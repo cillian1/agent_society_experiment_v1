@@ -1,11 +1,13 @@
-"""Sol: a wise mentor who watches over the society from outside the world. Every SOL_EVERY days Sol reviews how
+"""Sol: a wise mentor who watches over the society from outside the world. Every morning Sol reviews how
 everyone is doing, speaks to the whole society, and gives individuals concrete advice (and can line up next steps
 for agents who are drifting). The Human can talk to Sol, and Sol passes things on."""
 import collections
 import json
 import threading
 
-from .config import FUNCTIONS, MAX_QUEUE, SOL_EVERY
+from .clock import age_text, stamp
+from .clock import DAY
+from .config import FUNCTIONS, MAX_QUEUE, SOL_MAX_DAYS, SOL_MIN_DAYS
 from .mind import ACTIONS, _json, failed, parse_action
 
 NAME = "Sol"
@@ -20,14 +22,14 @@ def overview(sim) -> str:
         counts = collections.Counter(h["action"] for h in recent)
         fails = sum(failed(h["result"]) for h in recent)
         lines.append(
-            f"- {a.name} ({a.word(t)}, {a.age(t)} days, {a.stage(t)}{', role: ' + a.role if a.role else ''}): "
+            f"- {a.name} ({a.word(t)}, {age_text(a.age(t))}, {a.stage(t)}{', role: ' + a.role if a.role else ''}): "
             f"hunger {int(a.hunger)}, health {int(a.health)}, carries {a.food} food/{a.wood} wood/{a.stone} stone"
             + (f"; ambition: {a.ambition}" if a.ambition else "") + (f"; plan: {a.plan}" if a.plan else "")
-            + (f"; last 20 days: {', '.join(f'{k} x{v}' for k, v in counts.most_common(5))}, {fails} failed" if recent else "")
+            + (f"; last 20 hours: {', '.join(f'{k} x{v}' for k, v in counts.most_common(5))}, {fails} failed" if recent else "")
             + (f"; latest: {recent[-1]['action']} -> {recent[-1]['result'][:90]}" if recent else ""))
-    funcs = collections.Counter(s.get("function") or "decorative" for s in sim.world.structures.values())
-    stock = [f"{s['kind']} holds {s['stock']['food']} food" for s in sim.world.structures.values() if s.get("stock")]
-    return (f"Day {t}. {len(sim.agents)} alive, {len(sim.dead)} dead. Explored {sim.world.explored_pct()}% of the world.\n"
+    funcs = collections.Counter(s.get("function") or "decorative" for s in sim.world.buildings.values())
+    stock = [f"{s['kind']} holds {s['stock']['food']} food" for s in sim.world.buildings.values() if s.get("stock")]
+    return (f"{stamp(t)}. {len(sim.agents)} alive, {len(sim.dead)} dead. Explored {sim.world.explored_pct()}% of the world.\n"
             f"Buildings: {', '.join(f'{v} {k}' for k, v in funcs.items()) or 'none'}. {'; '.join(stock)}\n"
             f"Discoveries: {', '.join(d['name'] for d in sim.discoveries) or 'none'}. "
             f"Known blueprints: {', '.join(b['kind'] for b in sim.blueprints.values()) or 'none'}.\n"
@@ -45,14 +47,15 @@ INSTRUCTIONS = (
 FORMAT = (
     'Reply ONLY with JSON: {"speech": "<1-3 sentences to everyone>", "advice": {"<name>": {"message": '
     f'"<1-2 sentences to them>", "next": [<up to {MAX_QUEUE} actions for them to start on, optional>]}}}}, '
-    '"note_to_human": "<1-2 sentences for the human observer about how the society is doing>"}. '
+    '"note_to_human": "<1-2 sentences for the human observer about how the society is doing>", '
+    f'"next_review_in_days": <{SOL_MIN_DAYS}-{SOL_MAX_DAYS}: sooner if things are shaky, later if all is well>}}. '
     f"Actions in next use the agents' format, e.g. {{\"action\": \"go\", \"target\": \"wood\"}}, {{\"action\": \"gather\"}}, "
     '{"action": "build", "direction": "east", "title": "well"}, {"action": "plant", "direction": "north"}; '
     f"allowed: {', '.join(x for x in ACTIONS if x not in ('wait', 'attempt', 'invent'))}. Only advise people listed.")
 
 
 def review(sim) -> dict:
-    prompt = (f"SOL_REVIEW\n{overview(sim)}\n\nYour last words to them: "
+    prompt = (f"SOL_REVIEW\n{overview(sim)}\n\nThis is your morning address to the society. Your last words to them: "
               f"{sim.sol_log[-1]['speech'] if sim.sol_log else '(this is your first review)'}\n\n{FORMAT}")
     return _json(sim.llm.complete(INSTRUCTIONS, prompt, model=sim.sol_model))
 
@@ -96,7 +99,14 @@ def apply(sim, data: dict, source: str):
             a.queue = [dict(n) for n in nxt]
         given[name] = msg + (f" (next: {' → '.join(n['action'] for n in nxt)})" if nxt else "")
         sim.events.append({"tick": t, "agent": NAME, "text": f'to {name}: "{msg}"', "color": COLOR, "kind": "sol"})
-    sim.sol_log.append({"tick": t, "source": source, "speech": speech, "advice": given,
+    try:
+        days = int(data.get("next_review_in_days") or 0)
+    except (TypeError, ValueError):
+        days = 0
+    if days:                                   # Sol decides when to look again
+        days = max(SOL_MIN_DAYS, min(SOL_MAX_DAYS, days))
+        sim.sol_next = sim.sol_last + days * DAY
+    sim.sol_log.append({"tick": t, "source": source, "speech": speech, "advice": given, "next_days": days or None,
                         "note": str(data.get("note_to_human") or "").strip()[:400]})
     del sim.sol_log[:-30]
     del sim.events[:-300]

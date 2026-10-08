@@ -90,6 +90,7 @@ class Agent:
     ambition: str = ""                 # long-term goal it sets for itself when reflecting
     queue: list[dict] = field(default_factory=list)          # follow-up actions it lined up ("next")
     advice: list[list] = field(default_factory=list)         # [day, text] what Sol the mentor told it
+    task: dict | None = None                                 # ongoing multi-hour work, e.g. {"type": "build", "id": 3}
     last_reflect: int = -999
     role: str = ""                     # agents invent and claim their own roles
     goal: str = DEFAULT_GOAL
@@ -146,7 +147,7 @@ class Agent:
     def stage(self, tick: int) -> str:
         age = self.age(tick)
         return "baby" if age < BABY_DAYS else "child" if age < ADULT_AGE else \
-            "elder" if age >= min(OLD_AGE, self.abilities.lifespan() - 150) else "adult"
+            "elder" if age >= min(OLD_AGE, (self.abilities.lifespan() - 150) * 24) else "adult"
 
     def word(self, tick: int | None = None) -> str:
         young = tick is not None and not self.adult(tick)
@@ -185,7 +186,8 @@ class Agent:
 
     # ---- memory ----
     def remember(self, tick: int, text: str):
-        self.log.append(f"t{tick}: {text[:260]}")
+        from .clock import short
+        self.log.append(f"[{short(tick)}] {text[:260]}")
 
     def needs_compaction(self) -> bool:
         return len(self.log) - self.sum_upto > KEEP_RECENT + COMPACT_AFTER

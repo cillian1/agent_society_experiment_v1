@@ -24,12 +24,14 @@ class World:
         self.tiles = self._generate()
         self.regrow: dict[tuple[int, int], tuple[int, str]] = {}  # (x, y) -> (tick it returns, tile type)
         self.plants: dict[tuple[int, int], dict] = {}  # (x, y) -> {"growth": float, "tended": {name: tick}}
-        self.structures: dict[tuple[int, int], dict] = {}  # (x, y) -> {kind, text, by, tick, walkable, under}
+        self.buildings: dict[int, dict] = {}           # id -> {id, kind, text, by, tick, function, walkable, x, y, w, h, ...}
+        self.structures: dict[tuple[int, int], dict] = {}  # every tile a building covers -> that building
+        self._next_id = 1
         self.explored: set[tuple[int, int]] = set()    # tiles any agent has seen (the community's shared map)
         self._find_irrigated()
 
     def _find_irrigated(self):
-        wells = [p for p, s in getattr(self, "structures", {}).items() if s.get("function") == "well"]
+        wells = [p for p, s in getattr(self, "structures", {}).items() if s.get("function") == "well"]   # its tiles
         self.irrigated = {(x, y) for y in range(self.height) for x in range(self.width)
                           if any(self.in_bounds(x + dx, y + dy) and self.tiles[y + dy][x + dx] == WATER
                                  for dx in (-2, -1, 0, 1, 2) for dy in (-2, -1, 0, 1, 2))}
@@ -133,8 +135,8 @@ class World:
         return False
 
     def tend(self, x: int, y: int, who: str, tick: int):
-        """Work a sprout -> (growth, partners, helped). Helps at most once every TEND_COOLDOWN days; a different
-        farmer having tended it within TEAMWORK_WINDOW days doubles the effect."""
+        """Work a sprout -> (growth, partners, helped). Helps at most once every TEND_COOLDOWN hours; a different
+        farmer having tended it within TEAMWORK_WINDOW hours doubles the effect."""
         p = self.plants[(x, y)]
         if tick - p.get("last", -99) < TEND_COOLDOWN:
             return p["growth"], [], False
@@ -172,39 +174,95 @@ class World:
                 for fx in range(max(0, x - reach), min(self.width, x + reach + 1))
                 if self.tiles[fy][fx] == SPROUT]
 
-    # ---- building ----
-    def build(self, x: int, y: int, kind: str, text: str, who: str, tick: int, func: str | None = "auto"):
-        """Place a free-form structure. Returns (ok, reason)."""
-        if not self.in_bounds(x, y):
-            return False, "outside the world"
-        t, k = self.tiles[y][x], kind.lower()
-        if t == WATER and not any(w in k for w in WATER_OK_WORDS):
-            return False, "water: only a bridge/dock/path-like structure can go there"
-        if t not in (GRASS, SAND, WATER):
-            return False, f"can't build on {t}"
+    # ---- buildings (each covers a w x h footprint; you can walk inside unless it's a wall) ----
+    @staticmethod
+    def _gap(b: dict, x: int, y: int) -> int:
+        """Chebyshev distance from (x, y) to the nearest tile of building b (0 = inside)."""
+        return max(max(b["x"] - x, 0, x - (b["x"] + b["w"] - 1)), max(b["y"] - y, 0, y - (b["y"] + b["h"] - 1)))
+
+    @staticmethod
+    def _nearest(b: dict, x: int, y: int):
+        return min(max(x, b["x"]), b["x"] + b["w"] - 1), min(max(y, b["y"]), b["y"] + b["h"] - 1)
+
+    def building_at(self, x: int, y: int) -> dict | None:
+        return self.structures.get((x, y))
+
+    def can_place(self, x0: int, y0: int, w: int, h: int, kind: str) -> str:
+        """'' if a building fits here, else why not."""
+        k = kind.lower()
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                if not self.in_bounds(x, y):
+                    return "it would stick out of the world"
+                t = self.tiles[y][x]
+                if t == WATER and not (w == h == 1 and any(word in k for word in WATER_OK_WORDS)):
+                    return "water in the way (only a 1-tile bridge/dock can go on water)"
+                if t not in (GRASS, SAND, WATER):
+                    return f"{t} in the way" if t != STRUCTURE else "another building in the way"
+        return ""
+
+    def build_at(self, x0: int, y0: int, w: int, h: int, kind: str, text: str, who: str, tick: int,
+                 func: str | None = "auto", work: float = 0):
+        """Place a building with its top-left corner at (x0, y0). Returns (ok, reason, building)."""
+        why = self.can_place(x0, y0, w, h, kind)
+        if why:
+            return False, why, None
+        k = kind.lower()
         func = function_of(kind) if func == "auto" else func
-        for dx, dy, s in self.structures_near(x, y, SAME_KIND_RADIUS if func else 3):
-            if (func and s.get("function") == func) or s["kind"].lower() == k:
-                return False, (f"there is already a {s['kind']} close by (dx={dx} dy={dy} from the spot) - use it, "
-                               "or build something different")
-        self.structures[(x, y)] = {"kind": kind, "text": text, "by": who, "tick": tick, "under": t,
-                                   "walkable": not any(w in k for w in BLOCK_WORDS), "function": func}
+        probe = {"x": x0, "y": y0, "w": w, "h": h}
+        for b in self.buildings.values():
+            near = max(self._gap(probe, *self._nearest(b, x0, y0)), self._gap(b, *self._nearest(probe, b["x"], b["y"])))
+            if ((func and b.get("function") == func and near <= SAME_KIND_RADIUS)
+                    or (b["kind"].lower() == k and near <= 3)):
+                nx, ny = self._nearest(b, x0, y0)
+                return False, (f"there is already a {b['kind']} close by (dx={nx - x0} dy={ny - y0} from the spot) - "
+                               "use it, or build something different"), None
+        b = {"id": self._next_id, "kind": kind, "text": text, "by": who, "tick": tick, "function": func,
+             "walkable": not any(word in k for word in BLOCK_WORDS), "x": x0, "y": y0, "w": w, "h": h,
+             "under": {f"{x},{y}": self.tiles[y][x] for y in range(y0, y0 + h) for x in range(x0, x0 + w)},
+             "work": work, "progress": 0.0, "done": work <= 0, "workers": {}}
+        self._next_id += 1
         if func == "storage":
-            self.structures[(x, y)]["stock"] = {"food": 0, "seeds": 0, "wood": 0, "stone": 0}
-        if func == "well":                       # waters the fields around it
-            self.irrigated |= {(x + dx, y + dy) for dx in range(-3, 4) for dy in range(-3, 4)}
-        self.tiles[y][x] = STRUCTURE
-        return True, ""
+            b["stock"] = {"food": 0, "seeds": 0, "wood": 0, "stone": 0}
+        self.buildings[b["id"]] = b
+        for y in range(y0, y0 + h):
+            for x in range(x0, x0 + w):
+                self.structures[(x, y)] = b
+                self.tiles[y][x] = STRUCTURE
+        if b["done"]:
+            self.finish(b)
+        return True, "", b
+
+    def finish(self, b: dict):
+        """A building is complete: it starts doing its job."""
+        b["done"], b["progress"] = True, b.get("work", 0)
+        if b.get("function") == "well":          # waters the fields around it
+            self.irrigated |= {(x + dx, y + dy) for x in range(b["x"], b["x"] + b["w"])
+                               for y in range(b["y"], b["y"] + b["h"]) for dx in range(-3, 4) for dy in range(-3, 4)}
+
+    def sites_near(self, x: int, y: int, radius: int):
+        """Unfinished buildings within radius."""
+        return [b for b in self.buildings.values() if not b.get("done", True) and self._gap(b, x, y) <= radius]
+
+    def build(self, x: int, y: int, kind: str, text: str, who: str, tick: int, func: str | None = "auto"):
+        """A one-tile building at (x, y). Returns (ok, reason)."""
+        ok, why, _ = self.build_at(x, y, 1, 1, kind, text, who, tick, func)
+        return ok, why
 
     def function_near(self, x: int, y: int, func: str, radius: int):
-        """Nearest building with this function within radius -> ((sx, sy), structure) or None."""
-        found = [(max(abs(sx - x), abs(sy - y)), (sx, sy), s) for (sx, sy), s in self.structures.items()
-                 if s.get("function") == func and max(abs(sx - x), abs(sy - y)) <= radius]
+        """Nearest building with this function within radius (0 = you're inside) -> ((sx, sy), building) or None."""
+        found = [(self._gap(b, x, y), self._nearest(b, x, y), b) for b in self.buildings.values()
+                 if b.get("function") == func and b.get("done", True) and self._gap(b, x, y) <= radius]
         return min(found, key=lambda f: f[0])[1:] if found else None
 
     def structures_near(self, x: int, y: int, radius: int):
-        return [(sx - x, sy - y, s) for (sx, sy), s in self.structures.items()
-                if max(abs(sx - x), abs(sy - y)) <= radius]
+        """[(dx, dy, building)] to the nearest tile of every building within radius."""
+        out = []
+        for b in self.buildings.values():
+            if self._gap(b, x, y) <= radius:
+                nx, ny = self._nearest(b, x, y)
+                out.append((nx - x, ny - y, b))
+        return out
 
     # ---- finding the way ----
     def path(self, start, goal, max_nodes: int = 4000) -> list | None:
@@ -325,7 +383,7 @@ class World:
         return {"width": self.width, "height": self.height, "tiles": self.tiles,
                 "regrow": {key(p): list(v) for p, v in self.regrow.items()},
                 "plants": {key(p): v for p, v in self.plants.items()},
-                "structures": {key(p): v for p, v in self.structures.items()},
+                "buildings": list(self.buildings.values()), "next_id": self._next_id,
                 "explored": sorted(key(p) for p in self.explored)}
 
     @classmethod
@@ -336,11 +394,22 @@ class World:
         w.rng = random.Random()
         w.regrow = {pos(k): tuple(v) for k, v in d["regrow"].items()}
         w.plants = {pos(k): v for k, v in d["plants"].items()}
-        w.structures = {pos(k): v for k, v in d["structures"].items()}
-        for s in w.structures.values():                     # saves from before buildings had functions
-            s.setdefault("function", function_of(s["kind"]))
-            if s["function"] == "storage":
-                s.setdefault("stock", {"food": 0, "seeds": 0, "wood": 0, "stone": 0})
+        w.buildings, w.structures = {}, {}
+        old = [dict(v, x=pos(k)[0], y=pos(k)[1], w=1, h=1) for k, v in d.get("structures", {}).items()]  # older saves
+        for i, b in enumerate(d.get("buildings") or old, start=1):
+            b.setdefault("id", i)
+            b.setdefault("function", function_of(b["kind"]))
+            b.setdefault("done", True)
+            b.setdefault("workers", {})
+            if not isinstance(b.get("under"), dict):
+                b["under"] = {f"{b['x']},{b['y']}": b.get("under") or GRASS}
+            if b["function"] == "storage":
+                b.setdefault("stock", {"food": 0, "seeds": 0, "wood": 0, "stone": 0})
+            w.buildings[b["id"]] = b
+            for y in range(b["y"], b["y"] + b["h"]):
+                for x in range(b["x"], b["x"] + b["w"]):
+                    w.structures[(x, y)] = b
+        w._next_id = d.get("next_id") or max(w.buildings, default=0) + 1
         w.explored = {pos(k) for k in d["explored"]}
         w._find_irrigated()
         return w

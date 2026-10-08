@@ -25,7 +25,7 @@ class MockLLM(UsageMixin):
         if "SOL_REVIEW" in prompt or "SOL_CHAT" in prompt:
             names = re.findall(r"^- (\w+) \(", prompt, re.M)
             who = names[0] if names else None
-            d = dict(speech="Work together: store spare food and build what is missing.",
+            d = dict(speech="Work together: store spare food and build what is missing.", next_review_in_days=2,
                      note_to_human="They are surviving; farming and storage need work.",
                      advice={who: {"message": "Stop chatting and gather wood for a storehouse.",
                                    "next": [{"action": "go", "target": "wood"}, {"action": "gather"}]}} if who else {})

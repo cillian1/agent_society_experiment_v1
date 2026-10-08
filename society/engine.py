@@ -1,4 +1,5 @@
-"""The simulation: runs days, applies life (hunger, ageing, death), lets the Human interact, records statistics."""
+"""The simulation: runs hours (24 to a day), applies life (hunger, sleep, ageing, death), lets the Human interact,
+records statistics."""
 import json
 import random
 import re
@@ -8,8 +9,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import actions, gm, mind, sol
-from .config import (SOL_EVERY, HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
+from . import actions, clock, gm, mind, sol
+from .clock import DAY
+from .config import (ADVICE_MEMORY, SOL_HOUR, SOL_EVERY, HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
                      DEFAULT_MAX_AGENTS, EAT_RELIEF, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
                      MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS)
 from .models import Abilities, Agent, Traits
@@ -78,7 +80,8 @@ class Society:
         smart = info.get("smart_local")
         self.sol_model = LOCAL                   # Sol: mentor AND referee; starts on the local brain (Settings / --sol-model)
         self.sol_log: list[dict] = []
-        self.sol_last, self.sol_due = 0, False
+        self.sol_last, self.sol_due = -SOL_EVERY, False
+        self.sol_next = 1                         # Sol's first review: the first morning (Sol then picks the next)
         if spawn:
             self._spawn()
             self._record_stats()
@@ -95,7 +98,7 @@ class Society:
                 a.color = PALETTE[i % len(PALETTE)]
             a.symbol = self._symbol_for(a.name)
             if a.born == -999:
-                a.born = -self.rng.randint(20, 120)    # settlers start as adults of varied age
+                a.born = -self.rng.randint(20, 120) * DAY    # settlers start as adults of varied age
                 a.food = max(a.food, START_FOOD)
             a.last_reflect = self.rng.randint(-REFLECT_EVERY + 1, -REFLECT_EVERY + 6)   # first reflection in days 1-5
             if a.abilities == Abilities():              # no abilities given: everyone gets their own mix
@@ -117,8 +120,12 @@ class Society:
         with self.lock:
             self.tick += 1
             self.world.update(self.tick, self.tech('growth'))
-            if self.tick - self.sol_last >= SOL_EVERY and self.agents:
-                self.sol_last, self.sol_due = self.tick, True       # time for Sol's review
+            if self.tick >= self.sol_next and clock.when(self.tick)["hour"] == SOL_HOUR and self.agents:
+                self.sol_last, self.sol_due = self.tick, True       # Sol's review (a morning address)
+                self.sol_next = self.tick + SOL_EVERY                # unless Sol decides otherwise
+            if clock.when(self.tick)["hour"] == clock.NIGHT_TO:      # dawn
+                for a in self.agents.values():
+                    a.heard.append(f"A new day dawns: {clock.stamp(self.tick)}.")
             for a in list(self.agents.values()):
                 a.authority = self.human_authority
                 if self._live_a_day(a, self.tick):
@@ -141,7 +148,7 @@ class Society:
     def prepare(self, a: Agent) -> dict | None:
         """What the agent perceives right now (consumes the messages it has heard)."""
         with self.lock:
-            if a.name not in self.agents or a.is_baby(self.tick):     # babies don't think (and cost nothing)
+            if a.name not in self.agents or a.is_baby(self.tick) or clock.is_night(self.tick):   # babies & sleepers don't think
                 return None
             agents = list(self.agents.values())
             job = {"prompt": mind.observation(a, self.world, agents, self.tick, self._ideas(), self._discoveries(),
@@ -153,7 +160,17 @@ class Society:
     def take_queued(self, a: Agent) -> dict | None:
         """The next action the agent lined up earlier - unless something important needs fresh thinking."""
         with self.lock:
-            if not a.queue or a.name not in self.agents or a.is_baby(self.tick):
+            if a.name not in self.agents or a.is_baby(self.tick) or clock.is_night(self.tick):
+                return None
+            if not a.queue and a.task:                      # carry on with ongoing work (no thinking needed)
+                site = self.world.buildings.get(a.task.get("id"))
+                if not site or site.get("done", True):
+                    a.task = None
+                else:
+                    nxt = ({"action": "work"} if self.world._gap(site, a.x, a.y) <= 1 else
+                           {"action": "go", "target": f"{site['x']},{site['y']}"})
+                    a.queue = [mind.parse_action(json.dumps(nxt), [])]
+            if not a.queue:
                 return None
             last = a.history[-1]["result"] if a.history else ""
             nxt = a.queue[0]
@@ -165,7 +182,7 @@ class Society:
                    else "my last step failed" if mind.failed(last) else "")
             if why:
                 a.queue = []
-                a.remember(self.tick, f"I stopped following my plan because {why}.")
+                a.remember(self.tick, f"I stopped what I was doing because {why}.")
                 return None
             act = a.queue.pop(0)
             act["thought"] = f"(following my plan) {act.get('thought') or ''}".strip()
@@ -249,9 +266,9 @@ class Society:
 
     def _live_a_day(self, a: Agent, tick: int) -> bool:
         """Hunger, health, fading feelings, old age. False if the agent died."""
-        baby = a.is_baby(tick)
+        baby, asleep = a.is_baby(tick), clock.is_night(tick)
         a.hunger = min(100.0, a.hunger + (BABY_HUNGER_PER_DAY if baby else HUNGER_PER_DAY * a.abilities.hunger_factor()
-                                                  * (1 - self.tech('hunger') / 100)))
+                                                  * (1 - self.tech('hunger') / 100)) * (0.5 if asleep else 1))
         if not baby and a.food > 0 and a.hunger >= INSTINCT_EAT_AT:   # survival instinct: eat without thinking
             a.food -= 1
             a.hunger = max(0.0, a.hunger - EAT_RELIEF)
@@ -267,11 +284,11 @@ class Society:
             a.health -= BABY_STARVE_DAMAGE if baby else STARVE_DAMAGE
         elif a.hunger < 60:
             rest = HOME_HEAL if self.world.function_near(a.x, a.y, "home", 1) else 0
-            a.health = min(100.0, a.health + 1 + self.tech("health") + rest)
+            a.health = min(100.0, a.health + (1 if asleep else 0.5) + self.tech("health") / 2 + rest)
         if a.health <= 0:
             self.die(a, tick, "neglect - nobody fed them" if baby else "starvation")
             return False
-        if a.age(tick) >= a.abilities.lifespan() + self.tech("lifespan") and self.rng.random() < OLD_AGE_DEATH_CHANCE:
+        if a.age(tick) >= (a.abilities.lifespan() + self.tech("lifespan")) * DAY and self.rng.random() < OLD_AGE_DEATH_CHANCE:
             self.die(a, tick, "old age")
             return False
         return True
@@ -338,7 +355,19 @@ class Society:
             cost = {k: int(max(0, min(MAX_BUILD_COST, float(got.get(k) or 0)))) for k in ("wood", "stone", "food")}
             cost = {k: v for k, v in cost.items() if v} or {"wood": 1}
             desc = str(design.get("description") or desc)[:160]
-        bp = {"kind": kind[:40], "cost": cost, "function": func, "description": desc, "by": by, "tick": tick}
+        from .config import BIG_WORDS, DEFAULT_SIZES, MAX_BUILDING_SIZE
+        size = list(DEFAULT_SIZES.get(func, (1, 1)))
+        if any(w in key for w in BIG_WORDS):
+            size = [3, 3]
+        if any(w in key for w in ("wall", "fence", "bridge", "dock", "sign", "statue", "monument", "path", "road")):
+            size = [1, 1]
+        if design and isinstance(design.get("size"), (list, tuple)) and len(design["size"]) == 2:
+            try:
+                size = [max(1, min(MAX_BUILDING_SIZE, int(v))) for v in design["size"]]
+            except (TypeError, ValueError):
+                pass
+        bp = {"kind": kind[:40], "cost": cost, "function": func, "description": desc, "by": by, "tick": tick,
+              "size": size}
         self.blueprints[key] = bp
         return bp
 
@@ -387,11 +416,11 @@ class Society:
         mother.pregnancy = {"father": father.name, "conceived": tick, "due": tick + PREGNANCY_DAYS, "name": name}
         mother.heart_tick = father.heart_tick = tick
         for p, o in ((mother, father), (father, mother)):
-            p.remember(tick, f"{o.name} and I are expecting a baby! It is due on day {tick + PREGNANCY_DAYS}.")
+            p.remember(tick, f"{o.name} and I are expecting a baby! It is due around {clock.stamp(tick + PREGNANCY_DAYS)}.")
         for o in self.agents.values():
             if o not in (mother, father):
                 o.heard.append(f"{mother.name} is pregnant by {father.name}.")
-        self.event(tick, mother, f"is pregnant by {father.name} - the baby is due on day {tick + PREGNANCY_DAYS}", "birth")
+        self.event(tick, mother, f"is pregnant by {father.name} - the baby is due around {clock.stamp(tick + PREGNANCY_DAYS)}", "birth")
 
     def _give_birth(self, mother: Agent, tick: int):
         p, mother.pregnancy = mother.pregnancy, None
@@ -460,7 +489,7 @@ class Society:
                 for b in list(self.blueprints.values())[-12:]]
 
     def _mentor_for(self, a: Agent) -> list[str]:
-        return [t for d, t in a.advice if self.tick - d <= 20][-3:]
+        return [t for d, t in a.advice if self.tick - d <= ADVICE_MEMORY][-3:]
 
     def _ideas(self) -> list[str]:
         return [f"{i['title']} (by {i['by']}): {i['text']}" for i in self.inventions[-MAX_IDEAS_IN_PROMPT:]]
@@ -482,7 +511,7 @@ class Society:
         self.stats.append({
             "day": self.tick, "population": len(alive), "deaths": len(self.dead),
             "hunger": round(sum(a.hunger for a in alive) / n, 1), "food": sum(a.food for a in alive),
-            "explored": self.world.explored_pct(), "structures": len(self.world.structures),
+            "explored": self.world.explored_pct(), "structures": len(self.world.buildings),
             "objects": sum(len(a.items) for a in alive), "ideas": len(self.inventions),
             "discoveries": len(self.discoveries),
             "farms": sum(t in ("sprout", "crop") for row in self.world.tiles for t in row),
@@ -620,7 +649,7 @@ class Society:
                 "agents": [a.to_dict() for a in self.agents.values()],
                 "dead": [{"agent": d["agent"].to_dict(), "tick": d["tick"], "cause": d["cause"]} for d in self.dead.values()],
                 "events": self.events, "inventions": self.inventions, "discoveries": self.discoveries,
-                "blueprints": self.blueprints, "sol_log": self.sol_log, "sol_last": self.sol_last,
+                "blueprints": self.blueprints, "sol_log": self.sol_log, "sol_last": self.sol_last, "sol_next": self.sol_next,
                 "sol_model": self.sol_model, "talk": self.talk, "stats": self.stats,
                 "chat": [c for c in self.chat if not c.get("pending")],
             }
@@ -639,4 +668,5 @@ class Society:
             setattr(s, k, d.get(k, []))
         s.blueprints = d.get("blueprints", {})
         s.sol_log, s.sol_last = d.get("sol_log", []), d.get("sol_last", s.tick)
+        s.sol_next = d.get("sol_next", s.tick + 1)
         return s

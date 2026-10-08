@@ -13,6 +13,15 @@ const store = {                       // per-browser conveniences only; the page
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
 };
+// the world's calendar: one turn is one hour
+const cal = () => S.st?.calendar || { start_hour: 6, hours_per_day: 24, days_per_month: 30, months: ['Thawing', 'Blossom', 'Sowing', 'Greening', 'Highsun', 'Longday', 'Ripening', 'Harvest', 'Leaffall', 'Mistmoon', 'Frost', 'Deepwinter'] };
+function ts(tick, long) {
+  if (typeof tick !== 'number') return '?';
+  const c = cal(), h = tick + c.start_hour, days = Math.floor(h / c.hours_per_day), hour = h % c.hours_per_day;
+  const day = days % c.days_per_month + 1, m = Math.floor(days / c.days_per_month) % 12, year = Math.floor(days / (c.days_per_month * 12)) + 1;
+  const hh = String(hour).padStart(2, '0') + ':00';
+  return long ? `${c.months[m]} ${day}, year ${year} · ${hh}` : `${c.months[m].slice(0, 3)} ${day} · ${hh}`;
+}
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
 const hungerColor = h => h > 70 ? 'var(--bad)' : h > 40 ? 'var(--warn)' : 'var(--good)';
 const TIER = { local: '🖥️', smart: '🧠', haiku: '🌱', sonnet: '⭐', opus: '👑', custom: '🔧' };
@@ -146,7 +155,7 @@ function drawAgent(a) {
   if (a.stage === 'baby') { ctx.font = '12px system-ui'; ctx.fillText('🍼', px + r + 3, py + 2); }
   if (a.slow) { ctx.font = '14px system-ui'; ctx.fillText('💭', px - r - 4, py - r - 10); }
   ctx.font = 'bold 11px system-ui';
-  const tag = `${a.name} · ${a.age}`, nw = ctx.measureText(tag).width + 10;
+  const tag = `${a.name} · ${Math.floor(a.age / 24)}d`, nw = ctx.measureText(tag).width + 10;
   ctx.fillStyle = 'rgba(10,12,16,.78)'; ctx.beginPath(); ctx.roundRect(px - nw / 2, py + r + 4, nw, 15, 6); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.fillText(tag, px, py + r + 11.5);
 }
@@ -234,11 +243,11 @@ cv.addEventListener('mousemove', e => {
   const unseen = st.fog && st.fog[y][x] === '0';
   let html = `<div class="muted">(${x}, ${y}) · ${unseen ? 'Unexplored' : names[t]}</div>`;
   const a = agentAt(fx, fy, .8);
-  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${SEX[a.sex]} ${a.stage} ${extras(a)} · ${a.age} days old · hunger ${a.hunger} · ${a.food} food${a.pregnant ? ` · due day ${a.due}` : ''}</div><div class="muted">${esc(a.doing)}</div>` + html;
+  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${SEX[a.sex]} ${a.stage} ${extras(a)} · ${a.age} days old · hunger ${a.hunger} · ${a.food} food${a.pregnant ? ` · due ${ts(a.due)}` : ''}</div><div class="muted">${esc(a.doing)}</div>` + html;
   const s = st.structures.find(q => q.x === x && q.y === y);
   if (s) html += `<div>${iconFor(s.kind)} <b>${esc(s.kind)}</b> by ${esc(s.by)}${s.function ? `<div style="color:var(--gold)">⚙️ ${esc(s.function)}</div>` : '<div class="muted">decorative</div>'}${s.stock ? `<div>📦 ${Object.entries(s.stock).map(([k, v]) => `${v} ${k}`).join(' · ')}</div>` : ''}${s.text ? `<div class="muted">“${esc(s.text)}”</div>` : ''}</div>`;
   const g = st.dead.find(q => q.x === x && q.y === y);
-  if (g) html += `<div>🪦 ${esc(g.name)} — died of ${esc(g.cause)} at ${g.age} (day ${g.died})</div>`;
+  if (g) html += `<div>🪦 ${esc(g.name)} — died of ${esc(g.cause)} aged ${g.age_text} (${ts(g.died)})</div>`;
   tip.innerHTML = html; tip.hidden = false;
   tip.style.left = Math.min(e.clientX + 14, innerWidth - 290) + 'px'; tip.style.top = (e.clientY + 14) + 'px';
 });
@@ -254,7 +263,7 @@ setInterval(() => { if ($('follow').checked && S.sel) centerOn(S.sel); }, 1200);
 
 // ======================================================================= top bar & banner
 function renderTop(st) {
-  $('p-day').textContent = `Day ${st.day}`;
+  $('p-day').textContent = `${ts(st.day, true)}`;
   const B = st.backends || {};
   $('p-brain').textContent = B.mock ? '🎭 Mock (scripted)' : '🧠 ' + [B.local ? 'Local: ' + B.local_model : '', B.smart_local ? 'Smart: ' + B.smart_local : '', B.claude ? 'Claude' : ''].filter(Boolean).join(' + ');
   $('p-pop').textContent = `👥 ${st.agents.length} / ${st.limits.max_agents}` + (st.dead.length ? ` · 🪦 ${st.dead.length}` : '');
@@ -305,11 +314,11 @@ function renderList(st) {
       <div class="avatar" style="background:${a.color}">${esc(a.name[0])}</div>
       <div><div class="name">${esc(a.name)} <span class="muted" title="${a.sex}">${SEX[a.sex]}</span> <span title="${a.stage === 'baby' ? 'babies don\'t use a brain' : a.tier}">${a.stage === 'baby' ? '' : TIER[a.tier]}</span> ${extras(a)}</div>
         <div class="sub">${a.role ? esc(a.role) : '<i>no role yet</i>'} · ${esc(a.doing) || 'getting started'}</div></div>
-      <div class="right">🎂 ${a.age}d<br>🍎 ${a.food}</div>
+      <div class="right">🎂 ${a.age_text}<br>🍎 ${a.food}</div>
       <div class="bar" title="Hunger ${a.hunger}/100"><div style="width:${a.hunger}%;background:${hungerColor(a.hunger)}"></div></div>
     </div>`).join('') || '<p class="muted">Nobody matches.</p>';
   $('graves').innerHTML = st.dead.length ? '<h3>In memory</h3>' + st.dead.map(g =>
-    `<div class="grave" data-name="${esc(g.name)}">🪦 ${esc(g.name)} — ${esc(g.cause)} at ${g.age} days (day ${g.died})</div>`).join('') : '';
+    `<div class="grave" data-name="${esc(g.name)}">🪦 ${esc(g.name)} — ${esc(g.cause)}, aged ${g.age_text} (${ts(g.died)})</div>`).join('') : '';
 }
 $('list').onclick = e => { const p = e.target.closest('.person'); if (!p) return; p.id === 'sol-row' ? talkToSol() : select(p.dataset.name); };
 $('graves').onclick = e => { const g = e.target.closest('.grave'); if (g) select(g.dataset.name, false); };
@@ -358,7 +367,7 @@ function renderProfile() {
   for (const b of $('pt').children) b.classList.toggle('on', b.dataset.k === S.ptab);
   $('ph').innerHTML = `<div class="avatar big" style="background:${a.color}">${esc(a.name[0])}</div>
     <div><h2>${esc(a.name)} ${!a.alive ? '🪦' : a.stage === 'baby' ? '' : TIER[a.tier]}</h2>
-    <div class="muted">${SEX[a.sex]} ${a.adult ? (a.sex === 'female' ? 'woman' : 'man') : (a.sex === 'female' ? 'girl' : 'boy')} · ${a.role ? esc(a.role) : 'no role yet'} · ${a.age} days old · ${a.alive ? a.stage + ' ' + extras(a) : `died of ${esc(a.cause)} on day ${a.died}`}</div></div>`;
+    <div class="muted">${SEX[a.sex]} ${a.adult ? (a.sex === 'female' ? 'woman' : 'man') : (a.sex === 'female' ? 'girl' : 'boy')} · ${a.role ? esc(a.role) : 'no role yet'} · ${a.age} days old · ${a.alive ? a.stage + ' ' + extras(a) : `died of ${esc(a.cause)} on ${ts(a.died)}`}</div></div>`;
   $('pa').innerHTML = a.alive ? `<button class="btn" data-do="talk">💬 Talk</button><button class="btn" data-do="locate">📍 Find on map</button>
     <button class="btn" data-do="follow">${$('follow').checked ? '⏹ Stop following' : '👁 Follow'}</button>
     <button class="btn" data-gift="food" title="Give 3 food">🎁 🍎</button><button class="btn" data-gift="seeds" title="Give 3 seeds">🎁 🌱</button>
@@ -378,7 +387,7 @@ const meter = (label, v, color) => `<div class="meter"><span>${label}</span><div
 
 function overview(a) {
   const l = a.history.filter(h => h.action !== 'reply to Human').slice(-1)[0];
-  const notes = (a.pregnancy ? `<div class="card">🤰 Pregnant by <a href="#" data-goto="${esc(a.pregnancy.father)}">${esc(a.pregnancy.father)}</a> — the baby is due on day ${a.pregnancy.due}.</div>` : '')
+  const notes = (a.pregnancy ? `<div class="card">🤰 Pregnant by <a href="#" data-goto="${esc(a.pregnancy.father)}">${esc(a.pregnancy.father)}</a> — the baby is due on ${ts(a.pregnancy.due)}.</div>` : '')
     + (a.stage === 'baby' ? `<div class="card">🍼 A baby: can't think or feed themselves yet, and stays with their mother. Others must <b>care</b> for them (or you can send food). A child from day 5, an adult from day 10.</div>` : '')
     + (a.stage === 'child' ? '<div class="card">👶 A child: thinks and acts on their own, an adult from day 10.</div>' : '');
   return notes + `${meter('Hunger', a.hunger, hungerColor(a.hunger))}${meter('Health', a.health, a.health < 40 ? 'var(--bad)' : 'var(--good)')}
@@ -387,19 +396,19 @@ function overview(a) {
     <span>Explored</span><span>${a.discoveries} tiles seen first</span>
     <span>Position</span><span>(${a.x}, ${a.y})</span></div>
     ${l ? `<div class="card thought">💭 ${esc(l.thought)}<div class="tag" style="margin-top:4px">▶ ${esc(l.action)} → ${esc(l.result)}</div></div>` : ''}
-    ${a.advice && a.advice.length ? `<div class="card" style="border-left:3px solid var(--gold)">🧙 <b>Sol's advice</b> (day ${a.advice[a.advice.length - 1][0]}): ${esc(a.advice[a.advice.length - 1][1])}</div>` : ''}
+    ${a.advice && a.advice.length ? `<div class="card" style="border-left:3px solid var(--gold)">🧙 <b>Sol's advice</b> (${ts(a.advice[a.advice.length - 1][0])}): ${esc(a.advice[a.advice.length - 1][1])}</div>` : ''}
     ${a.ambition ? `<div class="card" style="border-left:3px solid var(--gold)">🎯 <b>Ambition:</b> ${esc(a.ambition)}</div>` : ''}
     ${a.plan ? `<div class="card" style="border-left:3px solid var(--accent)">🗺️ <b>Plan:</b> ${esc(a.plan)}</div>` : ''}
     ${a.queue.length ? `<div class="card">⏭️ <b>Next up</b> (runs automatically): ${a.queue.map(q => esc(q.action + (q.target ? ' → ' + q.target : q.title ? ' ' + q.title : q.to && q.to !== 'all' ? ' → ' + q.to : ''))).join(' · ')}</div>` : ''}
     <h3>Abilities</h3>${Object.entries(a.abilities).map(([k, v]) => `<div title="${esc(a.ability_info[k])}">${meter(k[0].toUpperCase() + k.slice(1), v * 10, v >= 7 ? 'var(--good)' : v <= 3 ? 'var(--warn)' : 'var(--accent)').replace(`<span>${v * 10}</span></div>`, `<span>${v}/10</span></div>`)}</div>`).join('')}
     <p class="muted small">Hover an ability to see what it does. Expected lifespan: about ${a.lifespan} days.</p>
-    ${a.orders.length ? `<h3>You asked</h3>${a.orders.map(o => `<div class="card">“${esc(o[1])}” <span class="tag">day ${o[0]}</span></div>`).join('')}` : ''}
+    ${a.orders.length ? `<h3>You asked</h3>${a.orders.map(o => `<div class="card">“${esc(o[1])}” <span class="tag">${ts(o[0])}</span></div>`).join('')}` : ''}
     <h3>Personality</h3>${Object.entries(a.traits).map(([k, v]) => meter({ openness: 'Openness', conscientiousness: 'Diligence', extraversion: 'Outgoing', agreeableness: 'Kindness', neuroticism: 'Anxiety' }[k] || k, Math.round(v * 100), 'var(--accent)')).join('')}`;
 }
 
 function timeline(a) {
   return `<div class="tag">${a.history_total} turns in total · newest first</div><div class="timeline">` + a.history.slice().reverse().map(h => `
-    <div class="entry"><div class="tag">day ${h.tick} · (${h.x}, ${h.y}) · hunger ${h.hunger}</div>
+    <div class="entry"><div class="tag">${ts(h.tick)} · (${h.x}, ${h.y}) · hunger ${h.hunger}</div>
       ${h.heard?.length ? `<div class="heard">👂 ${h.heard.map(esc).join('<br>👂 ')}</div>` : ''}
       <div>💭 ${esc(h.thought)}</div><div>▶ <b>${esc(h.action)}</b> <span class="muted">→ ${esc(h.result)}</span></div></div>`).join('') + '</div>';
 }
@@ -465,7 +474,7 @@ function renderChat(force) {
   const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
   el.innerHTML = c.length ? c.map(m => m.from === 'You'
     ? `<div class="bub me"><b style="color:var(--you)">You → ${esc(m.to)}</b>${esc(m.text)}</div>`
-    : m.review ? `<div class="bub" style="border-left:3px solid var(--gold)"><b style="color:var(--gold)">🧙 Sol's review · day ${m.tick}</b>${esc(m.text)}</div>`
+    : m.review ? `<div class="bub" style="border-left:3px solid var(--gold)"><b style="color:var(--gold)">🧙 Sol's review · ${ts(m.tick)}</b>${esc(m.text)}</div>`
     : `<div class="bub"><b style="color:${m.color}">${esc(m.from)}</b>${m.pending ? '<span class="muted typing">thinking</span>' : esc(m.text)}${(m.changes || []).map(c => `<div class="tag" style="margin-top:4px;color:var(--gold)">${esc(c)}</div>`).join('')}</div>`).join('')
     : '<p class="muted">Pick who to talk to below and say hello. Ask what they are up to, give them a task, or tell them a story.</p>';
   if (stick || force) el.scrollTop = el.scrollHeight;
@@ -498,7 +507,7 @@ function renderFeed(st, force) {
   const key = S.filter + JSON.stringify(items.slice(0, 5)) + items.length;
   if (key === feedKey && !force) return;
   feedKey = key;
-  $('feed').innerHTML = items.map(i => `<div class="item ${i.kind === 'idea' ? 'idea' : ''}"><span class="day">day ${i.tick}</span>
+  $('feed').innerHTML = items.map(i => `<div class="item ${i.kind === 'idea' ? 'idea' : ''}"><span class="day">${ts(i.tick)}</span>
     <div>${KIND_ICON[i.kind] || '•'} <span class="who" data-goto="${esc(i.agent)}" style="color:${i.color}">${esc(i.agent)}</span> ${esc(i.text)}</div></div>`).join('')
     || '<p class="muted">Nothing here yet.</p>';
 }
@@ -520,7 +529,7 @@ function drawCharts() {
     const X = i => padL + (data.length === 1 ? pw : i / (data.length - 1) * pw), Y = v => 6 + ph - v / max * ph;
     g.font = '10px system-ui'; g.fillStyle = ink; g.strokeStyle = grid; g.lineWidth = 1;
     (max >= 4 ? [0, .5, 1] : [0, 1]).forEach(f => { const y = Y(max * f); g.beginPath(); g.moveTo(padL, y); g.lineTo(w - 6, y); g.stroke(); g.textAlign = 'right'; g.fillText(fmt(Math.round(max * f)), padL - 4, y + 3); });
-    g.textAlign = 'left'; g.fillText('day ' + data[0].day, padL, h - 2); g.textAlign = 'right'; g.fillText('day ' + data[data.length - 1].day, w - 6, h - 2);
+    g.textAlign = 'left'; g.fillText(ts(data[0].day), padL, h - 2); g.textAlign = 'right'; g.fillText(ts(data[data.length - 1].day), w - 6, h - 2);
     g.strokeStyle = line; g.lineWidth = 2; g.lineJoin = 'round'; g.beginPath();
     ys.forEach((v, i) => i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v))); g.stroke();
     const i = S.hover ?? data.length - 1;
@@ -529,7 +538,7 @@ function drawCharts() {
     $('v-' + k).textContent = fmt(ys[i]) + (k === 'explored' ? '%' : '');
   }
   const d = data[S.hover ?? data.length - 1];
-  $('readout').innerHTML = `<b>Day ${d.day}</b> — ` + METRICS.map(([k, l]) => `${l}: <b>${fmt(d[k])}${k === 'explored' ? '%' : ''}</b>`).join(' · ') + ` · Deaths so far: <b>${d.deaths}</b>`;
+  $('readout').innerHTML = `<b>${ts(d.day, true)}</b> — ` + METRICS.map(([k, l]) => `${l}: <b>${fmt(d[k])}${k === 'explored' ? '%' : ''}</b>`).join(' · ') + ` · Deaths so far: <b>${d.deaths}</b>`;
   if ($('stats-table').checked) {
     const step = Math.max(1, Math.ceil(data.length / 30)), rows = data.filter((_, i) => i % step === 0 || i === data.length - 1).reverse();
     $('table').innerHTML = `<table><tr><th>Day</th>${METRICS.map(([, l]) => `<th>${l}</th>`).join('')}</tr>` +
@@ -547,7 +556,7 @@ $('stats-table').onchange = drawCharts;
 // ======================================================================= settings
 async function loadSaves() {
   const saves = await api.get('/api/saves');
-  $('saves').innerHTML = saves.length ? saves.map(s => `<div class="save"><span><b>${esc(s.name)}</b><br><span class="muted small">day ${s.day ?? '?'} · ${esc(s.saved)} · ${s.size_kb} KB</span></span>
+  $('saves').innerHTML = saves.length ? saves.map(s => `<div class="save"><span><b>${esc(s.name)}</b><br><span class="muted small">${ts(s.day ?? '?')} · ${esc(s.saved)} · ${s.size_kb} KB</span></span>
     <button class="btn" data-load="${esc(s.name)}">Load</button></div>`).join('') : '<p class="muted">No saves yet.</p>';
   renderUsage();
 }
@@ -556,7 +565,7 @@ $('saves').onclick = async e => {
   if (!confirm(`Load "${b.dataset.load}"? The current world will be replaced (save it first if you want to keep it).`)) return;
   const r = await api.post('/api/load', { name: b.dataset.load });
   if (r.error) return toast(r.error, 'var(--bad)');
-  resetView(); toast(`Loaded "${b.dataset.load}" (day ${r.day})`, 'var(--good)');
+  resetView(); toast(`Loaded "${b.dataset.load}" (${ts(r.day)})`, 'var(--good)');
 };
 $('save').onclick = async () => {
   const r = await api.post('/api/save', { name: $('save-name').value.trim() });
@@ -634,7 +643,7 @@ async function poll() {
     if (document.activeElement !== $('auth')) $('auth').value = st.authority;
     renderChat(); renderFeed(st); toastNewEvents(st.events);
     $('discoveries').innerHTML = st.discoveries.length ? st.discoveries.slice().reverse().map(d => `<div class="disc"><b>${esc(d.name)}</b>
-      <span class="muted">by <span class="who" data-goto="${esc(d.by)}" style="color:${d.color};cursor:pointer">${esc(d.by)}</span>, day ${d.tick}</span>
+      <span class="muted">by <span class="who" data-goto="${esc(d.by)}" style="color:${d.color};cursor:pointer">${esc(d.by)}</span>, ${ts(d.tick)}</span>
       <div>${esc(d.description)}</div><span class="eff">⚡ ${esc(d.meaning)}</span></div>`).join('')
       : '<p class="muted small">Nothing yet. When an agent attempts or invents something genuinely useful, it shows up here and changes the rules for everyone.</p>';
     const so = st.sol;

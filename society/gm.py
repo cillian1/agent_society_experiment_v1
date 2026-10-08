@@ -18,7 +18,8 @@ def _context(sim, a) -> str:
             if w.in_bounds(x, y):
                 near[w.tiles[y][x]] = near.get(w.tiles[y][x], 0) + 1
     disc = "; ".join(f"{d['name']} ({EFFECTS[d['effect']][0].replace('N', str(d['amount']))})" for d in sim.discoveries) or "none yet"
-    return (f"Day {sim.tick}. {a.name}, a {a.word(sim.tick)}, {a.age(sim.tick)} days old"
+    from .clock import age_text, stamp
+    return (f"{stamp(sim.tick)}. {a.name}, a {a.word(sim.tick)}, {age_text(a.age(sim.tick))} old"
             + (f", the {a.role}" if a.role else "") + f". Abilities: {a.abilities.describe()}.\n"
             f"Carrying: {a.food} food, {a.seeds} seeds, {a.wood} wood, {a.stone} stone; objects: "
             f"{', '.join(i['name'] for i in a.items) or 'none'}. Hunger {int(a.hunger)}/100, health {int(a.health)}/100.\n"
@@ -68,8 +69,10 @@ def design(sim, a, kind: str, idea: str) -> dict | None:
               "As Sol, the referee of this world, design what it takes for a small stone-age society: materials (wood, stone, food; "
               f"0-{MAX_BUILD_COST} each - bigger or cleverer buildings cost more) and what it does. Pick the function "
               f"that fits best, or none if it is decorative or cultural:\n{funcs}\n"
+              "Also choose its size in tiles, [width, height], from [1, 1] (a well, a sign) to [3, 3] (a hall, a temple); "
+              "people can walk inside buildings.\n"
               'Reply ONLY with JSON: {"cost": {"wood": 0, "stone": 0, "food": 0}, "function": "<key or none>", '
-              '"description": "<what it is and does, one sentence>"}')
+              '"size": [2, 2], "description": "<what it is and does, one sentence>"}')
     data = _json(sim.llm.complete("You are Sol, mentor and referee of a society simulation. Be fair and concise.",
                                   prompt, model=sim.sol_model))
     return data or None
@@ -113,14 +116,13 @@ def apply_outcome(sim, a, act: dict, out: dict, tick: int) -> str:
             sim.event(tick, a, f"made a {name}", "craft")
         st = out.get("structure") if isinstance(out.get("structure"), dict) else None
         if st and str(st.get("kind") or "").strip():
-            for dx, dy in DIRS.values():
-                x, y = a.x + dx, a.y + dy
-                if not sim.occupied(x, y):
-                    okb, _ = sim.world.build(x, y, str(st["kind"])[:40], str(st.get("description") or "")[:160], a.name, tick)
-                    if okb:
-                        notes.append(f"built a {st['kind']}")
-                        sim.event(tick, a, f"built a {st['kind']} at ({x}, {y})", "build")
-                        break
+            from .actions import place_building
+            kind = str(st["kind"])[:40]
+            b, _ = place_building(sim, a, kind, str(st.get("description") or "")[:160], sim.blueprint(kind, None, a.name, tick),
+                                  None, tick)
+            if b:
+                notes.append(f"built a {kind}")
+                sim.event(tick, a, f"built a {kind} at ({b['x']}, {b['y']})", "build")
         d = out.get("discovery") if isinstance(out.get("discovery"), dict) else None
         if d and d.get("effect") in EFFECTS and str(d.get("name") or "").strip():
             name = str(d["name"]).strip()[:50]

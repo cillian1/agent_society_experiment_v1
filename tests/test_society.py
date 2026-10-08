@@ -81,21 +81,29 @@ class FamilyTests(unittest.TestCase):
         self.assertIn("waiting", act(ada, "Brix"))
         self.assertIn("pregnant", act(brix, "Ada"))
         self.assertEqual(ada.pregnancy["father"], "Brix")
-        for _ in range(10):
+        from society.config import ADULT_AGE, BABY_DAYS, PREGNANCY_DAYS
+        for _ in range(PREGNANCY_DAYS):
             sim.begin_day()
         kiki = sim.agents["Kiki"]
         self.assertIsNone(ada.pregnancy)
         self.assertEqual((kiki.parents, kiki.stage(sim.tick)), (["Ada", "Brix"], "baby"))
         self.assertIsNone(sim.prepare(kiki))                       # babies don't think
         self.assertLessEqual(kiki.dist(ada), 1)                      # carried by mum
-        ada.food = 3
+        ada.food = 30
         self.assertIn("fed Kiki", apply(sim, ada, parse_action('{"action": "care", "to": "Kiki"}', ["Kiki"]), sim.tick))
-        for _ in range(5):
+        for _ in range(BABY_DAYS - 1):
             sim.begin_day()
+            if kiki.hunger > 60:                                  # keep the baby fed
+                kiki.hunger = 10
+        sim.begin_day()
         self.assertEqual(kiki.stage(sim.tick), "child")
-        self.assertIsNotNone(sim.prepare(kiki))
-        for _ in range(5):
+        while sim.tick % 24 != 4:                                 # thinking happens in daylight (06:00-22:00)
             sim.begin_day()
+            kiki.hunger = min(kiki.hunger, 40)
+        self.assertIsNotNone(sim.prepare(kiki))
+        while kiki.age(sim.tick) < ADULT_AGE:
+            sim.begin_day()
+            kiki.hunger = min(kiki.hunger, 40)
         self.assertEqual(kiki.stage(sim.tick), "adult")
 
     def test_same_sex_cannot_conceive(self):
@@ -230,20 +238,28 @@ class BuildingTests(unittest.TestCase):
         self.assertIn("still missing 3 wood, 1 stone", do('{"action": "build", "direction": "east", "title": "Granary"}'))
         self.assertIn("granary", sim.blueprints)              # the plan is now shared knowledge
         a.wood, a.stone = 10, 5
-        self.assertIn("built", do('{"action": "build", "direction": "east", "title": "Granary"}'))
+        self.assertIn("started building", do('{"action": "build", "direction": "east", "title": "Granary"}'))
+        self.assertIn("no storehouse", do('{"action": "store", "title": "food", "amount": 3}'))   # not finished yet
+        self.assertIn("1/9", do('{"action": "work"}'))
+        for _ in range(12):
+            if "finished" in do('{"action": "work"}'):
+                break
+        self.assertIsNone(a.task)
         self.assertIn("already", do('{"action": "build", "direction": "west", "title": "storehouse"}'))
         self.assertIn("stored 3 food", do('{"action": "store", "title": "food", "amount": 3}'))
         self.assertIn("took 2 food", do('{"action": "take", "title": "food", "amount": 2}'))
         do('{"action": "build", "direction": "north", "title": "hearth"}')
+        for _ in range(10):
+            do('{"action": "work"}')
         a.hunger = 60
         self.assertIn("cooked", do('{"action": "eat"}'))
         self.assertLessEqual(a.hunger, 5)
 
 
 class SolTests(unittest.TestCase):
-    def test_sol_reviews_every_20_days_and_advises(self):
-        sim = make(41)
-        self.assertEqual([l["tick"] for l in sim.sol_log], [20, 40])
+    def test_sol_reviews_and_picks_the_next_time(self):
+        sim = make(110)
+        self.assertEqual([l["tick"] for l in sim.sol_log], [1, 49, 97])   # 07:00; the mock Sol asks for 2 days
         advised = [a for a in sim.agents.values() if a.advice]
         self.assertTrue(advised)
         self.assertTrue(any(c.get("review") for c in sim.chat))

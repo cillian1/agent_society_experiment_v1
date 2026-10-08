@@ -2,7 +2,7 @@
 string that the agent sees next turn. Register new actions with @action("name") - and describe them in mind.py."""
 import re
 
-from .config import (FIRE_MEAL_BONUS, BOND, FRIEND_BOND, BUILD_COST, CARE_RELIEF, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN,
+from .config import (FUNCTIONS, FIRE_MEAL_BONUS, BOND, FRIEND_BOND, BUILD_COST, CARE_RELIEF, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN,
                      GROW_NEEDED, HEARING_RADIUS, LOVE_BOND, MAX_ITEMS)
 from .mind import DIRS
 
@@ -277,8 +277,8 @@ def tend(sim, a, act, tick):
         return "no young plants within reach"
     todo = [p for p in near if w.needs_tending(*p, tick)]
     if not todo:
-        days = min(w.days_to_ripe(*p) for p in near)
-        return (f"these plants were tended recently - they grow by themselves now (ripe in about {days} days). "
+        hours = min(w.days_to_ripe(*p) for p in near)
+        return (f"these plants were tended recently - they grow by themselves now (ripe in about {hours} hours). "
                 "Go and do something else meanwhile")
     x, y = todo[0]
     growth, partners, _ = w.tend(x, y, a.name, tick)
@@ -296,9 +296,39 @@ def tend(sim, a, act, tick):
     if ripe:
         sim.event(tick, a, f"grew a ripe crop at ({x}, {y})!", "farm")
     return (f"tended the plant at ({x}, {y}): growth {min(growth, GROW_NEEDED):.0f}/{GROW_NEEDED:.0f}"
-            + ("" if ripe else f", ripe in about {w.days_to_ripe(x, y)} days on its own - no need to stay")
+            + ("" if ripe else f", ripe in about {w.days_to_ripe(x, y)} hours on its own - no need to stay")
             + (f" - teamwork with {', '.join(partners)} doubled the effect!" if partners else "")
             + (" It is now ripe!" if ripe else ""))
+
+
+def footprints(a, w: int, h: int, direction):
+    """Places for a w x h building right next to the agent, in the given direction (or any)."""
+    for d in [direction] if direction in DIRS else list(DIRS):
+        if d in ("east", "west"):
+            x0s = [a.x + 1] if d == "east" else [a.x - w]
+            y0s = sorted(range(a.y - h + 1, a.y + 1), key=lambda y: abs(y + (h - 1) / 2 - a.y))
+        else:
+            y0s = [a.y + 1] if d == "south" else [a.y - h]
+            x0s = sorted(range(a.x - w + 1, a.x + 1), key=lambda x: abs(x + (w - 1) / 2 - a.x))
+        for x0 in x0s:
+            for y0 in y0s:
+                yield d, x0, y0
+
+
+def place_building(sim, a, kind: str, text: str, bp: dict, direction, tick: int):
+    """Try every spot next to the agent; returns (building, '') or (None, why it failed)."""
+    w, h = bp.get("size") or (1, 1)
+    why = "no room next to you"
+    for _, x0, y0 in footprints(a, w, h, direction):
+        if any(sim.occupied(x, y) for x in range(x0, x0 + w) for y in range(y0, y0 + h)):
+            why = "someone is standing where it would go"
+            continue
+        ok, why, b = sim.world.build_at(x0, y0, w, h, kind, text, a.name, tick, bp["function"])
+        if ok:
+            return b, ""
+        if "already a" in why:
+            return None, why
+    return None, why
 
 
 @action("build")
@@ -316,23 +346,67 @@ def build(sim, a, act, tick):
     if short:
         return (f"to build a {title} you need {need} (you have {a.wood} wood, {a.stone} stone, {a.food} food) - "
                 f"still missing {', '.join(f'{v} {k}' for k, v in short.items())}. {what} Gather it, then build.")
-    why = "no adjacent tile given"
-    for dx, dy in [DIRS[act["direction"]]] if act["direction"] in DIRS else DIRS.values():
-        x, y = a.x + dx, a.y + dy
-        if sim.occupied(x, y):
-            why = "an agent is standing there"
-            continue
-        ok, why = sim.world.build(x, y, title, act["message"][:160], a.name, tick, bp["function"])
-        if ok:
-            for k, v in cost.items():
-                setattr(a, k, getattr(a, k) - v)
-            sim.event(tick, a, f'built a {title} at ({x}, {y}){_quote(act["message"])}', "build")
-            for o in sim.agents.values():
-                if o is not a and max(abs(o.x - x), abs(o.y - y)) <= HEARING_RADIUS:
-                    o.remember(tick, f'{a.name} built a "{title}" at ({x}, {y}).')
-            a.remember(tick, f'I built a "{title}" at ({x}, {y}).')
-            return f"built a {title} at ({x}, {y}). {what}"
-    return f"couldn't build: {why}"
+    b, why = place_building(sim, a, title, act["message"][:160], bp, act["direction"], tick)
+    if not b:
+        w, h = bp.get("size") or (1, 1)
+        return f"couldn't build the {title} ({w}x{h} tiles): {why}" + ("" if "already" in why else
+                                                                        " - try another direction or a more open spot")
+    for k, v in cost.items():
+        setattr(a, k, getattr(a, k) - v)
+    x, y, size = b["x"], b["y"], f"{b['w']}x{b['h']}"
+    hours = work_hours(bp)
+    b["work"], b["done"] = hours, False
+    a.task = {"type": "build", "id": b["id"]}
+    sim.event(tick, a, f'started building a {title} ({size}) at ({x}, {y}) - {hours} hours of work{_quote(act["message"])}', "build")
+    for o in sim.agents.values():
+        if o is not a and max(abs(o.x - x), abs(o.y - y)) <= HEARING_RADIUS:
+            o.heard.append(f'{a.name} started building a {title} at ({x}, {y}) - you could help with work.')
+            o.remember(tick, f'{a.name} started building a "{title}" at ({x}, {y}).')
+    a.remember(tick, f'I started building a "{title}" ({size}) at ({x}, {y}); it needs {hours} hours of work.')
+    return (f"started building a {title} ({size} tiles) at ({x}, {y}): it needs {hours} hours of work. You'll keep "
+            f"working on it automatically; others can help with work. {what}")
+
+
+def work_hours(bp: dict) -> int:
+    w, h = bp.get("size") or (1, 1)
+    return int(max(2, min(16, sum(bp["cost"].values()) + w * h)))
+
+
+@action("work")
+def work(sim, a, act, tick):
+    """Put an hour of work into a building under construction next to you (yours or someone else's)."""
+    w = sim.world
+    site = w.buildings.get((a.task or {}).get("id")) if a.task else None
+    if not site or site.get("done", True) or w._gap(site, a.x, a.y) > 1:
+        near = w.sites_near(a.x, a.y, 1)
+        site = near[0] if near else None
+    if not site:
+        a.task = None
+        return "nothing under construction next to you"
+    helpers = [n for n, t in site["workers"].items() if n != a.name and tick - t <= 1]
+    gain = 1 + (0.5 if a.abilities.strength >= 7 else 0) + (0.5 if helpers else 0)
+    site["progress"] = min(site["work"], site["progress"] + gain)
+    site["workers"][a.name] = tick
+    a.task = {"type": "build", "id": site["id"]}
+    for n in helpers:
+        if n in sim.agents:
+            sim.bond(a, sim.agents[n], BOND["teamwork"])
+            sim.bond(sim.agents[n], a, BOND["teamwork"])
+    if site["progress"] >= site["work"]:
+        w.finish(site)
+        a.task = None
+        crew = sorted(site["workers"])
+        for n in crew:
+            if n in sim.agents:
+                sim.agents[n].remember(tick, f'We finished the {site["kind"]} at ({site["x"]}, {site["y"]})! ({", ".join(crew)})')
+                if sim.agents[n].task and sim.agents[n].task.get("id") == site["id"]:
+                    sim.agents[n].task = None
+        sim.event(tick, a, f'finished the {site["kind"]} at ({site["x"]}, {site["y"]})' +
+                  (f" with {', '.join(n for n in crew if n != a.name)}" if len(crew) > 1 else ""), "build")
+        return f'finished the {site["kind"]}! It now works: {(FUNCTIONS.get(site["function"]) or (None, "decorative"))[1]}.'
+    left = site["work"] - site["progress"]
+    return (f'worked on the {site["kind"]}: {site["progress"]:.0f}/{site["work"]} hours done, {left:.0f} to go'
+            + (f" (helped by {', '.join(helpers)})" if helpers else ""))
 
 
 @action("craft")
@@ -460,4 +534,4 @@ def procreate(sim, a, act, tick):
         p.pending = None
     name = re.sub(r"[^A-Za-z]", "", act["baby_name"])[:12].capitalize()
     sim.conceive(mother, a if mother is b else b, name, tick)
-    return f"{mother.name} is now pregnant - the baby will be born in 10 days"
+    return f"{mother.name} is now pregnant - the baby will be born in about 10 days"

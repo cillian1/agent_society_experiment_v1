@@ -142,8 +142,8 @@ class Hub:
         if path == "/api/speak":
             return {"delivered": sim.human_say(d.get("to", "all"), str(d.get("message", "")))}
         if path == "/api/sol":
+            sim.sol_last, sim.sol_next = sim.tick, sim.tick + 3 * 24      # Sol may pick a different next time
             sol.review_async(sim)
-            sim.sol_last = sim.tick
             return {"review": "started"}
         if path == "/api/model":
             return {"model": sim.set_model(d.get("name", ""), d.get("model", ""))}
