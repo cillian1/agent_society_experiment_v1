@@ -95,6 +95,19 @@ more materials, friendship, fishing without tools, free building). Useful `inven
 Everything the referee grants is checked and capped by the engine, so it can't break the world. Discoveries are listed
 in 🌍 World and every agent is told about them so they can build on each other's ideas.
 
+## Blueprints: agents decide what to build
+Agents can build anything they think their community needs. The first time someone tries a new kind of building, the
+Game Master draws up a **blueprint**: what it costs (wood, stone, food) and what it does (storage, home, fire, well,
+workshop, or decorative). If they don't have enough, they're told exactly what's missing. Blueprints are shared
+knowledge (🌍 World → Blueprints); familiar buildings get sensible default costs.
+
+## Sol, the mentor
+Sol watches over the society from outside the world. Every 20 days (or when you press *Review now* in 💬 Talk) Sol
+reviews everyone — who's doing pointless or repetitive things, what the community lacks — gives a short speech to
+everyone, specific advice to individuals, and can line up next steps for people who are drifting. Talk to Sol by
+picking 🧙 Sol in 💬 Talk (e.g. "Sol, get everyone working on a well") and Sol passes it on; you can still talk to
+anyone directly. Choose Sol's brain in ⚙️ Settings (Haiku with a key, otherwise smart local / local).
+
 ## Project layout
 ```
 serve.py / run.py        start the hub / run headless (`py run.py --days 50 --save test`)
@@ -103,7 +116,8 @@ society/
   world.py               map generation, resources, farming, structures, fog of war
   models.py              Agent and Traits data
   mind.py                prompts, parsing the model's JSON, calling the model
-  gm.py                  the Game Master: judges attempts/inventions, grants bounded outcomes and discoveries
+  gm.py                  the Game Master: judges attempts/inventions, designs blueprints, grants bounded outcomes
+  sol.py                 Sol the mentor: periodic reviews, advice and conversations with the Human
   actions.py             what each action does (one function per action)
   engine.py              the day loop, life & death, the Human's interactions, stats, save state
   views.py               JSON sent to the hub

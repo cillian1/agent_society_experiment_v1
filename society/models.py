@@ -89,6 +89,7 @@ class Agent:
     plan: str = ""                     # the agent's own current plan, kept from day to day
     ambition: str = ""                 # long-term goal it sets for itself when reflecting
     queue: list[dict] = field(default_factory=list)          # follow-up actions it lined up ("next")
+    advice: list[list] = field(default_factory=list)         # [day, text] what Sol the mentor told it
     last_reflect: int = -999
     role: str = ""                     # agents invent and claim their own roles
     goal: str = DEFAULT_GOAL

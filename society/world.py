@@ -173,7 +173,7 @@ class World:
                 if self.tiles[fy][fx] == SPROUT]
 
     # ---- building ----
-    def build(self, x: int, y: int, kind: str, text: str, who: str, tick: int):
+    def build(self, x: int, y: int, kind: str, text: str, who: str, tick: int, func: str | None = "auto"):
         """Place a free-form structure. Returns (ok, reason)."""
         if not self.in_bounds(x, y):
             return False, "outside the world"
@@ -182,7 +182,7 @@ class World:
             return False, "water: only a bridge/dock/path-like structure can go there"
         if t not in (GRASS, SAND, WATER):
             return False, f"can't build on {t}"
-        func = function_of(kind)
+        func = function_of(kind) if func == "auto" else func
         for dx, dy, s in self.structures_near(x, y, SAME_KIND_RADIUS if func else 3):
             if (func and s.get("function") == func) or s["kind"].lower() == k:
                 return False, (f"there is already a {s['kind']} close by (dx={dx} dy={dy} from the spot) - use it, "

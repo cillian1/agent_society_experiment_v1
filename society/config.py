@@ -72,6 +72,13 @@ FUNCTIONS = {                         # what a building does, recognised from wo
     "workshop": (("workshop", "forge", "smithy", "workbench", "craft"),
                  "crafting within 2 tiles costs no materials"),
 }
+DEFAULT_COSTS = {                     # what familiar buildings take; new kinds get a blueprint from the Game Master
+    "home": {"wood": 3}, "storage": {"wood": 4, "stone": 1}, "fire": {"wood": 2, "stone": 1},
+    "well": {"stone": 4, "wood": 1}, "workshop": {"wood": 3, "stone": 2}, "wall": {"stone": 2},
+    "bridge": {"wood": 3}, None: {"wood": 1},
+}
+MAX_BUILD_COST = 8
+BLOCK_WORDS_COST = [(("wall", "fence", "palisade"), {"stone": 2}), (("bridge", "dock", "pier"), {"wood": 3})]                    # per material
 SAME_KIND_RADIUS = 6                  # no second building with the same function this close
 HOME_HEAL = 2
 FIRE_MEAL_BONUS = 15
@@ -88,6 +95,7 @@ KEEP_RECENT = 25                      # memory lines shown verbatim; older ones 
 COMPACT_AFTER = 20                    # this many unsummarised old lines trigger a summary
 ORDER_MEMORY_DAYS = 30                # how long a request from the Human stays on an agent's mind
 MAX_IDEAS_IN_PROMPT = 10
+SOL_EVERY = 20                        # days between Sol the mentor's reviews of the society
 MAX_QUEUE = 4                         # follow-up actions an agent may line up (run without a model call)
 REFLECT_EVERY = 20                    # days between an agent's reflections on its life and ambition
 

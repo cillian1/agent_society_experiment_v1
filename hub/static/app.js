@@ -382,6 +382,7 @@ function overview(a) {
     <span>Explored</span><span>${a.discoveries} tiles seen first</span>
     <span>Position</span><span>(${a.x}, ${a.y})</span></div>
     ${l ? `<div class="card thought">💭 ${esc(l.thought)}<div class="tag" style="margin-top:4px">▶ ${esc(l.action)} → ${esc(l.result)}</div></div>` : ''}
+    ${a.advice && a.advice.length ? `<div class="card" style="border-left:3px solid var(--gold)">🧙 <b>Sol's advice</b> (day ${a.advice[a.advice.length - 1][0]}): ${esc(a.advice[a.advice.length - 1][1])}</div>` : ''}
     ${a.ambition ? `<div class="card" style="border-left:3px solid var(--gold)">🎯 <b>Ambition:</b> ${esc(a.ambition)}</div>` : ''}
     ${a.plan ? `<div class="card" style="border-left:3px solid var(--accent)">🗺️ <b>Plan:</b> ${esc(a.plan)}</div>` : ''}
     ${a.queue.length ? `<div class="card">⏭️ <b>Next up</b> (runs automatically): ${a.queue.map(q => esc(q.action + (q.target ? ' → ' + q.target : q.title ? ' ' + q.title : q.to && q.to !== 'all' ? ' → ' + q.to : ''))).join(' · ')}</div>` : ''}
@@ -441,7 +442,7 @@ $('profile').addEventListener('click', e => {
 // ======================================================================= talk
 function renderTo() {
   const all = S.to.has('*'), agents = S.st?.agents || [];
-  $('to').innerHTML = `<span class="chip ${all ? 'on' : ''}" data-n="*">Everyone</span>` + agents.map(a =>
+  $('to').innerHTML = `<span class="chip ${all ? 'on' : ''}" data-n="*">Everyone</span><span class="chip ${!all && S.to.has('Sol') ? 'on' : ''}" data-n="Sol" title="Sol, the mentor: ask for advice or to pass something on">🧙 Sol</span>` + agents.map(a =>
     `<span class="chip ${!all && S.to.has(a.name) ? 'on' : ''}" data-n="${esc(a.name)}"><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</span>`).join('');
 }
 $('to').onclick = e => {
@@ -459,6 +460,7 @@ function renderChat(force) {
   const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
   el.innerHTML = c.length ? c.map(m => m.from === 'You'
     ? `<div class="bub me"><b style="color:var(--you)">You → ${esc(m.to)}</b>${esc(m.text)}</div>`
+    : m.review ? `<div class="bub" style="border-left:3px solid var(--gold)"><b style="color:var(--gold)">🧙 Sol's review · day ${m.tick}</b>${esc(m.text)}</div>`
     : `<div class="bub"><b style="color:${m.color}">${esc(m.from)}</b>${m.pending ? '<span class="muted typing">thinking</span>' : esc(m.text)}${(m.changes || []).map(c => `<div class="tag" style="margin-top:4px;color:var(--gold)">${esc(c)}</div>`).join('')}</div>`).join('')
     : '<p class="muted">Pick who to talk to below and say hello. Ask what they are up to, give them a task, or tell them a story.</p>';
   if (stick || force) el.scrollTop = el.scrollHeight;
@@ -474,13 +476,14 @@ $('send').onclick = send;
 $('msg').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 $('auth').onchange = e => api.post('/api/control', { authority: e.target.value });
 $('gm').onchange = e => api.post('/api/control', { gm_model: e.target.value });
+$('solm').onchange = e => api.post('/api/control', { sol_model: e.target.value });
 $('discoveries').onclick = e => { const g = e.target.closest('[data-goto]'); if (g) select(g.dataset.goto); };
 
 // ======================================================================= world feed
-const FILTERS = { all: 'All', talk: '💬 Talk', life: '❤️ Life', making: '🔨 Making', ideas: '💡 Ideas', explore: '🧭 Exploring', survival: '🍎 Food' };
-const KIND_FILTER = { discovery: 'ideas', attempt: 'ideas', goal: 'ideas', care: 'life', birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
+const FILTERS = { all: 'All', sol: '🧙 Sol', talk: '💬 Talk', life: '❤️ Life', making: '🔨 Making', ideas: '💡 Ideas', explore: '🧭 Exploring', survival: '🍎 Food' };
+const KIND_FILTER = { sol: 'sol', discovery: 'ideas', attempt: 'ideas', goal: 'ideas', care: 'life', birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
   idea: 'ideas', explore: 'explore', food: 'survival', role: 'life', brain: 'life' };
-const KIND_ICON = { discovery: '💡', attempt: '✨', goal: '🎯', care: '🍼', birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
+const KIND_ICON = { sol: '🧙', discovery: '💡', attempt: '✨', goal: '🎯', care: '🍼', birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
 $('filters').innerHTML = Object.entries(FILTERS).map(([k, l]) => `<span class="chip ${k === 'all' ? 'on' : ''}" data-f="${k}">${l}</span>`).join('');
 $('filters').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; S.filter = c.dataset.f; for (const x of $('filters').children) x.classList.toggle('on', x === c); renderFeed(S.st, true); };
 let feedKey = '';
@@ -623,13 +626,23 @@ async function poll() {
     if (st.tiles.length === S.H) syncTiles(st.tiles);
     renderTop(st);
     if (!S.sel) renderList(st);
-    if ($('to').children.length !== st.agents.length + 1) renderTo();
+    if ($('to').children.length !== st.agents.length + 2) renderTo();
     if (document.activeElement !== $('auth')) $('auth').value = st.authority;
     renderChat(); renderFeed(st); toastNewEvents(st.events);
     $('discoveries').innerHTML = st.discoveries.length ? st.discoveries.slice().reverse().map(d => `<div class="disc"><b>${esc(d.name)}</b>
       <span class="muted">by <span class="who" data-goto="${esc(d.by)}" style="color:${d.color};cursor:pointer">${esc(d.by)}</span>, day ${d.tick}</span>
       <div>${esc(d.description)}</div><span class="eff">⚡ ${esc(d.meaning)}</span></div>`).join('')
       : '<p class="muted small">Nothing yet. When an agent attempts or invents something genuinely useful, it shows up here and changes the rules for everyone.</p>';
+    const so = st.sol;
+    $('solcard').innerHTML = `<b style="color:var(--gold)">🧙 Sol, the mentor</b> <span class="muted small">reviews everyone every 20 days · next in ${so.next_in} days</span>
+      <button class="btn" id="sol-now" style="float:right;padding:3px 10px">Review now</button>
+      <div class="small" style="margin-top:6px">${so.log.length ? esc(so.log[so.log.length - 1].note || so.log[so.log.length - 1].speech) : 'Sol hasn\'t reviewed the society yet. Pick 🧙 Sol below to talk to Sol.'}</div>`;
+    $('sol-now').onclick = () => api.post('/api/sol').then(() => toast('🧙 Sol is reviewing the society…', '#ffd93d'));
+    if (document.activeElement !== $('solm')) $('solm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[so.model] || 'local';
+    $('blueprints').innerHTML = st.blueprints.length ? st.blueprints.slice().reverse().map(b => `<div class="disc" style="background:var(--panel-2);border-color:var(--line)">${iconFor(b.kind)} <b>${esc(b.kind)}</b>
+      <span class="muted">${b.by ? 'designed by ' + esc(b.by) : ''}</span><div>${esc(b.description)}</div>
+      <span class="eff" style="color:var(--text-2)">needs ${Object.entries(b.cost).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing'}</span></div>`).join('')
+      : '<p class="muted small">No blueprints yet. The first time someone builds a new kind of building, its cost and purpose are worked out and shared here.</p>';
     if (document.activeElement !== $('gm')) $('gm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[st.gm_model] || 'local';
     if (S.tab === 'settings') renderUsage();
   } catch (e) { console.error(e); }

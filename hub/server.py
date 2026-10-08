@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from society import persistence, views
+from society import persistence, sol, views
 from society.config import AUTOSAVE_EVERY
 
 STATIC = Path(__file__).parent / "static"
@@ -63,6 +63,9 @@ class Hub:
             day = sim.tick
             try:
                 day = sim.begin_day()
+                if sim.sol_due:                        # Sol's review runs alongside the day
+                    sim.sol_due = False
+                    sol.review_async(sim)
                 for a in list(sim.agents.values()):
                     key = (id(sim), a.name)
                     with self.busy_lock:
@@ -127,6 +130,9 @@ class Hub:
                 self.max_wait = max(0.5, float(d["max_wait"]))
             if d.get("step"):
                 self.step_once = True
+            if d.get("sol_model"):
+                sim.sol_model = {"local": "local", "haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5",
+                                 "opus": "claude-opus-5-5"}.get(d["sol_model"], d["sol_model"])
             if d.get("gm_model"):
                 sim.gm_model = {"local": "local", "haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5",
                                 "opus": "claude-opus-5-5"}.get(d["gm_model"], d["gm_model"])
@@ -136,6 +142,10 @@ class Hub:
                     "authority": sim.human_authority}
         if path == "/api/speak":
             return {"delivered": sim.human_say(d.get("to", "all"), str(d.get("message", "")))}
+        if path == "/api/sol":
+            sol.review_async(sim)
+            sim.sol_last = sim.tick
+            return {"review": "started"}
         if path == "/api/model":
             return {"model": sim.set_model(d.get("name", ""), d.get("model", ""))}
         if path == "/api/gift":

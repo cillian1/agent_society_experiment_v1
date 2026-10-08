@@ -8,8 +8,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import actions, gm, mind
-from .config import (HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
+from . import actions, gm, mind, sol
+from .config import (SOL_EVERY, HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
                      DEFAULT_MAX_AGENTS, EAT_RELIEF, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
                      MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS)
 from .models import Abilities, Agent, Traits
@@ -72,9 +72,14 @@ class Society:
         self.errors: list[dict] = []
         self.stats: list[dict] = []
         self.discoveries: list[dict] = []        # ideas the Game Master made real: they change the rules
+        self.blueprints: dict[str, dict] = {}    # what each kind of building costs and does (shared knowledge)
         self.lock = threading.RLock()
         info = llm.info() if hasattr(llm, 'info') else {}
         self.gm_model = HAIKU if info.get('claude') else LOCAL   # the referee for attempts and inventions
+        smart = info.get("smart_local")
+        self.sol_model = HAIKU if info.get("claude") else (f"local:{smart}" if smart else LOCAL)   # Sol the mentor
+        self.sol_log: list[dict] = []
+        self.sol_last, self.sol_due = 0, False
         if spawn:
             self._spawn()
             self._record_stats()
@@ -113,6 +118,8 @@ class Society:
         with self.lock:
             self.tick += 1
             self.world.update(self.tick, self.tech('growth'))
+            if self.tick - self.sol_last >= SOL_EVERY and self.agents:
+                self.sol_last, self.sol_due = self.tick, True       # time for Sol's review
             for a in list(self.agents.values()):
                 a.authority = self.human_authority
                 if self._live_a_day(a, self.tick):
@@ -138,7 +145,8 @@ class Society:
             if a.name not in self.agents or a.is_baby(self.tick):     # babies don't think (and cost nothing)
                 return None
             agents = list(self.agents.values())
-            job = {"prompt": mind.observation(a, self.world, agents, self.tick, self._ideas(), self._discoveries()),
+            job = {"prompt": mind.observation(a, self.world, agents, self.tick, self._ideas(), self._discoveries(),
+                                              self._blueprints(), self._mentor_for(a)),
                    "others": [o.name for o in agents if o is not a], "heard": a.heard}
             a.heard = []
             return job
@@ -186,6 +194,11 @@ class Society:
         except Exception as e:                        # one broken brain must not stop everyone else
             self._error(a, e)
             act = mind.failed_action(e)
+        if act["action"] == "build" and self.blueprint_key(act["title"] or "") not in self.blueprints:
+            try:                                      # a new kind of building: the referee works out what it takes
+                act["blueprint"] = gm.design(self, a, act["title"], act["message"])
+            except Exception as e:
+                self._error(a, e, "blueprint design failed")
         if act["action"] in ("attempt", "invent"):   # the referee decides what really happens
             try:
                 act["gm"] = gm.judge(self, a, act)
@@ -231,6 +244,9 @@ class Society:
         for (a, job), act in order:
             self.apply_decision(a, act, job)
         self.end_day(time.time() - t0)
+        if self.sol_due:
+            self.sol_due = False
+            sol.run_review(self)
 
     def _live_a_day(self, a: Agent, tick: int) -> bool:
         """Hunger, health, fading feelings, old age. False if the agent died."""
@@ -295,6 +311,37 @@ class Society:
         """Raise a's feeling toward b (charming people are liked faster)."""
         a.bonds[b.name] = min(100.0, a.bonds.get(b.name, 0)
                               + amount * b.abilities.charm() * (1 + self.tech("friendship") / 100))
+
+    @staticmethod
+    def blueprint_key(kind: str) -> str:
+        return re.sub(r"^(a|an|the|my|our)\s+", "", re.sub(r"[^a-z ]", "", kind.lower())).strip()
+
+    def blueprint(self, kind: str, design: dict | None = None, by: str = "", tick: int = 0) -> dict:
+        """What it takes to build this kind of thing - known, newly designed by the Game Master, or a default."""
+        from .config import BLOCK_WORDS_COST, DEFAULT_COSTS, FUNCTIONS, MAX_BUILD_COST
+        from .world import function_of
+        key = self.blueprint_key(kind) or "structure"
+        if key in self.blueprints:
+            return self.blueprints[key]
+        func = function_of(kind)
+        cost = dict(DEFAULT_COSTS.get(func) or DEFAULT_COSTS[None])
+        if func is None:
+            for words, c in BLOCK_WORDS_COST:
+                if any(w in key for w in words):
+                    cost = dict(c)
+        desc = FUNCTIONS[func][1] if func else "decorative"
+        if design:                                     # the Game Master's blueprint for a new kind of building
+            if design.get("function") in FUNCTIONS:
+                func, desc = design["function"], FUNCTIONS[design["function"]][1]
+            elif design.get("function") in (None, "none", ""):
+                func = None
+            got = design.get("cost") if isinstance(design.get("cost"), dict) else {}
+            cost = {k: int(max(0, min(MAX_BUILD_COST, float(got.get(k) or 0)))) for k in ("wood", "stone", "food")}
+            cost = {k: v for k, v in cost.items() if v} or {"wood": 1}
+            desc = str(design.get("description") or desc)[:160]
+        bp = {"kind": kind[:40], "cost": cost, "function": func, "description": desc, "by": by, "tick": tick}
+        self.blueprints[key] = bp
+        return bp
 
     def tech(self, effect: str) -> float:
         """Total bonus the society's discoveries give for one effect (capped)."""
@@ -409,6 +456,13 @@ class Society:
         return [f"{d['name']} (by {d['by']}): {d['description']} - {EFFECTS[d['effect']][0].replace('N', str(d['amount']))}"
                 for d in self.discoveries]
 
+    def _blueprints(self) -> list[str]:
+        return [f"{b['kind']}: {', '.join(f'{v} {k}' for k, v in b['cost'].items())} - {b['description']}"
+                for b in list(self.blueprints.values())[-12:]]
+
+    def _mentor_for(self, a: Agent) -> list[str]:
+        return [t for d, t in a.advice if self.tick - d <= 20][-3:]
+
     def _ideas(self) -> list[str]:
         return [f"{i['title']} (by {i['by']}): {i['text']}" for i in self.inventions[-MAX_IDEAS_IN_PROMPT:]]
 
@@ -442,14 +496,24 @@ class Society:
     def human_say(self, targets, message: str) -> list[str]:
         """The Human talks to agents anywhere in the world; each answers right away in the chat."""
         message = message.strip()[:600]
+        to_sol = isinstance(targets, list) and sol.NAME in targets
         with self.lock:
             chosen = list(self.agents.values()) if targets in ("all", None) else \
                 [self.agents[n] for n in targets if n in self.agents]
-            if not message or not chosen:
+            if not message or not (chosen or to_sol):
                 return []
+            if to_sol:                                   # talking to Sol, the mentor
+                self.chat.append({"from": "You", "to": sol.NAME + (", " + ", ".join(a.name for a in chosen) if chosen else ""),
+                                  "text": message, "tick": self.tick})
+                slot = {"from": sol.NAME, "text": "", "pending": True, "tick": self.tick, "color": sol.COLOR}
+                self.chat.append(slot)
+                sol.reply_async(self, message, slot)
+                if not chosen:
+                    return [sol.NAME]
             names = [a.name for a in chosen]
             to = "everyone" if len(chosen) == len(self.agents) else ", ".join(names)
-            self.chat.append({"from": "You", "to": to, "text": message, "tick": self.tick})
+            if not to_sol:
+                self.chat.append({"from": "You", "to": to, "text": message, "tick": self.tick})
             slots = []
             for a in chosen:
                 a.authority = self.human_authority
@@ -556,7 +620,9 @@ class Society:
                 "world": self.world.to_dict(),
                 "agents": [a.to_dict() for a in self.agents.values()],
                 "dead": [{"agent": d["agent"].to_dict(), "tick": d["tick"], "cause": d["cause"]} for d in self.dead.values()],
-                "events": self.events, "inventions": self.inventions, "discoveries": self.discoveries, "talk": self.talk, "stats": self.stats,
+                "events": self.events, "inventions": self.inventions, "discoveries": self.discoveries,
+                "blueprints": self.blueprints, "sol_log": self.sol_log, "sol_last": self.sol_last,
+                "sol_model": self.sol_model, "gm_model": self.gm_model, "talk": self.talk, "stats": self.stats,
                 "chat": [c for c in self.chat if not c.get("pending")],
             }
 
@@ -572,4 +638,6 @@ class Society:
                   for x in d.get("dead", [])}
         for k in ("events", "inventions", "talk", "stats", "chat", "discoveries"):
             setattr(s, k, d.get(k, []))
+        s.blueprints = d.get("blueprints", {})
+        s.sol_log, s.sol_last = d.get("sol_log", []), d.get("sol_last", s.tick)
         return s

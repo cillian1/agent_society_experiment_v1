@@ -3,7 +3,7 @@ import json
 import random
 import re
 
-from .config import (FUNCTIONS, ADULT_AGE, BABY_DAYS, BUILD_COST, CHILD_FOOD_COST, CRAFT_COST, FRIEND_BOND, HUNGER_WARNING,
+from .config import (DEFAULT_COSTS, FUNCTIONS, ADULT_AGE, BABY_DAYS, CHILD_FOOD_COST, CRAFT_COST, FRIEND_BOND, HUNGER_WARNING,
                      KEEP_RECENT, LOVE_BOND, MAX_ITEMS, MAX_QUEUE, ORDER_MEMORY_DAYS, PREGNANCY_DAYS)
 from .models import Agent
 
@@ -88,8 +88,10 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         "or love and wins hearts fast\n"
         '  plant   - {"direction": "..."} put a carried seed into an adjacent grass tile\n'
         "  tend    - speed up a young plant within reach (helps once every few days; plants also grow on their own)\n"
-        f'  build   - {{"direction": "...", "title": "<house, wall, bridge, sign, anything>", "message": "<description or sign text>"}} '
-        f"costs {BUILD_COST} wood/stone; you can walk into or over what you build, except walls and fences. Water only takes bridges/docks. "
+        f'  build   - {{"direction": "...", "title": "<ANY building you think your community needs>", "message": "<what it is for>"}} '
+        "decide for yourself what to build - the game tells you what it takes (known blueprints are listed below; a new "
+        "kind of building gets its own blueprint the first time someone tries). You can walk into or over what you build, "
+        "except walls and fences. Water only takes bridges/docks. "
         "Buildings DO things: " + "; ".join(f"{words[0]}: {what}" for words, what in FUNCTIONS.values())
         + ". Don't build what already exists nearby - use it, or build something new.\n"
         '  store   - {"title": "food|seeds|wood|stone", "amount": N} put supplies into a storehouse next to you, for everyone\n'
@@ -113,6 +115,8 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         "(a truly useful idea can become a discovery)\n"
         "  wait\n"
         + HUMAN_NOTES[a.authority] + " (Talking with the Human happens in a separate chat, so it does not use up your turn.)\n"
+        "Sol is a wise mentor who watches over your society and every few weeks gives everyone advice. Sol sees the "
+        "bigger picture: take Sol's advice seriously.\n"
         "THINK IN PROJECTS, not single steps: with \"next\" you can line up to "
         f"{MAX_QUEUE} more actions that run automatically on the following days (you'll be interrupted if something "
         "important happens, e.g. hunger or someone talking to you). Use it to get real things done.\n"
@@ -167,7 +171,14 @@ def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[s
                                  ("fire", "hearth", "a fire would give warm meals and bring people together"),
                                  ("workshop", "workshop", "a workshop makes crafting free for everyone nearby")):
             if not world.function_near(a.x, a.y, func, 8):
-                add(why, action="build", direction="east", title=title, message=f"{a.name}'s {title}")
+                cost = DEFAULT_COSTS[func]
+                short = {k: v - getattr(a, k) for k, v in cost.items() if getattr(a, k) < v}
+                if short:
+                    what = "wood" if "wood" in short else "stone"
+                    add(f"{why}; you still need {', '.join(f'{v} {k}' for k, v in short.items())}",
+                        action="go", target=what)
+                else:
+                    add(why, action="build", direction="east", title=title, message=f"{a.name}'s {title}")
                 break
     store = world.function_near(a.x, a.y, "storage", 1)
     if store and a.food >= 4 and a.hunger < 40:
@@ -200,7 +211,7 @@ def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[s
 
 
 def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str],
-                discoveries: list[str] = ()) -> str:
+                discoveries: list[str] = (), blueprints: list[str] = (), mentor: list[str] = ()) -> str:
     """Everything the agent perceives and remembers this turn."""
     others = {(o.x, o.y): o.symbol for o in agents if o is not a}
     stage = {"child": f"a child - you become an adult at {ADULT_AGE} days", "adult": "an adult",
@@ -305,6 +316,12 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
             "- " + m for m in a.log[max(a.sum_upto, len(a.log) - a.abilities.memory()):]))
     if ideas:
         lines.append("Ideas invented by the society so far:\n" + "\n".join("- " + i for i in ideas))
+    if blueprints:
+        lines.append("Building blueprints your community knows (what each costs and does):\n"
+                     + "\n".join("- " + b for b in blueprints))
+    if mentor:
+        lines.append("Sol, the wise mentor who watches over your society, told you recently:\n"
+                     + "\n".join("- " + m for m in mentor))
     if discoveries:
         lines.append("Discoveries your society has made (they really work - build on them!):\n"
                      + "\n".join("- " + d for d in discoveries))

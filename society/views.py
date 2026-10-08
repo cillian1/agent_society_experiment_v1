@@ -1,5 +1,5 @@
 """JSON views of a society for the hub: a light state for polling, and full detail for one agent."""
-from .config import ADULT_AGE, EFFECTS, FUNCTIONS, LOVE_BOND, OLD_AGE
+from .config import SOL_EVERY, ADULT_AGE, EFFECTS, FUNCTIONS, LOVE_BOND, OLD_AGE
 from .engine import Society, tier_of
 from .models import ABILITY_INFO, Agent
 
@@ -30,8 +30,11 @@ def state(sim: Society, since_event: int = 0) -> dict:
             "chat": sim.chat[-60:],
             "talk": sim.talk[-60:],
             "inventions": sim.inventions[-40:],
+            "blueprints": list(sim.blueprints.values()),
             "discoveries": [{**d, "meaning": EFFECTS[d["effect"]][0].replace("N", str(d["amount"]))} for d in sim.discoveries],
             "gm_model": sim.gm_model,
+            "sol": {"model": sim.sol_model, "last": sim.sol_last, "next_in": max(0, SOL_EVERY - (sim.tick - sim.sol_last)),
+                    "log": sim.sol_log[-5:]},
             "structures": [{"x": x, "y": y, "kind": s["kind"], "text": s["text"], "by": s["by"], "walkable": s["walkable"],
                             "function": FUNCTIONS[s["function"]][1] if s.get("function") else "", "stock": s.get("stock")}
                            for (x, y), s in sim.world.structures.items()],
@@ -59,6 +62,7 @@ def agent_detail(sim: Society, name: str) -> dict | None:
             **_brief(sim, a), "alive": not dead, "goal": a.goal, "traits": vars(a.traits),
             "seeds": a.seeds, "wood": a.wood, "stone": a.stone, "items": a.items, "discoveries": a.discoveries,
             "parents": a.parents, "children": a.children, "pregnancy": a.pregnancy, "plan": a.plan, "ambition": a.ambition, "queue": a.queue,
+            "advice": [x for x in a.advice if t - x[0] <= 20][-3:],
             "abilities": vars(a.abilities), "ability_info": ABILITY_INFO, "lifespan": a.abilities.lifespan(),
             "bonds": {k: int(v) for k, v in sorted(a.bonds.items(), key=lambda kv: -kv[1]) if v >= 1},
             "summary": a.summary, "log": a.log[-60:], "log_total": len(a.log),

@@ -303,25 +303,35 @@ def tend(sim, a, act, tick):
 
 @action("build")
 def build(sim, a, act, tick):
-    cost = 0 if sim.tech("building") >= 1 else BUILD_COST
-    if a.materials() < cost:
-        return f"need {cost} wood/stone to build (you have {a.wood} wood, {a.stone} stone)"
     title = (act["title"] or "structure")[:40]
+    new = sim.blueprint_key(title) not in sim.blueprints
+    bp = sim.blueprint(title, act.get("blueprint"), a.name, tick)
+    cost = {} if sim.tech("building") >= 1 else bp["cost"]
+    need = ", ".join(f"{v} {k}" for k, v in cost.items())
+    what = f"It will: {bp['description']}." if bp.get("description") else ""
+    if new:
+        sim.event(tick, a, f"drew up plans for a {title}: needs {need or 'nothing'}. {what}", "idea")
+        a.remember(tick, f"I worked out how to build a {title}: it needs {need or 'nothing'}. {what}")
+    short = {k: v - getattr(a, k) for k, v in cost.items() if getattr(a, k) < v}
+    if short:
+        return (f"to build a {title} you need {need} (you have {a.wood} wood, {a.stone} stone, {a.food} food) - "
+                f"still missing {', '.join(f'{v} {k}' for k, v in short.items())}. {what} Gather it, then build.")
     why = "no adjacent tile given"
     for dx, dy in [DIRS[act["direction"]]] if act["direction"] in DIRS else DIRS.values():
         x, y = a.x + dx, a.y + dy
         if sim.occupied(x, y):
             why = "an agent is standing there"
             continue
-        ok, why = sim.world.build(x, y, title, act["message"][:160], a.name, tick)
+        ok, why = sim.world.build(x, y, title, act["message"][:160], a.name, tick, bp["function"])
         if ok:
-            a.spend_materials(cost)
+            for k, v in cost.items():
+                setattr(a, k, getattr(a, k) - v)
             sim.event(tick, a, f'built a {title} at ({x}, {y}){_quote(act["message"])}', "build")
             for o in sim.agents.values():
                 if o is not a and max(abs(o.x - x), abs(o.y - y)) <= HEARING_RADIUS:
                     o.remember(tick, f'{a.name} built a "{title}" at ({x}, {y}).')
             a.remember(tick, f'I built a "{title}" at ({x}, {y}).')
-            return f"built a {title} at ({x}, {y})"
+            return f"built a {title} at ({x}, {y}). {what}"
     return f"couldn't build: {why}"
 
 

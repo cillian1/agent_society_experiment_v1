@@ -22,6 +22,19 @@ class MockLLM(UsageMixin):
         if "SUMMARIZE_MEMORIES" in prompt:
             lines = prompt.split("New memories to fold in:\n", 1)[-1].split("\n\nWrite the updated")[0].splitlines()
             return "I remember: " + " ".join(l.split(": ", 1)[-1] for l in lines)[:600]
+        if "SOL_REVIEW" in prompt or "SOL_CHAT" in prompt:
+            names = re.findall(r"^- (\w+) \(", prompt, re.M)
+            who = names[0] if names else None
+            d = dict(speech="Work together: store spare food and build what is missing.",
+                     note_to_human="They are surviving; farming and storage need work.",
+                     advice={who: {"message": "Stop chatting and gather wood for a storehouse.",
+                                   "next": [{"action": "go", "target": "wood"}, {"action": "gather"}]}} if who else {})
+            if "SOL_CHAT" in prompt:
+                d["message"] = "[MOCK] I'll pass that on to everyone."
+            return json.dumps(d)
+        if "GAME_MASTER_BLUEPRINT" in prompt:
+            return json.dumps(dict(cost={"wood": rng.randint(1, 4), "stone": rng.randint(0, 3)},
+                                   function=rng.choice(["home", "fire", "none"]), description="a mock blueprint"))
         if "GAME_MASTER" in prompt:
             ideas = [("Smoked Fish", "hunger"), ("Irrigation Ditches", "growth"), ("Herbal Medicine", "health"),
                      ("The Wheel", "speed"), ("Stone Tools", "materials"), ("Harvest Festival", "friendship")]

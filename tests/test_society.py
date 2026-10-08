@@ -225,8 +225,11 @@ class BuildingTests(unittest.TestCase):
         x, y = next((x, y) for y in range(2, w.height - 2) for x in range(2, w.width - 2)
                     if all(w.tiles[y + dy][x + dx] == "grass" for dx in (-1, 0, 1) for dy in (-1, 0, 1))
                     and not any(max(abs(o.x - x), abs(o.y - y)) <= 2 for o in sim.agents.values()))
-        a.x, a.y, a.wood, a.food, a.hunger = x, y, 4, 6, 10
+        a.x, a.y, a.wood, a.stone, a.food, a.hunger = x, y, 1, 0, 6, 10
         do = lambda j: apply(sim, a, parse_action(j, []), 1)
+        self.assertIn("still missing 3 wood, 1 stone", do('{"action": "build", "direction": "east", "title": "Granary"}'))
+        self.assertIn("granary", sim.blueprints)              # the plan is now shared knowledge
+        a.wood, a.stone = 10, 5
         self.assertIn("built", do('{"action": "build", "direction": "east", "title": "Granary"}'))
         self.assertIn("already", do('{"action": "build", "direction": "west", "title": "storehouse"}'))
         self.assertIn("stored 3 food", do('{"action": "store", "title": "food", "amount": 3}'))
@@ -235,6 +238,25 @@ class BuildingTests(unittest.TestCase):
         a.hunger = 60
         self.assertIn("cooked", do('{"action": "eat"}'))
         self.assertLessEqual(a.hunger, 5)
+
+
+class SolTests(unittest.TestCase):
+    def test_sol_reviews_every_20_days_and_advises(self):
+        sim = make(41)
+        self.assertEqual([l["tick"] for l in sim.sol_log], [20, 40])
+        advised = [a for a in sim.agents.values() if a.advice]
+        self.assertTrue(advised)
+        self.assertTrue(any(c.get("review") for c in sim.chat))
+
+    def test_talking_to_sol(self):
+        sim = make()
+        self.assertEqual(sim.human_say(["Sol"], "Sol, get them building a well"), ["Sol"])
+        for _ in range(100):
+            if not sim.chat[-1].get("pending"):
+                break
+            time.sleep(0.02)
+        self.assertEqual(sim.chat[-1]["from"], "Sol")
+        self.assertTrue(sim.chat[-1]["changes"])
 
 
 class SaveTests(unittest.TestCase):

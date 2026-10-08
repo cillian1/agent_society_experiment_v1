@@ -73,6 +73,7 @@
     </section>
 
     <section class="tab" id="tab-talk" hidden>
+      <div class="card" id="solcard" style="border-left:3px solid var(--gold)"></div>
       <div class="chat" id="chat"></div>
       <div class="field-label">Talking to</div>
       <div class="chips" id="to"></div>
@@ -94,6 +95,8 @@
     <section class="tab" id="tab-world" hidden>
       <h3 style="margin-top:0">💡 Discoveries <span class="muted small" style="text-transform:none;letter-spacing:0">— ideas that became real and change the world</span></h3>
       <div id="discoveries"></div>
+      <h3>📐 Blueprints <span class="muted small" style="text-transform:none;letter-spacing:0">— what each building costs and does</span></h3>
+      <div id="blueprints"></div>
       <h3>What's happening</h3>
       <div class="chips" id="filters"></div>
       <div class="feed" id="feed"></div>
@@ -117,6 +120,10 @@
       <div class="row"><label class="field-label" for="gm">Referee for attempts &amp; inventions</label>
         <select id="gm"><option value="local">🖥️ Local (free)</option><option value="haiku">🌱 Haiku</option><option value="sonnet">⭐ Sonnet</option><option value="opus">👑 Opus</option></select></div>
       <p class="muted small">Judges anything an agent tries and turns good ideas into discoveries. A smarter referee makes a richer world; it only runs when someone attempts or invents something.</p>
+      <h3>Sol, the mentor</h3>
+      <div class="row"><label class="field-label" for="solm">Sol's brain</label>
+        <select id="solm"><option value="local">🖥️ Local (free)</option><option value="haiku">🌱 Haiku</option><option value="sonnet">⭐ Sonnet</option><option value="opus">👑 Opus</option></select></div>
+      <p class="muted small">Sol reviews the society every 20 days and whenever you ask. A smarter Sol gives much better advice; it's one call per review.</p>
       <h3>Brains &amp; usage</h3>
       <div id="usage"></div>
       <h3>Keyboard shortcuts</h3>

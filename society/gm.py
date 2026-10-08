@@ -4,7 +4,7 @@ generous or confused referee can't break the simulation."""
 import json
 import re
 
-from .config import DISCOVERY_COOLDOWN, EFFECTS, MAX_ITEMS
+from .config import DISCOVERY_COOLDOWN, EFFECTS, FUNCTIONS, MAX_BUILD_COST, MAX_ITEMS
 from .mind import DIRS, _json
 
 USES = ("wood", "stone", "farm", "fish", "none")
@@ -52,6 +52,25 @@ def judge(sim, a, act: dict) -> dict | None:
     model = sim.gm_model
     data = _json(sim.llm.complete("You are the game master of a society simulation. Be fair, vivid and concise.",
                                   prompt, model=model))
+    return data or None
+
+
+def design(sim, a, kind: str, idea: str) -> dict | None:
+    """A new kind of building: decide what it costs and what it does (once - then everyone knows)."""
+    if not (kind or "").strip():
+        return None
+    funcs = "\n".join(f'  "{k}": {v[1]}' for k, v in FUNCTIONS.items())
+    known = "; ".join(f"{b['kind']}: {', '.join(f'{v} {k}' for k, v in b['cost'].items())}"
+                      for b in list(sim.blueprints.values())[-8:]) or "none yet"
+    prompt = (f"GAME_MASTER_BLUEPRINT\n{_context(sim, a)}\n\n{a.name} wants to build a \"{kind[:60]}\""
+              + (f" ({idea[:160]})" if idea else "") + ".\nKnown buildings and their costs: " + known + "\n"
+              "As the game master, design what it takes for a small stone-age society: materials (wood, stone, food; "
+              f"0-{MAX_BUILD_COST} each - bigger or cleverer buildings cost more) and what it does. Pick the function "
+              f"that fits best, or none if it is decorative or cultural:\n{funcs}\n"
+              'Reply ONLY with JSON: {"cost": {"wood": 0, "stone": 0, "food": 0}, "function": "<key or none>", '
+              '"description": "<what it is and does, one sentence>"}')
+    data = _json(sim.llm.complete("You are the game master of a society simulation. Be fair and concise.",
+                                  prompt, model=sim.gm_model))
     return data or None
 
 
