@@ -1223,6 +1223,8 @@ async function poll() {
       ${note ? `<div class="small clamp" title="${esc(note)}">${esc(note)}</div>` : '<div class="small muted">No review yet. Sol looks over everyone, gives advice and decides when to look again.</div>'}`;
     $('sol-now').onclick = () => api.post('/api/sol').then(() => toast('🧙 Sol is reviewing the society…', '#ffd93d'));
     $('sol-talk').onclick = talkToSol;
+    const lm = st.backends?.local_model, lo = $('solm').querySelector('option[value=local]');
+    if (lo && lm && !lo.textContent.includes(lm)) lo.textContent = `🖥️ Local · ${lm} (free)`;
     if (document.activeElement !== $('solm')) $('solm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[so.model] || (so.model.startsWith('local:') ? 'smart' : 'local');
     $('blueprints').innerHTML = st.blueprints.length ? st.blueprints.slice().reverse().map(b => `<div class="disc" style="background:var(--panel-2);border-color:var(--line)">${iconFor(b.kind)} <b>${esc(b.kind)}</b>
       <span class="muted">${b.by ? 'designed by ' + esc(b.by) : ''}</span><div>${esc(b.description)}</div>
