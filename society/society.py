@@ -17,6 +17,9 @@ def default_agents() -> list[Agent]:
               Traits(0.5, 0.6, 0.7, 0.2, 0.5), ["negotiation", "accounting"]),
         Agent("Eli", "Skeptic", "Question plans, find flaws, and protect the group from bad decisions.",
               Traits(0.7, 0.7, 0.3, 0.2, 0.7), ["critical thinking", "history"]),
+        Agent("Fenn", "Mediator", "Resolve conflicts, find common ground, and steer the group toward long-term wellbeing.",
+              Traits(0.85, 0.7, 0.5, 0.9, 0.2), ["diplomacy", "ethics", "synthesis"],
+              model="claude-opus-5-5"),
     ]
 
 

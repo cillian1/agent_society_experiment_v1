@@ -6,7 +6,7 @@ from society.society import default_agents, load_agents
 
 p = argparse.ArgumentParser(description="Run a small society of communicating agents.")
 p.add_argument("--rounds", type=int, default=3)
-p.add_argument("--agents", help="JSON file defining agents (default: built-in 5)")
+p.add_argument("--agents", help="JSON file defining agents (default: built-in 6)")
 p.add_argument("--model", help="Claude model id (default: claude-haiku-5-5)")
 p.add_argument("--mock", action="store_true", help="use offline mock LLM")
 p.add_argument("--seed", type=int)

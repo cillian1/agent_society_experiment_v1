@@ -26,6 +26,7 @@ class Agent:
     traits: Traits
     skills: list[str] = field(default_factory=list)
     resources: int = 10
+    model: str | None = None  # per-agent Claude model override (None = society default)
     memory: list[str] = field(default_factory=list)  # messages heard so far
 
     def system_prompt(self, others: list[str]) -> str:
@@ -42,7 +43,9 @@ class Agent:
 
     def act(self, llm, others: list[str], max_memory: int = 12) -> dict:
         recent = "\n".join(self.memory[-max_memory:]) or "(nothing yet - you have just arrived)"
-        raw = llm.complete(self.system_prompt(others), f"Recent conversation:\n{recent}\n\nYour turn.")
+        raw = llm.complete(
+            self.system_prompt(others), f"Recent conversation:\n{recent}\n\nYour turn.", model=self.model
+        )
         return self._parse(raw, others)
 
     @staticmethod

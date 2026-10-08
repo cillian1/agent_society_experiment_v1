@@ -11,9 +11,9 @@ class ClaudeLLM:
         self.model = model
         self.max_tokens = max_tokens
 
-    def complete(self, system: str, prompt: str) -> str:
+    def complete(self, system: str, prompt: str, model: str | None = None) -> str:
         resp = self.client.messages.create(
-            model=self.model,
+            model=model or self.model,
             max_tokens=self.max_tokens,
             system=system,
             messages=[{"role": "user", "content": prompt}],
@@ -27,7 +27,7 @@ class MockLLM:
     def __init__(self, seed: int = 0):
         self.rng = random.Random(seed)
 
-    def complete(self, system: str, prompt: str) -> str:
+    def complete(self, system: str, prompt: str, model: str | None = None) -> str:
         line = self.rng.choice(
             ["Let's pool our resources.", "I disagree with that plan.",
              "What does everyone think we should build first?",
