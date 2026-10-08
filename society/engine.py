@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import actions, gm, mind
-from .config import (EFFECTS, HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
+from .config import (HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
                      DEFAULT_MAX_AGENTS, EAT_RELIEF, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
                      MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS)
 from .models import Abilities, Agent, Traits
@@ -121,8 +121,9 @@ class Society:
             for i, a in enumerate(alive):                # time spent together brings people closer
                 for b in alive[i + 1:]:
                     if a.dist(b) <= 2 and not a.is_baby(self.tick) and not b.is_baby(self.tick):
-                        self.bond(a, b, BOND["together"])
-                        self.bond(b, a, BOND["together"])
+                        warm = 2 if self.world.function_near(a.x, a.y, "fire", 3) else 1   # around a fire
+                        self.bond(a, b, BOND["together"] * warm)
+                        self.bond(b, a, BOND["together"] * warm)
             for a in list(self.agents.values()):
                 if a.pregnancy and self.tick >= a.pregnancy["due"]:
                     self._give_birth(a, self.tick)
@@ -250,7 +251,8 @@ class Society:
         if a.hunger >= 100:
             a.health -= BABY_STARVE_DAMAGE if baby else STARVE_DAMAGE
         elif a.hunger < 60:
-            a.health = min(100.0, a.health + 1 + self.tech("health"))
+            rest = HOME_HEAL if self.world.function_near(a.x, a.y, "home", 1) else 0
+            a.health = min(100.0, a.health + 1 + self.tech("health") + rest)
         if a.health <= 0:
             self.die(a, tick, "neglect - nobody fed them" if baby else "starvation")
             return False

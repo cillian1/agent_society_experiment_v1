@@ -60,6 +60,21 @@ MAX_STEPS = 3                         # tiles per move
 BUILD_COST = 1                        # wood/stone per structure
 CRAFT_COST = 1                        # wood/stone per object
 MAX_ITEMS = 8
+FUNCTIONS = {                         # what a building does, recognised from words in its name
+    "storage": (("storehouse", "storage", "granary", "barn", "pantry", "silo", "warehouse", "cellar"),
+                "store/take shared food, seeds, wood and stone"),
+    "home": (("house", "hut", "home", "shelter", "cabin", "lodge", "tent", "dwelling"),
+             "spending the day next to it heals you (rest)"),
+    "fire": (("fire", "hearth", "oven", "kitchen", "campfire", "bonfire"),
+             "meals eaten nearby fill you up more, and people near it grow closer"),
+    "well": (("well", "irrigation", "fountain", "canal", "reservoir"),
+             "crops within 3 tiles grow as if beside water"),
+    "workshop": (("workshop", "forge", "smithy", "workbench", "craft"),
+                 "crafting within 2 tiles costs no materials"),
+}
+SAME_KIND_RADIUS = 6                  # no second building with the same function this close
+HOME_HEAL = 2
+FIRE_MEAL_BONUS = 15
 FISH_COOLDOWN = 3
 TOOLS = {                             # object-name keywords -> what they're good for
     "wood": ("axe", "hatchet", "saw"),

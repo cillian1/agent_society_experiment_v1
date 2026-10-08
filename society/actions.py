@@ -2,7 +2,7 @@
 string that the agent sees next turn. Register new actions with @action("name") - and describe them in mind.py."""
 import re
 
-from .config import (BOND, FRIEND_BOND, BUILD_COST, CARE_RELIEF, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN,
+from .config import (FIRE_MEAL_BONUS, BOND, FRIEND_BOND, BUILD_COST, CARE_RELIEF, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN,
                      GROW_NEEDED, HEARING_RADIUS, LOVE_BOND, MAX_ITEMS)
 from .mind import DIRS
 
@@ -144,8 +144,61 @@ def eat(sim, a, act, tick):
     if a.food <= 0:
         return "no food to eat"
     a.food -= 1
-    a.hunger = max(0.0, a.hunger - EAT_RELIEF)
-    return "ate food"
+    fire = sim.world.function_near(a.x, a.y, "fire", 2)
+    a.hunger = max(0.0, a.hunger - EAT_RELIEF - (FIRE_MEAL_BONUS if fire else 0))
+    return "ate a warm cooked meal by the fire" if fire else "ate food"
+
+
+GOODS = ("food", "seeds", "wood", "stone")
+
+
+def _amount(act, have: int) -> int:
+    try:
+        n = int(act.get("amount") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return max(1, min(have, n or have))
+
+
+@action("store")
+def store(sim, a, act, tick):
+    """Put supplies into a storehouse next to you, for everyone."""
+    hit = sim.world.function_near(a.x, a.y, "storage", 1)
+    if not hit:
+        return "no storehouse next to you (build one, or go to one)"
+    what = (act.get("title") or act.get("what") or "food").lower().strip()
+    what = next((g for g in GOODS if g in what), "food")
+    if getattr(a, what) <= 0:
+        return f"you have no {what} to store"
+    n = _amount(act, getattr(a, what))
+    setattr(a, what, getattr(a, what) - n)
+    stock = hit[1]["stock"]
+    stock[what] += n
+    a.remember(tick, f"I stored {n} {what} in the {hit[1]['kind']} for everyone.")
+    sim.event(tick, a, f"stored {n} {what} in the {hit[1]['kind']} (it now holds {stock['food']} food)", "gift")
+    for o in sim.agents.values():
+        if o is not a and a.dist(o) <= 6:
+            sim.bond(o, a, 2)
+    return f"stored {n} {what} in the {hit[1]['kind']}; it now holds " + ", ".join(f"{v} {k}" for k, v in stock.items())
+
+
+@action("take")
+def take(sim, a, act, tick):
+    """Take supplies from a storehouse next to you."""
+    hit = sim.world.function_near(a.x, a.y, "storage", 1)
+    if not hit:
+        return "no storehouse next to you"
+    stock = hit[1]["stock"]
+    what = (act.get("title") or act.get("what") or "food").lower().strip()
+    what = next((g for g in GOODS if g in what), "food")
+    if stock[what] <= 0:
+        return f"the {hit[1]['kind']} has no {what} left"
+    n = _amount(act, min(stock[what], 3))
+    stock[what] -= n
+    setattr(a, what, getattr(a, what) + n)
+    a.remember(tick, f"I took {n} {what} from the {hit[1]['kind']}.")
+    sim.event(tick, a, f"took {n} {what} from the {hit[1]['kind']}", "food")
+    return f"took {n} {what} from the {hit[1]['kind']} ({stock[what]} {what} left there)"
 
 
 @action("say")
@@ -277,7 +330,7 @@ def craft(sim, a, act, tick):
     title = act["title"][:30]
     if not title:
         return "name the object you want to craft (title)"
-    cost = 0 if sim.tech("building") >= 1 else CRAFT_COST
+    cost = 0 if sim.tech("building") >= 1 or sim.world.function_near(a.x, a.y, "workshop", 2) else CRAFT_COST
     if a.materials() < cost:
         return f"need {cost} wood/stone to craft (you have {a.wood} wood, {a.stone} stone)"
     if len(a.items) >= MAX_ITEMS:

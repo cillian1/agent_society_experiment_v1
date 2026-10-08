@@ -236,7 +236,7 @@ cv.addEventListener('mousemove', e => {
   const a = agentAt(fx, fy, .8);
   if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${SEX[a.sex]} ${a.stage} ${extras(a)} · ${a.age} days old · hunger ${a.hunger} · ${a.food} food${a.pregnant ? ` · due day ${a.due}` : ''}</div><div class="muted">${esc(a.doing)}</div>` + html;
   const s = st.structures.find(q => q.x === x && q.y === y);
-  if (s) html += `<div>${iconFor(s.kind)} <b>${esc(s.kind)}</b> by ${esc(s.by)}${s.text ? `<div class="muted">“${esc(s.text)}”</div>` : ''}</div>`;
+  if (s) html += `<div>${iconFor(s.kind)} <b>${esc(s.kind)}</b> by ${esc(s.by)}${s.function ? `<div style="color:var(--gold)">⚙️ ${esc(s.function)}</div>` : '<div class="muted">decorative</div>'}${s.stock ? `<div>📦 ${Object.entries(s.stock).map(([k, v]) => `${v} ${k}`).join(' · ')}</div>` : ''}${s.text ? `<div class="muted">“${esc(s.text)}”</div>` : ''}</div>`;
   const g = st.dead.find(q => q.x === x && q.y === y);
   if (g) html += `<div>🪦 ${esc(g.name)} — died of ${esc(g.cause)} at ${g.age} (day ${g.died})</div>`;
   tip.innerHTML = html; tip.hidden = false;

@@ -56,6 +56,10 @@ Keyboard: `Space` pause · `N` next day · `+`/`−` zoom · `0` fit · `F` foll
 - **Survival:** hunger rises every day; at 100 an agent loses health and can starve. Elders (500+ days) may die of old age.
 - **Farming:** plants grow by themselves (about 20 days, faster near water). Tending speeds them up once every few days,
   and a second farmer doubles it. Ripe crops give 3 food and replant.
+- **Buildings do things:** storehouse/granary (`store` and `take` shared food, seeds, wood, stone), house/hut/shelter
+  (rest next to it to heal), fire/hearth (cooked meals fill more, people near it bond faster), well (crops within 3
+  tiles grow as if by water), workshop/forge (free crafting nearby). Nobody can build a second one of the same kind
+  close to an existing one; anything else is decorative. Hover a building on the map to see what it does.
 - **Making things:** `build` anything (houses, signs, bridges — bridges can cross water) and `craft` objects. Tools work:
   axe = more wood, pickaxe = more stone, hoe = faster crops, fishing rod/net = fish from water.
 - **Abilities (1-10):** strength (extra wood & stone), speed (tiles per move), endurance (hunger rises slower),

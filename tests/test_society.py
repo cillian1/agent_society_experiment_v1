@@ -217,6 +217,26 @@ class TalkTests(unittest.TestCase):
         self.assertTrue(any("starting tomorrow" in c for c in sim.chat[-1]["changes"]))
 
 
+class BuildingTests(unittest.TestCase):
+    def test_buildings_have_functions_and_no_duplicates(self):
+        from society.actions import apply
+        sim = make()
+        a, w = sim.agents["Ada"], sim.world
+        x, y = next((x, y) for y in range(2, w.height - 2) for x in range(2, w.width - 2)
+                    if all(w.tiles[y + dy][x + dx] == "grass" for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+                    and not any(max(abs(o.x - x), abs(o.y - y)) <= 2 for o in sim.agents.values()))
+        a.x, a.y, a.wood, a.food, a.hunger = x, y, 4, 6, 10
+        do = lambda j: apply(sim, a, parse_action(j, []), 1)
+        self.assertIn("built", do('{"action": "build", "direction": "east", "title": "Granary"}'))
+        self.assertIn("already", do('{"action": "build", "direction": "west", "title": "storehouse"}'))
+        self.assertIn("stored 3 food", do('{"action": "store", "title": "food", "amount": 3}'))
+        self.assertIn("took 2 food", do('{"action": "take", "title": "food", "amount": 2}'))
+        do('{"action": "build", "direction": "north", "title": "hearth"}')
+        a.hunger = 60
+        self.assertIn("cooked", do('{"action": "eat"}'))
+        self.assertLessEqual(a.hunger, 5)
+
+
 class SaveTests(unittest.TestCase):
     def test_round_trip_and_continue(self):
         sim = make(60)

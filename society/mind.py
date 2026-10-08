@@ -3,13 +3,13 @@ import json
 import random
 import re
 
-from .config import (ADULT_AGE, BABY_DAYS, BUILD_COST, CHILD_FOOD_COST, CRAFT_COST, FRIEND_BOND, HUNGER_WARNING,
+from .config import (FUNCTIONS, ADULT_AGE, BABY_DAYS, BUILD_COST, CHILD_FOOD_COST, CRAFT_COST, FRIEND_BOND, HUNGER_WARNING,
                      KEEP_RECENT, LOVE_BOND, MAX_ITEMS, MAX_QUEUE, ORDER_MEMORY_DAYS, PREGNANCY_DAYS)
 from .models import Agent
 
 DIRS = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
 ACTIONS = ("go", "move", "gather", "eat", "say", "give", "plant", "tend", "build", "craft", "court", "procreate",
-           "care", "invent", "attempt", "wait")
+           "care", "store", "take", "invent", "attempt", "wait")
 
 INSPIRATION = [   # one is offered each day to spark creativity
     "Could you name a place - a lake, a hill, your camp - and put up a sign?",
@@ -74,7 +74,7 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         "Most of the world is unexplored: you only see a small area around you, and exploring finds new food, water, "
         "forests and rocks that your whole community can use. Be curious. Building and crafting make life better. "
         "Hunger rises every day; at 100 you take damage and can starve. Eating food lowers hunger. "
-        "Life lasts roughly 500-700 days; one turn is one day.\n"
+        f"You can expect to live about {a.abilities.lifespan()} days; one turn is one day.\n"
         "Each turn pick ONE action:\n"
         f'  go      - {{"target": "food|explore|wood|stone|water|<name>|x,y"}} walk up to {a.abilities.steps()} tiles toward it, '
         "finding the way around water and obstacles (the easiest way to travel)\n"
@@ -89,7 +89,11 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         '  plant   - {"direction": "..."} put a carried seed into an adjacent grass tile\n'
         "  tend    - speed up a young plant within reach (helps once every few days; plants also grow on their own)\n"
         f'  build   - {{"direction": "...", "title": "<house, wall, bridge, sign, anything>", "message": "<description or sign text>"}} '
-        f"costs {BUILD_COST} wood/stone; you can walk into or over what you build, except walls and fences. Water only takes bridges/docks.\n"
+        f"costs {BUILD_COST} wood/stone; you can walk into or over what you build, except walls and fences. Water only takes bridges/docks. "
+        "Buildings DO things: " + "; ".join(f"{words[0]}: {what}" for words, what in FUNCTIONS.values())
+        + ". Don't build what already exists nearby - use it, or build something new.\n"
+        '  store   - {"title": "food|seeds|wood|stone", "amount": N} put supplies into a storehouse next to you, for everyone\n'
+        '  take    - {"title": "food|seeds|wood|stone", "amount": N} take supplies from a storehouse next to you\n'
         f'  craft   - {{"title": "<axe, pickaxe, hoe, fishing rod, basket, anything>", "message": "what it is for"}} costs '
         f"{CRAFT_COST} wood/stone; you carry it (max {MAX_ITEMS}). Objects matter: an axe/hatchet gets extra wood, a "
         "pickaxe/hammer extra stone, a hoe/shovel/rake speeds up plants, a fishing rod/net/spear catches fish from water.\n"
@@ -156,10 +160,20 @@ def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[s
         add("you have seeds - start a farm", action="plant", direction="north")
     if a.materials() >= 1 and not a.items:
         tool = "fishing rod" if world.water_near(a.x, a.y) else "axe"
-        add(f"a {tool} would really help you", action="craft", title=tool, message=f"my first {tool}")
-    elif a.materials() >= 2:
-        add("you have materials to build something useful", action="build", direction="east",
-            title="storehouse", message="a place to share food")
+        add(f"{'an' if tool[0] in 'aeiou' else 'a'} {tool} would really help you", action="craft", title=tool, message=f"my first {tool}")
+    elif a.materials() >= 1:                  # build what's actually missing around here
+        for func, title, why in (("home", "house", "there is no shelter nearby - a house lets you rest and heal"),
+                                 ("storage", "storehouse", "there is no storehouse nearby to keep shared supplies"),
+                                 ("fire", "hearth", "a fire would give warm meals and bring people together"),
+                                 ("workshop", "workshop", "a workshop makes crafting free for everyone nearby")):
+            if not world.function_near(a.x, a.y, func, 8):
+                add(why, action="build", direction="east", title=title, message=f"{a.name}'s {title}")
+                break
+    store = world.function_near(a.x, a.y, "storage", 1)
+    if store and a.food >= 4 and a.hunger < 40:
+        add(f"you have spare food and the {store[1]['kind']} is next to you", action="store", title="food", amount=a.food - 2)
+    if store and a.hunger >= HUNGER_WARNING and not a.food and store[1]["stock"]["food"]:
+        add(f"you are hungry and the {store[1]['kind']} has food", action="take", title="food", amount=2)
     mats = [p for p in world.gather_options(a.x, a.y) if world.tile(*p) in ("tree", "rock")]
     if mats and a.materials() < 3:
         add("trees/rocks are within reach - gather materials", action="gather")
@@ -230,10 +244,16 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
             urgent = " - HUNGRY, feed them now!" if b.hunger >= 50 else ""
             lines.append(f"{'Your' if mine else 'A'} baby {b.name} is at dx={b.x - a.x} dy={b.y - a.y}: hunger "
                          f"{int(b.hunger)}/100, health {int(b.health)}/100{urgent} (stand next to them and use care)")
-    built = [f"{s['kind']} at dx={dx} dy={dy}" + (f' ("{s["text"]}")' if s["text"] else "") + f" built by {s['by']}"
-             for dx, dy, s in world.structures_near(a.x, a.y, view)][:6]
+    def describe(dx, dy, s):
+        out = f"{s['kind']} at dx={dx} dy={dy} (by {s['by']})"
+        if s.get("function"):
+            out += f" - {FUNCTIONS[s['function']][1]}"
+        if s.get("stock"):
+            out += " - holds " + ", ".join(f"{v} {k}" for k, v in s["stock"].items())
+        return out
+    built = sorted(world.structures_near(a.x, a.y, view + 4), key=lambda t: (not t[2].get("function"), max(abs(t[0]), abs(t[1]))))
     if built:
-        lines.append("Structures in view: " + "; ".join(built))
+        lines.append("Buildings around you: " + "; ".join(describe(*b) for b in built[:6]))
     food = world.food_near(a.x, a.y, smell)
     if food:
         dx, dy = food[0][0] - a.x, food[0][1] - a.y
@@ -338,7 +358,7 @@ def parse_action(raw: str, others: list[str], depth: int = 0) -> dict:
     return {"thought": s("thought") or raw[:200].strip(),
             "action": data.get("action") if data.get("action") in ACTIONS else "wait",
             "direction": data.get("direction"), "to": to, "target": s("target") or s("to"), "message": s("message"), "title": s("title"),
-            "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"), "plan": s("plan"), "what": s("what"),
+            "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"), "plan": s("plan"), "what": s("what"), "amount": data.get("amount"),
             "steps": data.get("steps") if isinstance(data.get("steps"), int) else 1,
             "next": [] if depth else [
                 parse_action(json.dumps(n), others, 1) for n in (data.get("next") or [])[:MAX_QUEUE]

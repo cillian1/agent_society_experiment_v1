@@ -4,12 +4,17 @@ import random
 GRASS, WATER, SAND, ROCK, FOOD, SPROUT, CROP = "grass", "water", "sand", "rock", "food", "sprout", "crop"
 TREE, STRUCTURE = "tree", "structure"
 GLYPH = {GRASS: "g", WATER: "~", SAND: ".", ROCK: "#", FOOD: "f", SPROUT: ",", CROP: "*", TREE: "^", STRUCTURE: "&"}
-from .config import (FOOD_REGROW_DAYS, GROW_NEEDED, IRRIGATED_GROWTH_PER_DAY, PLANT_GROWTH_PER_DAY, TEAMWORK_WINDOW,
+from .config import (FUNCTIONS, SAME_KIND_RADIUS, FOOD_REGROW_DAYS, GROW_NEEDED, IRRIGATED_GROWTH_PER_DAY, PLANT_GROWTH_PER_DAY, TEAMWORK_WINDOW,
                      TEND_COOLDOWN, TREE_REGROW_DAYS, WORLD_H, WORLD_W)
 
 WALKABLE = (GRASS, SAND, FOOD, SPROUT, CROP)
 BLOCK_WORDS = ("wall", "fence", "barrier", "palisade", "barricade")   # everything else can be walked into/over
 WATER_OK_WORDS = ("bridge", "dock", "pier", "raft", "path")
+
+
+def function_of(kind: str):
+    k = kind.lower()
+    return next((f for f, (words, _) in FUNCTIONS.items() if any(w in k for w in words)), None)
 
 
 class World:
@@ -24,9 +29,11 @@ class World:
         self._find_irrigated()
 
     def _find_irrigated(self):
+        wells = [p for p, s in getattr(self, "structures", {}).items() if s.get("function") == "well"]
         self.irrigated = {(x, y) for y in range(self.height) for x in range(self.width)
                           if any(self.in_bounds(x + dx, y + dy) and self.tiles[y + dy][x + dx] == WATER
                                  for dx in (-2, -1, 0, 1, 2) for dy in (-2, -1, 0, 1, 2))}
+        self.irrigated |= {(x + dx, y + dy) for x, y in wells for dx in range(-3, 4) for dy in range(-3, 4)}
 
     def _noise(self, cells=(12, 4), weights=(0.75, 0.25)) -> list[list[float]]:
         """Smooth value noise: bilinear-interpolated coarse grids at two scales."""
@@ -175,10 +182,25 @@ class World:
             return False, "water: only a bridge/dock/path-like structure can go there"
         if t not in (GRASS, SAND, WATER):
             return False, f"can't build on {t}"
+        func = function_of(kind)
+        for dx, dy, s in self.structures_near(x, y, SAME_KIND_RADIUS if func else 3):
+            if (func and s.get("function") == func) or s["kind"].lower() == k:
+                return False, (f"there is already a {s['kind']} close by (dx={dx} dy={dy} from the spot) - use it, "
+                               "or build something different")
         self.structures[(x, y)] = {"kind": kind, "text": text, "by": who, "tick": tick, "under": t,
-                                   "walkable": not any(w in k for w in BLOCK_WORDS)}
+                                   "walkable": not any(w in k for w in BLOCK_WORDS), "function": func}
+        if func == "storage":
+            self.structures[(x, y)]["stock"] = {"food": 0, "seeds": 0, "wood": 0, "stone": 0}
+        if func == "well":                       # waters the fields around it
+            self.irrigated |= {(x + dx, y + dy) for dx in range(-3, 4) for dy in range(-3, 4)}
         self.tiles[y][x] = STRUCTURE
         return True, ""
+
+    def function_near(self, x: int, y: int, func: str, radius: int):
+        """Nearest building with this function within radius -> ((sx, sy), structure) or None."""
+        found = [(max(abs(sx - x), abs(sy - y)), (sx, sy), s) for (sx, sy), s in self.structures.items()
+                 if s.get("function") == func and max(abs(sx - x), abs(sy - y)) <= radius]
+        return min(found, key=lambda f: f[0])[1:] if found else None
 
     def structures_near(self, x: int, y: int, radius: int):
         return [(sx - x, sy - y, s) for (sx, sy), s in self.structures.items()
@@ -315,6 +337,10 @@ class World:
         w.regrow = {pos(k): tuple(v) for k, v in d["regrow"].items()}
         w.plants = {pos(k): v for k, v in d["plants"].items()}
         w.structures = {pos(k): v for k, v in d["structures"].items()}
+        for s in w.structures.values():                     # saves from before buildings had functions
+            s.setdefault("function", function_of(s["kind"]))
+            if s["function"] == "storage":
+                s.setdefault("stock", {"food": 0, "seeds": 0, "wood": 0, "stone": 0})
         w.explored = {pos(k) for k in d["explored"]}
         w._find_irrigated()
         return w
