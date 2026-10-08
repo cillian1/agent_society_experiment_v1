@@ -996,7 +996,6 @@ function brain(a, B) {
   return `<p>Thinks with <b>${TIER[a.tier]} ${esc(a.model === 'local' ? 'local model (' + (B.local_model || '?') + ')' : a.model || 'default')}</b></p>
     <div class="tiers" id="tiers">
       ${opt('local', 'Local', `free · ${esc(B.local_model || '')}`, canL, 'No local model server found')}
-      ${opt('smart', 'Smart local', B.smart_local ? `free · ${esc(B.smart_local)}` : 'start the hub with --smart-local-model', !!B.smart_local || B.mock, 'Start the hub with --smart-local-model qwen2.5:14b-instruct')}
       ${opt('haiku', 'Haiku', 'cheap & quick', canC, 'Set ANTHROPIC_API_KEY to use Claude')}
       ${opt('sonnet', 'Sonnet', 'smarter', canC, 'Set ANTHROPIC_API_KEY to use Claude')}
       ${opt('opus', 'Enlighten', 'Opus — only one agent', canC, 'Set ANTHROPIC_API_KEY to use Claude')}
@@ -1139,7 +1138,7 @@ $('new').onclick = async () => {
 function renderUsage() {
   const u = S.st?.usage; if (!u) return;
   const rows = Object.entries(u.models), B = S.st.backends || {};
-  const brains = B.mock ? '🎭 Mock (scripted, not real thinking)' : [B.local ? '🖥️ Local: ' + esc(B.local_model) : '', B.smart_local ? '🧠 Smart local: ' + esc(B.smart_local) : '', B.claude ? '🌱 Claude (Haiku / Sonnet / Opus)' : ''].filter(Boolean).join(' · ');
+  const brains = B.mock ? '🎭 Mock (scripted, not real thinking)' : [B.local ? '🖥️ Local: ' + esc(B.local_model) : '', B.claude ? '🌱 Claude (Haiku / Sonnet / Opus)' : ''].filter(Boolean).join(' · ');
   $('usage').innerHTML = `<div class="card small">Available brains: ${brains || 'none'}</div>` + (rows.length
     ? `<table><tr><th>Model</th><th>Calls</th><th title="Average tokens sent + received per call">Per call</th><th>Input</th><th title="Input read from Claude's prompt cache at a tenth of the price">Cached</th><th>Output</th><th>Cost</th></tr>` +
       rows.map(([m, x]) => { const all = x.input + (x.cached || 0) + (x.written || 0);

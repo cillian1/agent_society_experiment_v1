@@ -20,23 +20,21 @@ The hub auto-detects what is available and shows it in the top bar:
 - **Claude** (Haiku / Sonnet / Opus) when the `ANTHROPIC_API_KEY` environment variable is set.
 - Neither? It falls back to a **scripted mock** (red banner): those agents can't really think or reply.
 
-By default **Ada and Fenn use Haiku, everyone else and every baby uses the local model.** Without an API key everyone
+By default **everyone uses the local model.** Without an API key everyone
 uses the local model; without a local server everyone uses Haiku. Change any agent's brain in their profile → *Brain*
-(Local / Haiku / Sonnet / **Enlighten** = Opus, one agent at a time, or any model id; `local:<name>` for another local model).
+(Local / Haiku / Sonnet / **Enlighten** = Opus, one agent at a time).
 
-### Local models (RTX 5070 Ti, 16 GB)
-Smarter agents = a bigger model. Easiest: keep the fast 7B for everyone and add a bigger one as **Smart local**:
-`ollama pull qwen2.5:14b-instruct`, then `py serve.py --local-concurrency 20 --smart-local-model qwen2.5:14b-instruct`
-and pick 🧠 Smart local in the Brain tab of the agents you care about (both models must fit in VRAM together).
-Or switch everyone: `qwen2.5:7b-instruct` is the fast default; `ollama pull qwen2.5:14b-instruct` and start with
-`--local-model qwen2.5:14b-instruct --local-concurrency 8` (and `OLLAMA_NUM_PARALLEL=8`) for noticeably better decisions at
-roughly half the speed. Or give your favourite agents Haiku/Sonnet in their profile → Brain.
-
-1. Install Ollama, then `ollama pull qwen2.5:7b-instruct`.
-2. For many agents at once: `setx OLLAMA_NUM_PARALLEL 20`, `setx OLLAMA_FLASH_ATTENTION 1`, `setx OLLAMA_KV_CACHE_TYPE q8_0`,
-   then quit and restart Ollama.
-3. `py serve.py --local-concurrency 20`. Check `ollama ps` shows `100% GPU`; if not, lower `OLLAMA_NUM_PARALLEL`
-   or use `qwen2.5:3b-instruct`. LM Studio / llama.cpp / vLLM work too (`--local-api openai --local-url ...`).
+### Local model (RTX 5070 Ti, 16 GB)
+Everyone uses one local model: **qwen2.5:14b-instruct** (smart, and it fits on a 16 GB card with room to spare).
+1. Install Ollama, then `ollama pull qwen2.5:14b-instruct`.
+2. Once: `setx OLLAMA_NUM_PARALLEL 4`, `setx OLLAMA_FLASH_ATTENTION 1`, `setx OLLAMA_KV_CACHE_TYPE q8_0`, then quit
+   Ollama (tray icon → Quit) and start it again.
+3. `py serve.py` (it uses 4 requests at once by default, matching `OLLAMA_NUM_PARALLEL`). `ollama ps` should show the
+   model at `100% GPU`. If the local model gets overloaded the hub sends it fewer requests at once by itself, skips
+   dreams until it has caught up, and tells you in the banner.
+Another model: `--local-model NAME` (for example `qwen2.5:7b-instruct` for more speed on a smaller card).
+LM Studio / llama.cpp / vLLM work too (`--local-api openai --local-url ...`). Claude models can still be chosen per
+agent in their profile → Brain.
 
 ## Using the hub
 | Where | What you can do |

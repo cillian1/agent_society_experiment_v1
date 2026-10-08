@@ -11,13 +11,12 @@ def add_llm_args(p):
     p.add_argument("--no-local", action="store_true", help="don't use a local model server")
     p.add_argument("--local-url", default=os.environ.get("LOCAL_LLM_URL", "http://127.0.0.1:11434"),
                    help="local model server (default: Ollama on 127.0.0.1:11434)")
-    p.add_argument("--local-model", default=os.environ.get("LOCAL_LLM_MODEL", "qwen2.5:7b-instruct"),
-                   help="local model name (e.g. one you pulled with `ollama pull`)")
-    p.add_argument("--smart-local-model", default=os.environ.get("SMART_LOCAL_MODEL"),
-                   help="a bigger local model offered as 'Smart local' in each agent's Brain tab (e.g. qwen2.5:14b-instruct)")
+    p.add_argument("--local-model", default=os.environ.get("LOCAL_LLM_MODEL", "qwen2.5:14b-instruct"),
+                   help="the local model everyone uses (one you pulled with `ollama pull`)")
     p.add_argument("--local-api", choices=["ollama", "openai"], default="ollama",
                    help="'openai' for LM Studio / llama.cpp / vLLM style servers (use --local-url .../ without /v1)")
-    p.add_argument("--local-concurrency", type=int, default=8, help="max simultaneous requests sent to the local server")
+    p.add_argument("--local-concurrency", type=int, default=4,
+                   help="max simultaneous requests sent to the local server (match OLLAMA_NUM_PARALLEL)")
     p.add_argument("--local-ctx", type=int, default=4096, help="context window for local requests (Ollama num_ctx)")
     p.add_argument("--price", action="append", default=[], metavar="MODEL=IN,OUT",
                    help="USD per million tokens, to show a $ estimate (repeatable), e.g. claude-haiku-5-5=1,5")
@@ -38,12 +37,6 @@ def build_llm(args) -> RouterLLM:
         ok, msg = cand.probe()
         notes.append(msg)
         local = cand if ok else None
-        if local and args.smart_local_model:
-            smart = LocalLLM(args.local_url, args.smart_local_model, args.local_api)
-            ok2, msg2 = smart.probe()
-            notes.append(msg2.replace("local model", "smart local model"))
-            if ok2:
-                local.smart_model = args.smart_local_model
     if not claude and not local:
         notes.append("NO BRAINS AVAILABLE: falling back to scripted mock agents")
         return RouterLLM(mock=MockLLM(), notes=notes)
@@ -63,4 +56,6 @@ def resolve_model(model, llm: RouterLLM):
 
 def apply_backends(agents, llm: RouterLLM):
     for a in agents:
+        if llm.local and a.model and a.model.startswith("local:"):
+            a.model = LOCAL                      # one local model for everyone (older saves named a second one)
         a.model = resolve_model(a.model, llm)

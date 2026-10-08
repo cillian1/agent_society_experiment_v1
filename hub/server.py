@@ -29,6 +29,7 @@ class Hub:
                  autosave: bool = True):
         self.society, self.new_world, self.load_world = society, new_world, load_world
         self.paused, self.interval, self.max_wait, self.autosave = False, interval, max_wait, autosave
+        self.dream_slots = threading.Semaphore(2)
         self.step_once = False
         self.last_autosave = society.tick
         self.pool = ThreadPoolExecutor(max_workers=64)
@@ -68,7 +69,7 @@ class Hub:
                     sim.sol_due = False
                     sol.review_async(sim)
                 for a in sim.dreamers():               # one dream per sleeper on some nights, in the background
-                    self.pool.submit(sim.dream, a)
+                    self._dream(sim, a)
                 for a in list(sim.agents.values()):
                     key = (id(sim), a.name)
                     with self.busy_lock:
@@ -98,6 +99,21 @@ class Hub:
                     persistence.save(sim, "autosave")
                 except OSError as e:
                     print("autosave failed:", e)
+
+    def _dream(self, sim, a):
+        """Dreams are optional: at most two at a time, and none while the local model is busy - a skipped dream
+        simply happens on another night (the agent is still due one)."""
+        local = getattr(sim.llm, "local", None)
+        if (local and a.model and a.model.startswith("local") and local.slots.busy()) or not self.dream_slots.acquire(blocking=False):
+            a.dream_at = -1
+            return
+
+        def go():
+            try:
+                sim.dream(a)
+            finally:
+                self.dream_slots.release()
+        self.pool.submit(go)
 
     def swap(self, sim):
         self.society, self.last_autosave = sim, sim.tick
@@ -137,8 +153,7 @@ class Hub:
                 self.max_wait = max(0.5, float(d["max_wait"]))
             if d.get("step"):
                 self.step_once = True
-            smart = (sim.llm.info() if hasattr(sim.llm, "info") else {}).get("smart_local")
-            names = {"local": "local", "smart": f"local:{smart}" if smart else "local", "haiku": "claude-haiku-5-5",
+            names = {"local": "local", "smart": "local", "haiku": "claude-haiku-5-5",
                      "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
             if d.get("sol_model"):
                 sim.sol_model = names.get(d["sol_model"], d["sol_model"])

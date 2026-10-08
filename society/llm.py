@@ -87,6 +87,27 @@ class Slots:
 
     def __init__(self, n: int, extra: int = 2):
         self.free, self.extra, self.urgent, self.cv = n, extra, 0, threading.Condition()
+        self.size = self.max = n                     # shrinks while the server is overloaded, grows back after
+
+    def shrink(self) -> bool:
+        with self.cv:
+            if self.size <= 2:
+                return False
+            self.size -= 1
+            self.free -= 1
+            return True
+
+    def grow(self):
+        with self.cv:
+            if self.size < self.max:
+                self.size += 1
+                self.free += 1
+                self.cv.notify_all()
+
+    def busy(self) -> bool:
+        """Is everything taken (so an optional request, like a dream, should wait for another night)?"""
+        with self.cv:
+            return self.free <= 0 or self.urgent > 0
 
     @contextmanager
     def take(self, urgent: bool = False):
@@ -109,12 +130,12 @@ class LocalLLM(UsageMixin):
 
     def __init__(self, base_url: str = "http://127.0.0.1:11434", model: str = "qwen2.5:7b-instruct",
                  api: str = "ollama", concurrency: int = 8, ctx: int = 4096, max_tokens: int = 400,
-                 timeout: float = 300):
+                 timeout: float = 180):
         self._init_usage()
         self.base, self.model, self.api = base_url.rstrip("/"), model, api
         self.ctx, self.max_tokens, self.timeout = ctx, max_tokens, timeout
         self.slots = Slots(concurrency)                # how many requests we send to the server at once
-        self.smart_model = None                       # optional bigger model ("Smart local")
+        self.ok_streak = 0
 
     def usage(self) -> dict:
         u = super().usage()
@@ -130,8 +151,14 @@ class LocalLLM(UsageMixin):
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             raise RuntimeError(f"local model server said {e.code}: {e.read()[:300].decode(errors='replace')}") from e
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-            raise RuntimeError(f"can't reach the local model server at {self.base} ({e})") from e
+        except (TimeoutError, OSError) as e:
+            if isinstance(e, TimeoutError) or "timed out" in str(e):
+                self.ok_streak = 0
+                fewer = self.slots.shrink()              # it's overloaded: ask it for less at once
+                raise RuntimeError(f"the local model didn't answer within {int(self.timeout)} s - it's overloaded"
+                                   + (f" (now sending at most {self.slots.size} requests at once)" if fewer else "")
+                                   + ". Check `ollama ps`: it should say 100% GPU") from e
+            raise RuntimeError(f"can't reach the local model server at {self.base} ({e}) - is Ollama running?") from e
 
     def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True,
                  urgent: bool = False, max_tokens: int | None = None) -> str:
@@ -158,6 +185,9 @@ class LocalLLM(UsageMixin):
                 text = r["choices"][0]["message"]["content"]
                 inp, out = r.get("usage", {}).get("prompt_tokens", 0), r.get("usage", {}).get("completion_tokens", 0)
         self._record(f"local:{model}", inp, out)
+        self.ok_streak += 1
+        if self.ok_streak % 25 == 0:
+            self.slots.grow()                            # coping again: back up toward the full number
         return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()   # drop reasoning blocks some models emit
 
     def probe(self) -> tuple[bool, str]:
@@ -212,4 +242,4 @@ class RouterLLM:
     def info(self) -> dict:
         return {"mock": bool(self.mock), "claude": bool(self.claude), "local": bool(self.local),
                 "local_model": self.local.model if self.local else None,
-                "smart_local": self.local.smart_model if self.local else None, "notes": self.notes}
+                "notes": self.notes}

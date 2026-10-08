@@ -78,8 +78,6 @@ class Society:
         self.discoveries: list[dict] = []        # ideas Sol judged real: they change the rules
         self.blueprints: dict[str, dict] = {}    # what each kind of building costs and does (shared knowledge)
         self.lock = threading.RLock()
-        info = llm.info() if hasattr(llm, 'info') else {}
-        smart = info.get("smart_local")
         self.think_every = THINK_EVERY             # hours between model calls per agent (Settings)
         self.sol_model = LOCAL                   # Sol: mentor AND referee; starts on the local brain (Settings / --sol-model)
         self.sol_log: list[dict] = []
@@ -827,10 +825,7 @@ class Society:
         """Any brain: local / haiku / sonnet / opus, or any model id ('local:<name>' for another local model).
         Opus ('enlighten') is limited to one agent at a time; the previous one drops to Sonnet."""
         spec = (spec or "").strip()
-        smart = (self.llm.info() if hasattr(self.llm, "info") else {}).get("smart_local")
-        if spec.lower() == "smart" and not smart:
-            return None
-        model = f"local:{smart}" if spec.lower() == "smart" else TIERS.get(spec.lower(), spec)
+        model = TIERS.get(spec.lower(), spec) if spec.lower() != "smart" else LOCAL
         if not model or len(model) > 80 or not re.fullmatch(r"[\w.:\-/]+", model):
             return None
         with self.lock:
@@ -844,7 +839,7 @@ class Society:
                         o.heard.append("The enlightenment has passed to someone else; you are now at the Sonnet level.")
                 a.heard.append("You have been ENLIGHTENED: your mind is now sharper than anyone else's.")
             a.model = model
-            label = {"local": "now thinks with the free local model", "smart": f"now thinks with the smart local model ({model[6:]})",
+            label = {"local": "now thinks with the free local model",
                      "haiku": "now thinks with Haiku",
                      "sonnet": "was upgraded to Sonnet", "opus": "was ENLIGHTENED (Opus)"}
             self.event(self.tick, a, label.get(tier_of(model), f"now thinks with {model}"), "brain")
