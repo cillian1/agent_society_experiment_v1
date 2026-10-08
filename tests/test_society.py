@@ -177,9 +177,17 @@ class PlanningTests(unittest.TestCase):
         self.assertIsNone(sim.take_queued(ada))                 # hungry -> stop and think again
         self.assertEqual(ada.queue, [])
 
-    def test_reflection_sets_an_ambition(self):
-        sim = make(8)
-        self.assertTrue(any(a.ambition for a in sim.agents.values()))
+    def test_dreams_happen_at_night_and_set_ambitions(self):
+        sim = make(16)                                          # 06:00 -> 22:00: nobody has dreamt yet
+        self.assertFalse(any(a.ambition for a in sim.agents.values()))
+        calls = []
+        orig = sim.llm.complete
+        sim.llm.complete = lambda s, p, model=None, json_mode=True: (calls.append(p[:15]), orig(s, p, model, json_mode))[1]
+        with redirect_stdout(io.StringIO()):
+            sim.run(7)                                          # 23:00-05:00: everyone dreams exactly once
+        self.assertEqual(calls.count("REFLECT_ON_LIFE"), len(sim.agents))
+        self.assertEqual(len(calls), len(sim.agents))          # and nothing else is asked while they sleep
+        self.assertTrue(all(a.ambition and a.last_dream for a in sim.agents.values()))
 
 
 class GameMasterTests(unittest.TestCase):

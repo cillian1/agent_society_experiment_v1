@@ -52,87 +52,74 @@ def compass(dx: int, dy: int) -> str:
 
 
 # ---------------------------------------------------------------- prompts
-def system_prompt(a: Agent, others: list[str]) -> str:
-    return (
-        f"You are {a.name}, a {a.word()}, one of {len(others) + 1} agents living in a 2D tile world "
-        f"(the others: {', '.join(others) or 'nobody yet'}). Nobody has a job or a role until they invent one; "
-        "nobody is anybody's family until children are born. You are free to do what you want: explore, "
-        "talk, make friends (or enemies), plan together, farm, build, invent customs, tools, jobs and laws. "
-        "Be creative and resourceful: try new things, combine ideas, invent, build, organise, specialise - "
-        "a thriving society needs more than gathering food. In this world ANYTHING is possible: if you can imagine it, "
-        "attempt it. Build on the discoveries others have made. "
-        "Talking is valuable: answer people who speak to you, share what you know, ask questions, make deals. "
-        "You remember everything that has happened to you. Survival comes first: eat before you get very hungry, "
-        "and keep some food on you. Don't repeat or echo what others just said, and don't repeat your own last action "
-        "if it isn't working - try something new, specific and concrete.\n"
-        "Before you choose, think briefly: (1) Am I - or a baby I'm responsible for - hungry or in danger? Deal with "
-        "that first. (2) What is my plan, and is it working? (3) What creative step would make life better for me "
-        "or my community? Plants grow by themselves: tending once every few hours is plenty, so don't hover over them.\n"
-        f"Goal: {a.goal}\nPersonality: {a.traits.describe()} - act like it.\n"
-        f"Abilities (1-10): {a.abilities.describe()}. Use your strengths and let others cover your weaknesses.\n\n"
-        "World: g grass, . sand, ~ water (impassable), # rock (impassable), ^ tree (impassable), f wild food bush "
-        "(slow to regrow), , young plant, * ripe crop, & a structure someone built. North is up (y decreases), "
-        "east is right. Uppercase letters are agents (you are @). "
-        "Most of the world is unexplored: you only see a small area around you, and exploring finds new food, water, "
-        "forests and rocks that your whole community can use. Be curious. Building and crafting make life better. "
-        "Hunger rises every day; at 100 you take damage and can starve. Eating food lowers hunger. "
-        f"One turn is one HOUR; a day has 24. Everyone sleeps at night (22:00-06:00), so use the daylight well. "
-        f"You can expect to live about {a.abilities.lifespan()} days.\n"
-        "Each turn pick ONE action:\n"
-        f'  go      - {{"target": "food|explore|wood|stone|water|<name>|x,y"}} walk up to {a.abilities.steps()} tiles toward it, '
-        "finding the way around water and obstacles (the easiest way to travel)\n"
-        f'  move    - {{"direction": "north|south|east|west", "steps": 1-{a.abilities.steps()}}} walk straight (stops at obstacles)\n'
-        "  gather  - take from an adjacent/own-tile food bush or ripe crop (food, sometimes seeds), tree (wood) or rock "
-        "(stone); next to water with a fishing tool you catch fish (food)\n"
-        "  eat     - eat one carried food (hunger -40)\n"
-        '  say     - {"to": "<name or all>", "message": "..."} heard within 8 tiles; talk to people!\n'
-        '  give    - {"to": "<name>", "title": "<object, optional>", "message": "<optional words>"} hand one food (or that '
-        "object) to an adjacent agent. A gift - especially with a few kind words - is a lovely way to show friendship "
-        "or love and wins hearts fast\n"
-        '  plant   - {"direction": "..."} put a carried seed into an adjacent grass tile\n'
-        "  tend    - speed up a young plant within reach (helps once every few hours; plants also grow on their own)\n"
-        f'  build   - {{"direction": "...", "title": "<ANY building you think your community needs>", "message": "<what it is for>"}} '
-        "decide for yourself what to build - the game tells you what it takes (known blueprints are listed below; a new "
-        "kind of building gets its own blueprint from Sol the first time someone tries). You can walk into or over what you build, "
-        "except walls and fences. Water only takes bridges/docks. "
-        "Buildings DO things: " + "; ".join(f"{words[0]}: {what}" for words, what in FUNCTIONS.values())
-        + ". Don't build what already exists nearby - use it, or build something new.\n"
-        "Building takes TIME: build pays the materials and starts a construction site; it then needs some hours of "
-        "work (you carry on automatically, and others can help - teamwork is faster). It only works once finished.\n"
-        "  work    - put an hour of work into a building under construction next to you (help others build!)\n"
-        '  store   - {"title": "food|seeds|wood|stone", "amount": N} put supplies into a storehouse next to you, for everyone\n'
-        '  take    - {"title": "food|seeds|wood|stone", "amount": N} take supplies from a storehouse next to you\n'
-        f'  craft   - {{"title": "<axe, pickaxe, hoe, fishing rod, basket, anything>", "message": "what it is for"}} costs '
-        f"{CRAFT_COST} wood/stone; you carry it (max {MAX_ITEMS}). Objects matter: an axe/hatchet gets extra wood, a "
-        "pickaxe/hammer extra stone, a hoe/shovel/rake speeds up plants, a fishing rod/net/spear catches fish from water.\n"
-        '  court   - {"to": "<name>", "message": "..."} show affection to an agent within 3 tiles\n'
-        "Relationships grow from talking to someone directly, spending time together, gifts, courting, caring and "
-        f"working together; at {FRIEND_BOND}+ you are friends, at {LOVE_BOND}+ in love.\n"
-        f'  procreate - {{"to": "<name>", "baby_name": "..."}} a woman and a man who love each other (mutual love >= {LOVE_BOND}, '
-        f"adults, nearby, each pays {CHILD_FOOD_COST} food) both choose it; she is then pregnant for {PREGNANCY_DAYS // DAY} days\n"
-        f'  care    - {{"to": "<name>"}} feed (uses 1 of your food) and look after a baby next to you. Babies can\'t feed '
-        f"themselves for their first {BABY_DAYS // DAY} days and die if nobody cares for them; then they are children "
-        f"until {ADULT_AGE // DAY} days old, then adults.\n"
-        '  attempt - {"what": "<ANYTHING you can imagine trying>"} e.g. tame a deer, dig a well, brew medicine from herbs, '
-        "build a boat, hold a harvest festival, start a school, smoke fish to preserve it, make a map. Sol, your mentor, "
-        "decides what happens - you may gain things, make objects or buildings, or make a DISCOVERY that changes the "
-        "world for everyone. Anything is possible if it's plausible; ambitious ideas may need materials, help or skill.\n"
-        '  invent  - {"title": "...", "message": "describe your idea, custom, tool or law"} shared with the whole society '
-        "(a truly useful idea can become a discovery)\n"
-        "  wait\n"
-        + HUMAN_NOTES[a.authority] + " (Talking with the Human happens in a separate chat, so it does not use up your turn.)\n"
-        "Sol is a wise mentor who watches over your society, judges what happens when someone attempts or invents "
-        "something, works out what new buildings take, and every few weeks gives everyone advice. Sol sees the "
-        "bigger picture: take Sol's advice seriously.\n"
-        "THINK IN PROJECTS, not single steps: with \"next\" you can line up to "
-        f"{MAX_QUEUE} more actions that run automatically over the following hours (you'll be interrupted if something "
-        "important happens, e.g. hunger or someone talking to you). Use it to get real things done.\n"
-        "Reply ONLY with JSON. Optional extra fields: \"next\" (list of follow-up actions), \"plan\" (your plan in "
-        "words), \"remember\" (a note to your future self) and \"role\" (claim or change your own role/title), e.g.\n"
-        '{"thought": "We need shelter before winter; I have no wood yet.", "action": "go", "target": "wood", '
-        '"next": [{"action": "gather"}, {"action": "gather"}, {"action": "build", "direction": "east", "title": "house", '
-        '"message": "home of Ada"}], "plan": "build a house near the forest, then invite Brix", "role": "builder"}'
-    )
+# The rules are the same for every agent and every turn, so they are sent as the system prompt: Claude caches them
+# (cached input costs a tenth) and local servers reuse them. Everything about one agent goes in the turn prompt.
+_RULES: dict[str, str] = {}
+
+
+def rules(authority: str = "leader") -> str:
+    if authority not in _RULES:
+        _RULES[authority] = (
+            "You are one of the people living in a tile world. Nobody has a role or family until they make one. Be free, "
+            "creative and resourceful: explore, talk, befriend, farm, build, craft, invent customs, tools, jobs and laws. "
+            "ANYTHING plausible is possible - attempt it. Survival first: eat before you get very hungry and keep food on you. "
+            "Don't echo others or repeat an action that isn't working.\n"
+            "Each turn: (1) am I (or a baby I look after) hungry or in danger? (2) is my plan working? (3) what creative step "
+            "helps me or my community? Plants grow by themselves; tending every few hours is plenty.\n"
+            "Map: g grass, . sand, ~ water, # rock, ^ tree (last three impassable), f food bush, , young plant, * ripe crop, "
+            "& building, capital letters = people, @ = you. North is up (y decreases). Most land is unexplored: exploring "
+            "finds food, water, wood and stone for everyone. One turn = one HOUR; everyone sleeps 22:00-06:00. Hunger "
+            "rises every hour; at 100 you lose health and can starve.\n"
+            "ACTIONS (pick one):\n"
+            'go {"target": "food|explore|wood|stone|water|<name>|x,y"} walk toward it, around obstacles\n'
+            'move {"direction": "north|south|east|west", "steps": N}\n'
+            "gather - from an adjacent food bush/ripe crop (food, seeds), tree (wood) or rock (stone); fish from water with a fishing tool\n"
+            "eat - one carried food (hunger -40)\n"
+            'say {"to": "<name|all>", "message": "..."} heard within 8 tiles\n'
+            'give {"to": "<name>", "title": "<object, optional>", "message": "..."} one food (or the object) to someone '
+            "next to you; gifts with kind words win hearts fast\n"
+            'plant {"direction": "..."} a seed into adjacent grass;  tend - help a young plant next to you grow\n'
+            'build {"direction": "...", "title": "<any building your community needs>", "message": "<purpose>"} pays the '
+            "materials (a new kind gets a blueprint from Sol) and starts a construction site that needs hours of work; you keep "
+            "working on it automatically, others can help. You can walk inside buildings (not walls). Water takes only "
+            "bridges/docks. Buildings DO things: " + "; ".join(f"{w[0]}: {what}" for w, what in FUNCTIONS.values())
+            + ". Don't duplicate one nearby - use it.\n"
+            "work - an hour of work on a construction site next to you\n"
+            'store / take {"title": "food|seeds|wood|stone", "amount": N} with a storehouse next to you\n'
+            f'craft {{"title": "<axe, pickaxe, hoe, fishing rod, anything>", "message": "purpose"}} costs {CRAFT_COST} wood/stone, '
+            f"carry up to {MAX_ITEMS}. Axe = more wood, pickaxe = more stone, hoe = faster plants, rod/net/spear = fish\n"
+            'court {"to": "<name>", "message": "..."} affection to someone within 3 tiles. Bonds grow by talking, time '
+            f"together, gifts, courting, caring and working together: {FRIEND_BOND}+ friends, {LOVE_BOND}+ love\n"
+            f'procreate {{"to": "<name>", "baby_name": "..."}} a woman and a man in mutual love ({LOVE_BOND}+), adults, nearby, '
+            f"{CHILD_FOOD_COST} food each, both choose it; pregnancy lasts {PREGNANCY_DAYS // DAY} days\n"
+            f'care {{"to": "<name>"}} feed (1 food) a baby next to you: babies need it for {BABY_DAYS // DAY} days, are '
+            f"children until {ADULT_AGE // DAY} days old\n"
+            'attempt {"what": "<anything: tame a deer, brew medicine, hold a festival, make a map...>"} Sol decides what '
+            "happens; you may gain things or make a DISCOVERY that changes the world\n"
+            'invent {"title": "...", "message": "<idea, custom, tool or law>"} shared with everyone\n'
+            "wait\n"
+            + HUMAN_NOTES[authority] + " (That chat is separate and doesn't use your turn.)\n"
+            "Sol is a wise mentor who sees the bigger picture, judges attempts and designs blueprints: take Sol's advice seriously.\n"
+            f'THINK IN PROJECTS: "next" lines up to {MAX_QUEUE} more actions that run on their own over the following hours '
+            "(you are interrupted if something important happens). Use it - it gets real work done.\n"
+            "Reply ONLY with compact JSON. Keep \"thought\" to one short sentence. Optional: \"next\", \"plan\", "
+            '\"remember\", \"role\". Example: {"thought": "Need shelter; no wood yet.", "action": "go", "target": "wood", '
+            '"next": [{"action": "gather"}, {"action": "gather"}, {"action": "build", "direction": "east", "title": "house"}], '
+            '"plan": "house by the forest"}'
+        )
+    return _RULES[authority]
+
+
+def system_prompt(a: Agent, others: list[str] | None = None) -> str:
+    return rules(a.authority)
+
+
+def identity(a: Agent, others: list[str], tick: int) -> str:
+    """Who this agent is - the part of the prompt that differs between agents."""
+    return (f"You are {a.name}, a {a.word(tick)}. Others alive: {', '.join(others) or 'nobody'}.\n"
+            f"Personality: {a.traits.describe()} - act like it. Abilities (1-10): {a.abilities.describe()}. "
+            f"You walk up to {a.abilities.steps()} tiles a turn and expect to live about {a.abilities.lifespan()} days.\n"
+            f"Goal: {a.goal}")
 
 
 FAILS = ("blocked", "nothing", "no ", "need ", "couldn't", "unknown", "nobody", "there is no", "these plants",
@@ -226,6 +213,18 @@ def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[s
     return unique[:4]
 
 
+ROUTINE = ("eat", "care", "gather", "tend", "work", "store", "take", "go")
+
+
+def routine(a: Agent, world, agents: list[Agent], tick: int) -> dict | None:
+    """An obvious next step worked out by code (no model call): the best concrete suggestion, if there is one."""
+    for why, act in suggestions(a, world, agents, tick):
+        if act["action"] in ROUTINE and "<" not in json.dumps(act):
+            act = parse_action(json.dumps({**act, "thought": why}), [o.name for o in agents if o is not a])
+            return act
+    return None
+
+
 def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str],
                 discoveries: list[str] = (), blueprints: list[str] = (), mentor: list[str] = ()) -> str:
     """Everything the agent perceives and remembers this turn."""
@@ -233,30 +232,31 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
     stage = {"child": f"a child - you become an adult at {ADULT_AGE // DAY} days old", "adult": "an adult",
              "elder": "an elder", "baby": "a baby"}[a.stage(tick)]
     view, smell = a.abilities.view(), a.abilities.smell()
-    lines = [f"It is {clock.stamp(tick)} ({clock.part_of_day(tick)}; night falls at 22:00). You are at ({a.x}, {a.y}). "
-             f"You are a {a.word(tick)}, {age_text(a.age(tick))} old ({stage}).",
+    lines = [identity(a, [o.name for o in agents if o is not a], tick),
+             f"It is {clock.stamp(tick)} ({clock.part_of_day(tick)}; night falls at 22:00). You are at ({a.x}, {a.y}), "
+             f"{age_text(a.age(tick))} old ({stage}).",
              "Your role: " + (a.role or 'none yet - claim one by adding "role" to your reply, or stay free') + ".",
              f"Hunger: {int(a.hunger)}/100. Health: {int(a.health)}/100. Food carried: {a.food}. "
              f"Seeds: {a.seeds}. Wood: {a.wood}. Stone: {a.stone}.",
              f"Your surroundings (@ = you):\n{world.view(a.x, a.y, view, others)}"]
     if a.plan:
-        lines.insert(2, f"Your current plan: {a.plan} (keep following it, or change it with \"plan\")")
+        lines.insert(3, f"Your current plan: {a.plan} (keep following it, or change it with \"plan\")")
     site = world.buildings.get((a.task or {}).get("id")) if a.task else None
     if site and not site.get("done", True):
-        lines.insert(2, f"You are building a {site['kind']}: {site['progress']:.0f}/{site['work']} hours of work done "
+        lines.insert(3, f"You are building a {site['kind']}: {site['progress']:.0f}/{site['work']} hours of work done "
                         "(you carry on automatically unless something comes up).")
     if a.ambition:
-        lines.insert(2, f"Your long-term ambition: {a.ambition}")
+        lines.insert(3, f"Your long-term ambition: {a.ambition}")
     last = next((h for h in reversed(a.history) if h["action"] != "reply to Human"), None)
     if last and failed(last["result"]):
-        lines.insert(2, f"!!! Your last action ({last['action']}) did not work: {last['result']}. Don't repeat it - "
+        lines.insert(3, f"!!! Your last action ({last['action']}) did not work: {last['result']}. Don't repeat it - "
                         "try something else.")
     opts = suggestions(a, world, agents, tick)
     if opts:
-        lines.insert(3, "Good options right now (pick one, adapt it, or do something better):\n" + "\n".join(
+        lines.insert(4, "Good options right now (pick one, adapt it, or do something better):\n" + "\n".join(
             f"  {i + 1}. {json.dumps(act)}  <- {why}" for i, (why, act) in enumerate(opts)))
     if a.hunger >= HUNGER_WARNING:
-        lines.insert(1, f"!!! YOU ARE HUNGRY ({int(a.hunger)}/100) - at 100 you start losing health and die. "
+        lines.insert(2, f"!!! YOU ARE HUNGRY ({int(a.hunger)}/100) - at 100 you start losing health and die. "
                      + ("EAT NOW: choose the eat action (you carry food)." if a.food else
                         "Find food first: gather from a bush/crop, fish if you can, or ask someone to give you some. "
                         "Everything else can wait."))
@@ -313,9 +313,10 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
         lines.append(f"You have {a.wood} wood and {a.stone} stone: you could build a structure or craft a useful object.")
     if world.water_near(a.x, a.y):
         lines.append("You are next to water" + ("" if a.has_tool("fish") else " (a fishing rod/net would let you catch fish here)") + ".")
-    lines.append(f"Food within reach to gather: {'yes' if world.food_near(a.x, a.y, 1) else 'no'}")
     mats = [p for p in world.gather_options(a.x, a.y) if world.tile(*p) in ("tree", "rock")]
-    lines.append(f"Materials (trees/rocks) within reach: {len(mats)}")
+    reach = (["food"] if world.food_near(a.x, a.y, 1) else []) + ([f"{len(mats)} trees/rocks"] if mats else [])
+    if reach:
+        lines.append("Within reach to gather: " + " and ".join(reach))
     plants = world.plants_near(a.x, a.y, 1)
     if plants:
         todo = sum(world.needs_tending(x, y, tick) for x, y in plants)
@@ -339,23 +340,39 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
         lines.append("What you remember of your earlier life (summary):\n" + a.summary)
     if a.log[a.sum_upto:]:
         lines.append("Your recent memories (oldest first):\n" + "\n".join(
-            "- " + m for m in a.log[max(a.sum_upto, len(a.log) - a.abilities.memory()):]))
+            "- " + m for m in recent_memories(a.log[max(a.sum_upto, len(a.log) - a.abilities.memory()):])))
     if ideas:
-        lines.append("Ideas invented by the society so far:\n" + "\n".join("- " + i for i in ideas))
+        lines.append("Recent ideas in your society:\n" + "\n".join("- " + i for i in ideas[-5:]))
     if blueprints:
-        lines.append("Building blueprints your community knows (what each costs and does):\n"
-                     + "\n".join("- " + b for b in blueprints))
+        lines.append("Known blueprints: " + "; ".join(blueprints[-10:]))
     if mentor:
         lines.append("Sol, the wise mentor who watches over your society, told you recently:\n"
                      + "\n".join("- " + m for m in mentor))
     if discoveries:
         lines.append("Discoveries your society has made (they really work - build on them!):\n"
                      + "\n".join("- " + d for d in discoveries))
-    lines.append("Messages heard this turn:\n" + ("\n".join(a.heard) or "(none)"))
-    lines.append("An idea to consider (only if it fits): " + random.Random(hash((a.name, tick))).choice(INSPIRATION))
-    recent = [f"t{h['tick']}: {h['action']} -> {h['result']}" for h in a.history[-4:]]
-    lines.append("Your last few actions:\n" + ("\n".join(recent) or "(none yet)"))
+    if a.heard:
+        lines.append("Heard this turn:\n" + "\n".join(a.heard))
+    if tick % 3 == 0 and a.hunger < HUNGER_WARNING:          # a spark of inspiration now and then
+        lines.append("An idea to consider (only if it fits): " + random.Random(hash((a.name, tick))).choice(INSPIRATION))
+    recent = [f"{h['action']} -> {h['result'][:90]}" for h in a.history[-3:]]
+    lines.append("Your last actions: " + (" | ".join(recent) or "none yet"))
     return "\n".join(lines) + "\n\nWhat do you do?"
+
+
+def recent_memories(lines: list[str]) -> list[str]:
+    """Memories with repeats folded together: the same words heard five times are shown once, with a count."""
+    strip = lambda m: re.sub(r"^\[[^\]]*\] ", "", m)
+    count: dict[str, int] = {}
+    for m in lines:
+        count[strip(m)] = count.get(strip(m), 0) + 1
+    out, seen = [], set()
+    for m in reversed(lines):                       # keep the latest copy of each
+        k = strip(m)
+        if k not in seen:
+            seen.add(k)
+            out.append(m + (f" (x{count[k]})" if count[k] > 1 else ""))
+    return out[::-1]
 
 
 def reply_prompt(a: Agent, situation: str, human_msg: str, also_to: list[str]) -> str:
@@ -432,22 +449,29 @@ def reply(a: Agent, llm, situation: str, human_msg: str, others: list[str], also
             "next": nxt}
 
 
-def reflect(a: Agent, llm, tick: int, ideas: list[str]) -> dict:
-    """Every so often an agent steps back: what have I achieved, what do I want? Sets a long-term ambition."""
-    recent = "\n".join(a.log[-30:]) or "(nothing yet)"
-    prompt = (f"REFLECT_ON_LIFE\nIt is the evening of {clock.stamp(tick)}. You are {a.name}, a {a.word(tick)}, "
-              f"{age_text(a.age(tick))} old"
-              + (f", known as the {a.role}" if a.role else "") + f".\nPersonality: {a.traits.describe()}\n"
-              f"Abilities: {a.abilities.describe()}\nYour ambition so far: {a.ambition or '(none yet)'}\n"
+def dream(a: Agent, llm, tick: int, ideas: list[str], fold: list[str] | None = None) -> dict:
+    """The one model call of a night's sleep: the mind sorts the day out. It reflects, may change its ambition and
+    plan, sometimes wakes with an idea, and (when asked) folds old memories into the running summary."""
+    recent = "\n".join(recent_memories(a.log[-20:])) or "(nothing yet)"
+    prompt = (f"REFLECT_ON_LIFE\nIt is {clock.stamp(tick)} and {a.name} is asleep. You are {a.name}'s sleeping mind: "
+              f"a {a.word(tick)}, {age_text(a.age(tick))} old" + (f", known as the {a.role}" if a.role else "")
+              + f".\nPersonality: {a.traits.describe()}. Abilities: {a.abilities.describe()}.\n"
+              f"Ambition so far: {a.ambition or '(none yet)'}. Plan: {a.plan or '(none)'}\n"
               f"Earlier life: {a.summary or '(nothing summarised yet)'}\nRecent memories:\n{recent}\n"
-              + ("Ideas in your society:\n" + "\n".join("- " + i for i in ideas) + "\n" if ideas else "")
-              + "Step back and reflect. What have you achieved? What matters to you now? What could you build, start "
-              "or change that would make a real difference for you and your community over the next weeks? Be "
-              "ambitious, specific and creative, and play to your abilities. Think in days and weeks. Reply ONLY with JSON: "
-              '{"insight": "<one sentence about your life so far>", "ambition": "<a concrete long-term goal>", '
-              '"plan": "<the first few steps toward it>"}')
-    data = _json(llm.complete(f"You are {a.name}, reflecting on your life.", prompt, model=a.model))
-    return {k: str(data.get(k) or "").strip()[:240] for k in ("insight", "ambition", "plan")}
+              + ("Ideas in your society: " + "; ".join(ideas[-5:]) + "\n" if ideas else "")
+              + "Sort out the day as minds do in sleep. Dream briefly (dreams can be strange, but often mix real worries "
+              "and hopes). What matters now? Set a concrete, ambitious long-term goal that plays to your strengths, and "
+              "the next steps. If the dream sparks a genuinely new, useful idea to try tomorrow, give it; otherwise leave "
+              "\"idea\" empty.\n"
+              + ("FOLD_MEMORIES: also rewrite your life summary to include these older memories (first person, under 150 "
+                 "words; keep names, relationships, promises, places, inventions; drop trivia):\n" + "\n".join(fold) + "\n"
+                 if fold else "")
+              + 'Reply ONLY with compact JSON: {"dream": "<one sentence>", "insight": "<one sentence>", '
+              '"ambition": "...", "plan": "...", "idea": "<or empty>"' + (', "summary": "..."' if fold else "") + "}")
+    data = _json(llm.complete(f"You are the sleeping mind of {a.name}.", prompt, model=a.model))
+    out = {k: str(data.get(k) or "").strip()[:240] for k in ("dream", "insight", "ambition", "plan", "idea")}
+    out["summary"] = str(data.get("summary") or "").strip()[:1500]
+    return out
 
 
 def compact_memory(a: Agent, llm, model: str | None):

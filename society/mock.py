@@ -47,8 +47,12 @@ class MockLLM(UsageMixin):
         if "REFLECT_ON_LIFE" in prompt:
             goal = rng.choice(["build a village by the lake", "become the best farmer around", "map the whole world",
                                "raise a big family", "make tools for everyone"])
-            return json.dumps(dict(insight="I have survived so far, but I want more.", ambition=goal,
-                                   plan=f"start working toward: {goal}"))
+            d = dict(insight="I have survived so far, but I want more.", ambition=goal, plan=f"start working toward: {goal}",
+                     dream=rng.choice(["I flew over the lake.", "The forest was singing.", "I was lost in fog, then found a path."]),
+                     idea=rng.choice(["", "", "a raft to cross the water"]))
+            if "FOLD_MEMORIES" in prompt:
+                d["summary"] = "I remember: " + prompt.split("FOLD_MEMORIES", 1)[1][:400]
+            return json.dumps(d)
         if "CHAT_WITH_HUMAN" in prompt:
             who = re.search(r"You are (\w+),", system)
             asked = re.search(r'just said to you[^:]*: "([^"]*)"', prompt)
@@ -62,8 +66,8 @@ class MockLLM(UsageMixin):
         hunger = int(re.search(r"Hunger: (\d+)", prompt).group(1))
         carried = int(re.search(r"Food carried: (\d+)", prompt).group(1))
         seeds = int(re.search(r"Seeds: (\d+)", prompt).group(1))
-        reach = "reach to gather: yes" in prompt
-        mats = int(re.search(r"within reach: (\d+)", prompt).group(1))
+        reach = bool(re.search(r"Within reach to gather: food", prompt))
+        mats = int((re.search(r"(\d+) trees/rocks", prompt) or [0, 0])[1])
         mat_have = sum(int(x) for x in re.findall(r"(?:Wood|Stone): (\d+)", prompt))
         friend = re.search(r"Agents in view: (\w+) \[", prompt)
         unexp = re.search(r"Nearest unexplored area: dx=(-?\d+) dy=(-?\d+)", prompt)
@@ -71,7 +75,7 @@ class MockLLM(UsageMixin):
         m = re.search(r"Nearest food: dx=(-?\d+) dy=(-?\d+)", prompt) or re.search(r"seen: [\w ]+ at dx=(-?\d+) dy=(-?\d+)", prompt)
         partner = re.search(r"have a child right now with: (\w+)", prompt)
         asked = re.search(r"Choose procreate with to=(\w+)", prompt)
-        me = "woman" if "You are a woman" in prompt else "man"
+        me = "woman" if re.search(r"You are \w+, a (woman|girl)", prompt) else "man"
         mates = [n for n, sex in re.findall(r"(\w+) \[\w\] dx=-?\d+ dy=-?\d+, (woman|man)\b", prompt) if sex != me]
         near = re.match(r"(\w+)", mates[0]) if mates else None
         if partner or asked:

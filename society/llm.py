@@ -24,12 +24,16 @@ class UsageMixin:
         self._ulock = threading.Lock()
         self.prices = prices or {}  # model -> (input $/M tokens, output $/M tokens)
 
-    def _record(self, model: str, inp: int, out: int):
+    def _record(self, model: str, inp: int, out: int, cached: int = 0, written: int = 0):
+        """inp = input tokens at full price; cached = read from the prompt cache (a tenth of the price);
+        written = put into the cache (a quarter more than full price, once)."""
         with self._ulock:
-            u = self._usage.setdefault(model, {"calls": 0, "input": 0, "output": 0})
+            u = self._usage.setdefault(model, {"calls": 0, "input": 0, "output": 0, "cached": 0, "written": 0})
             u["calls"] += 1
             u["input"] += inp
             u["output"] += out
+            u["cached"] = u.get("cached", 0) + cached
+            u["written"] = u.get("written", 0) + written
 
     def usage(self) -> dict:
         with self._ulock:
@@ -39,12 +43,13 @@ class UsageMixin:
         for m, u in models.items():
             if m in self.prices:
                 pi, po = self.prices[m]
-                u["cost"] = u["input"] * pi / 1e6 + u["output"] * po / 1e6
+                u["cost"] = (u["input"] + 0.1 * u.get("cached", 0) + 1.25 * u.get("written", 0)) * pi / 1e6 + u["output"] * po / 1e6
                 cost += u["cost"]
             else:
                 priced = False
         return {"models": models, "calls": sum(u["calls"] for u in models.values()),
-                "input": sum(u["input"] for u in models.values()),
+                "input": sum(u["input"] + u.get("cached", 0) + u.get("written", 0) for u in models.values()),
+                "cached": sum(u.get("cached", 0) for u in models.values()),
                 "output": sum(u["output"] for u in models.values()),
                 "cost": cost if priced and models else None}
 
@@ -63,10 +68,14 @@ class ClaudeLLM(UsageMixin):
         resp = self.client.messages.create(
             model=model,
             max_tokens=self.max_tokens,
-            system=system,
+            # the shared rules are identical for every agent: cache them (reads cost a tenth). Models only cache
+            # prompts above a minimum length; shorter ones are simply sent normally.
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}] if len(system) > 2000 else system,
             messages=[{"role": "user", "content": prompt}],
         )
-        self._record(model, resp.usage.input_tokens, resp.usage.output_tokens)
+        u = resp.usage
+        self._record(model, u.input_tokens, u.output_tokens, getattr(u, "cache_read_input_tokens", 0) or 0,
+                     getattr(u, "cache_creation_input_tokens", 0) or 0)
         return "".join(b.text for b in resp.content if b.type == "text")
 
 
@@ -166,6 +175,7 @@ class RouterLLM:
             models.update(u["models"])
         costs = [u["cost"] for u in parts if u["models"]]
         return {"models": models, "calls": sum(u["calls"] for u in parts), "input": sum(u["input"] for u in parts),
+                "cached": sum(u.get("cached", 0) for u in parts),
                 "output": sum(u["output"] for u in parts),
                 "cost": None if (not costs or None in costs) else sum(costs)}
 

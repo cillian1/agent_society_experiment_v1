@@ -326,7 +326,7 @@ function personOverlay(a) {
   ctx.font = '12px system-ui';
   if (a.heart) ctx.fillText('❤️', x + 14, top - 8);
   if (a.slow) ctx.fillText('💭', x - 14, top - 8);
-  if (a.asleep && a.stage !== 'baby') { ctx.globalAlpha = .9; ctx.fillText('💤', x + 10 + Math.sin(performance.now() / 600) * 2, top - 10); ctx.globalAlpha = 1; }
+  if (a.asleep && a.stage !== 'baby') { ctx.globalAlpha = .9; ctx.fillText(a.dreaming ? '🌙' : '💤', x + 10 + Math.sin(performance.now() / 600) * 2, top - 10); ctx.globalAlpha = 1; }
   if (a.stage === 'baby') return;
   ctx.font = 'bold 10px system-ui';
   const tag = a.name, nw = ctx.measureText(tag).width + 10;
@@ -659,6 +659,7 @@ function overview(a) {
     <span>Position</span><span>(${a.x}, ${a.y})</span></div>
     ${l ? `<div class="card thought">💭 ${esc(l.thought)}<div class="tag" style="margin-top:4px">▶ ${esc(l.action)} → ${esc(l.result)}</div></div>` : ''}
     ${a.advice && a.advice.length ? `<div class="card" style="border-left:3px solid var(--gold)">🧙 <b>Sol's advice</b> (${ts(a.advice[a.advice.length - 1][0])}): ${esc(a.advice[a.advice.length - 1][1])}</div>` : ''}
+    ${a.last_dream?.length ? `<div class="card" style="border-left:3px solid #9085e9">🌙 <b>Last dream</b> (${ts(a.last_dream[0])}): <i>${esc(a.last_dream[1])}</i></div>` : ''}
     ${a.ambition ? `<div class="card" style="border-left:3px solid var(--gold)">🎯 <b>Ambition:</b> ${esc(a.ambition)}</div>` : ''}
     ${a.plan ? `<div class="card" style="border-left:3px solid var(--accent)">🗺️ <b>Plan:</b> ${esc(a.plan)}</div>` : ''}
     ${a.queue.length ? `<div class="card">⏭️ <b>Next up</b> (runs automatically): ${a.queue.map(q => esc(q.action + (q.target ? ' → ' + q.target : q.title ? ' ' + q.title : q.to && q.to !== 'all' ? ' → ' + q.to : ''))).join(' · ')}</div>` : ''}
@@ -753,13 +754,14 @@ $('send').onclick = send;
 $('msg').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 $('auth').onchange = e => api.post('/api/control', { authority: e.target.value });
 $('solm').onchange = e => api.post('/api/control', { sol_model: e.target.value });
+$('thinkev').onchange = e => api.post('/api/control', { think_every: +e.target.value }).then(() => toast(`Agents now think every ${e.target.value === '1' ? 'hour' : e.target.value + ' hours'}`));
 $('discoveries').onclick = e => { const g = e.target.closest('[data-goto]'); if (g) select(g.dataset.goto); };
 
 // ======================================================================= world feed
 const FILTERS = { all: 'All', sol: '🧙 Sol', talk: '💬 Talk', life: '❤️ Life', making: '🔨 Making', ideas: '💡 Ideas', explore: '🧭 Exploring', survival: '🍎 Food' };
-const KIND_FILTER = { sol: 'sol', discovery: 'ideas', attempt: 'ideas', goal: 'ideas', care: 'life', birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
+const KIND_FILTER = { dream: 'ideas', sol: 'sol', discovery: 'ideas', attempt: 'ideas', goal: 'ideas', care: 'life', birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
   idea: 'ideas', explore: 'explore', food: 'survival', role: 'life', brain: 'life' };
-const KIND_ICON = { sol: '🧙', discovery: '💡', attempt: '✨', goal: '🎯', care: '🍼', birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
+const KIND_ICON = { dream: '🌙', sol: '🧙', discovery: '💡', attempt: '✨', goal: '🎯', care: '🍼', birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
 $('filters').innerHTML = Object.entries(FILTERS).map(([k, l]) => `<span class="chip ${k === 'all' ? 'on' : ''}" data-f="${k}">${l}</span>`).join('');
 $('filters').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; S.filter = c.dataset.f; for (const x of $('filters').children) x.classList.toggle('on', x === c); renderFeed(S.st, true); };
 let feedKey = '';
@@ -843,9 +845,11 @@ function renderUsage() {
   const u = S.st?.usage; if (!u) return;
   const rows = Object.entries(u.models), B = S.st.backends || {};
   const brains = B.mock ? '🎭 Mock (scripted, not real thinking)' : [B.local ? '🖥️ Local: ' + esc(B.local_model) : '', B.smart_local ? '🧠 Smart local: ' + esc(B.smart_local) : '', B.claude ? '🌱 Claude (Haiku / Sonnet / Opus)' : ''].filter(Boolean).join(' · ');
-  $('usage').innerHTML = `<div class="card small">Available brains: ${brains || 'none'}</div>` + (rows.length ? `<table><tr><th>Model</th><th>Calls</th><th>Input</th><th>Output</th><th>Cost</th></tr>` +
-    rows.map(([m, x]) => `<tr><td>${esc(m)}</td><td>${fmt(x.calls)}</td><td>${fmt(x.input)}</td><td>${fmt(x.output)}</td><td>${x.cost != null ? '$' + x.cost.toFixed(3) : '–'}</td></tr>`).join('') + '</table>'
-    + '<p class="muted small">Local models are free. For Claude cost estimates start the hub with --price MODEL=IN,OUT (USD per million tokens).</p>'
+  $('usage').innerHTML = `<div class="card small">Available brains: ${brains || 'none'}</div>` + (rows.length
+    ? `<table><tr><th>Model</th><th>Calls</th><th title="Average tokens sent + received per call">Per call</th><th>Input</th><th title="Input read from Claude's prompt cache at a tenth of the price">Cached</th><th>Output</th><th>Cost</th></tr>` +
+      rows.map(([m, x]) => { const all = x.input + (x.cached || 0) + (x.written || 0);
+        return `<tr><td>${esc(m)}</td><td>${fmt(x.calls)}</td><td>${fmt(Math.round((all + x.output) / Math.max(1, x.calls)))}</td><td>${fmt(all)}</td><td>${fmt(x.cached || 0)}</td><td>${fmt(x.output)}</td><td>${x.cost != null ? '$' + x.cost.toFixed(3) : '–'}</td></tr>`; }).join('') + '</table>'
+      + '<p class="muted small">Local models are free. For Claude cost estimates start the hub with --price MODEL=IN,OUT (USD per million tokens).</p>'
     : '<p class="muted">No model calls yet.</p>');
 }
 async function resetView() {
@@ -910,6 +914,7 @@ async function poll() {
     if (!S.sel) renderList(st);
     if ($('to').children.length !== st.agents.length + 2) renderTo();
     if (document.activeElement !== $('auth')) $('auth').value = st.authority;
+    if (document.activeElement !== $('thinkev') && st.think_every) $('thinkev').value = st.think_every;
     renderChat(); renderFeed(st); toastNewEvents(st.events);
     $('discoveries').innerHTML = st.discoveries.length ? st.discoveries.slice().reverse().map(d => `<div class="disc"><b>${esc(d.name)}</b>
       <span class="muted">by <span class="who" data-goto="${esc(d.by)}" style="color:${d.color};cursor:pointer">${esc(d.by)}</span>, ${ts(d.tick)}</span>

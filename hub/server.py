@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from society import persistence, sol, views
-from society.config import AUTOSAVE_EVERY
+from society.config import AUTOSAVE_EVERY, THINK_CHOICES
 
 STATIC = Path(__file__).parent / "static"
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
@@ -66,6 +66,8 @@ class Hub:
                 if sim.sol_due:                        # Sol's review runs alongside the day
                     sim.sol_due = False
                     sol.review_async(sim)
+                for a in sim.dreamers():               # one dream per sleeper on some nights, in the background
+                    self.pool.submit(sim.dream, a)
                 for a in list(sim.agents.values()):
                     key = (id(sim), a.name)
                     with self.busy_lock:
@@ -137,6 +139,8 @@ class Hub:
                 sim.sol_model = names.get(d["sol_model"], d["sol_model"])
             if d.get("authority") in ("leader", "advisor", "observer"):
                 sim.human_authority = d["authority"]
+            if d.get("think_every") in THINK_CHOICES:
+                sim.think_every = int(d["think_every"])
             return {"paused": self.paused, "interval": self.interval, "max_wait": self.max_wait,
                     "authority": sim.human_authority}
         if path == "/api/speak":

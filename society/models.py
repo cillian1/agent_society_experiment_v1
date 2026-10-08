@@ -80,7 +80,7 @@ class Abilities:
         return 1.25 - self.endurance * 0.05              # 1.2x (1) .. 0.75x (10)
 
     def memory(self) -> int:
-        return 15 + 2 * self.wits                        # memories recalled word for word
+        return 6 + self.wits                             # memories recalled word for word (7-16)
 
     def lifespan(self) -> int:
         return 600 + 80 * self.endurance                 # 680 .. 1400 days
@@ -101,6 +101,9 @@ class Agent:
     advice: list[list] = field(default_factory=list)         # [day, text] what Sol the mentor told it
     task: dict | None = None                                 # ongoing multi-hour work, e.g. {"type": "build", "id": 3}
     last_reflect: int = -999
+    last_think: int = -999            # when its brain was last asked
+    dream_at: int = -1                # the hour of tonight's dream (-1: a dreamless night)
+    last_dream: list = field(default_factory=list)          # [tick, text]
     role: str = ""                     # agents invent and claim their own roles
     goal: str = DEFAULT_GOAL
     model: str | None = None           # brain: "local", "local:<name>", or a Claude model id

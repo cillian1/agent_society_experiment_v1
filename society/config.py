@@ -97,7 +97,7 @@ TOOLS = {                             # object-name keywords -> what they're goo
 }
 
 # ---- memory & prompts ----
-KEEP_RECENT = 25                      # memory lines shown verbatim; older ones are summarised
+KEEP_RECENT = 16                      # memory lines kept verbatim; older ones are summarised
 COMPACT_AFTER = 20                    # this many unsummarised old lines trigger a summary
 ORDER_MEMORY_DAYS = 3 * DAY           # how long a request from the Human stays on an agent's mind
 MAX_IDEAS_IN_PROMPT = 10
@@ -105,8 +105,11 @@ SOL_EVERY = 3 * DAY                   # Sol's default gap between reviews; Sol p
 SOL_MIN_DAYS, SOL_MAX_DAYS = 1, 7
 SOL_HOUR = 7
 ADVICE_MEMORY = 2 * DAY
-MAX_QUEUE = 4                         # follow-up actions an agent may line up (run without a model call)
-REFLECT_EVERY = DAY                   # an agent reflects on its life and ambition once a day
+MAX_QUEUE = 6                         # follow-up actions an agent may line up (run without a model call)
+REFLECT_EVERY = 3 * DAY               # nobody goes longer than this without a night of reflection (a dream)
+DREAM_CHANCE = 0.35                   # chance of dreaming on any other night, at a random hour of sleep
+THINK_EVERY = 2                       # hours between an agent's model calls (in between: its queue or routine)
+THINK_CHOICES = (1, 2, 3, 6)          # the Settings menu: smartest ... thriftiest
 
 # ---- bookkeeping ----
 AUTOSAVE_EVERY = DAY

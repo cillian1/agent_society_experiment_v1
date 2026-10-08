@@ -20,7 +20,7 @@ def _brief(sim: Society, a: Agent) -> dict:
         "pregnant": bool(a.pregnancy), "due": a.pregnancy["due"] if a.pregnancy else None,
         "x": a.x, "y": a.y, "hunger": int(a.hunger), "health": int(a.health), "food": a.food,
         "age": a.age(t), "age_text": clock.age_text(a.age(t)), "stage": a.stage(t), "adult": a.adult(t),
-        "asleep": clock.is_night(t),
+        "asleep": clock.is_night(t), "dreaming": bool(a.last_dream) and t - a.last_dream[0] <= 1,
         "say": a.last_say if t - a.last_say_tick <= 3 else "", "say_to": a.last_say_to,
         "heart": t - a.heart_tick <= 3,
         "doing": f"{latest['action']} → {latest['result']}" if latest else "",
@@ -56,7 +56,7 @@ def state(sim: Society, since_event: int = 0) -> dict:
                             "done": b.get("done", True), "progress": round(b.get("progress", 0), 1), "work": b.get("work", 0)}
                            for b in sim.world.buildings.values()],
             "explored": sim.world.explored_pct(),
-            "authority": sim.human_authority,
+            "authority": sim.human_authority, "think_every": sim.think_every,
             "usage": sim.llm.usage(),
             "backends": sim.llm.info() if hasattr(sim.llm, "info") else {},
             "errors": sim.errors[-5:],
@@ -76,7 +76,7 @@ def agent_detail(sim: Society, name: str) -> dict | None:
         a = a or dead["agent"]
         t = sim.tick
         return {
-            **_brief(sim, a), "alive": not dead, "goal": a.goal, "traits": vars(a.traits), "trait_info": TRAIT_INFO,
+            **_brief(sim, a), "alive": not dead, "goal": a.goal, "traits": vars(a.traits), "trait_info": TRAIT_INFO, "last_dream": a.last_dream,
             "seeds": a.seeds, "wood": a.wood, "stone": a.stone, "items": a.items, "discoveries": a.discoveries,
             "parents": a.parents, "children": a.children, "pregnancy": a.pregnancy, "plan": a.plan, "ambition": a.ambition, "queue": a.queue,
             "advice": [x for x in a.advice if t - x[0] <= 20][-3:],

@@ -11,9 +11,9 @@ from pathlib import Path
 
 from . import actions, clock, gm, mind, sol
 from .clock import DAY
-from .config import (ADVICE_MEMORY, SOL_HOUR, SOL_EVERY, HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
+from .config import (ADVICE_MEMORY, SOL_HOUR, SOL_EVERY, HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, DREAM_CHANCE, THINK_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
                      DEFAULT_MAX_AGENTS, EAT_RELIEF, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
-                     MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS)
+                     MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS, KEEP_RECENT, COMPACT_AFTER)
 from .models import Abilities, Agent, Traits
 from .world import World
 
@@ -78,6 +78,7 @@ class Society:
         self.lock = threading.RLock()
         info = llm.info() if hasattr(llm, 'info') else {}
         smart = info.get("smart_local")
+        self.think_every = THINK_EVERY             # hours between model calls per agent (Settings)
         self.sol_model = LOCAL                   # Sol: mentor AND referee; starts on the local brain (Settings / --sol-model)
         self.sol_log: list[dict] = []
         self.sol_last, self.sol_due = -SOL_EVERY, False
@@ -100,7 +101,7 @@ class Society:
             if a.born == -999:
                 a.born = -self.rng.randint(20, 120) * DAY    # settlers start as adults of varied age
                 a.food = max(a.food, START_FOOD)
-            a.last_reflect = self.rng.randint(-REFLECT_EVERY + 1, -REFLECT_EVERY + 6)   # first reflection in days 1-5
+            a.last_reflect = -REFLECT_EVERY                # everyone dreams on their first night
             if a.abilities == Abilities():              # no abilities given: everyone gets their own mix
                 a.abilities = Abilities.random(self.rng)
             self.world.reveal(a.x, a.y, a.abilities.view())
@@ -123,6 +124,11 @@ class Society:
             if self.tick >= self.sol_next and clock.when(self.tick)["hour"] == SOL_HOUR and self.agents:
                 self.sol_last, self.sol_due = self.tick, True       # Sol's review (a morning address)
                 self.sol_next = self.tick + SOL_EVERY                # unless Sol decides otherwise
+            if clock.when(self.tick)["hour"] == clock.NIGHT_FROM:    # bedtime: who will dream tonight, and when
+                for a in self.agents.values():
+                    due = self.tick - a.last_reflect >= REFLECT_EVERY
+                    a.dream_at = (self.tick + self.rng.randint(1, 7) if not a.is_baby(self.tick)
+                                  and (due or self.rng.random() < DREAM_CHANCE) else -1)
             if clock.when(self.tick)["hour"] == clock.NIGHT_TO:      # dawn
                 for a in self.agents.values():
                     a.heard.append(f"A new day dawns: {clock.stamp(self.tick)}.")
@@ -155,6 +161,7 @@ class Society:
                                               self._blueprints(), self._mentor_for(a)),
                    "others": [o.name for o in agents if o is not a], "heard": a.heard}
             a.heard = []
+            a.last_think = self.tick
             return job
 
     def take_queued(self, a: Agent) -> dict | None:
@@ -170,9 +177,9 @@ class Society:
                     nxt = ({"action": "work"} if self.world._gap(site, a.x, a.y) <= 1 else
                            {"action": "go", "target": f"{site['x']},{site['y']}"})
                     a.queue = [mind.parse_action(json.dumps(nxt), [])]
-            if not a.queue:
-                return None
             last = a.history[-1]["result"] if a.history else ""
+            if not a.queue:
+                return self._routine(a, last)
             nxt = a.queue[0]
             hungry = a.hunger >= HUNGER_WARNING and nxt["action"] not in ("eat", "gather") and nxt.get("target") != "food"
             baby = any(a.name in b.parents and b.is_baby(self.tick) and b.hunger >= 50 for b in self.agents.values())
@@ -189,23 +196,53 @@ class Society:
             act["thought"] = f"(following my plan) {act.get('thought') or ''}".strip()
             return act
 
+    def _routine(self, a: Agent, last: str) -> dict | None:
+        """Between thoughts (see think_every) an agent carries on with an obvious routine instead of asking its brain.
+        Anything that needs real thinking - being spoken to, a failure, hunger without food, a baby - asks the brain."""
+        if self.tick - a.last_think >= self.think_every or mind.failed(last):
+            return None
+        if any(k in h for h in a.heard for k in ("The Human", " to you", "courting you", "gave you", "child", "birth", "died")):
+            return None
+        act = mind.routine(a, self.world, list(self.agents.values()), self.tick)
+        if act:
+            act["thought"] = f"(routine) {act['thought']}"
+        return act
+
+    def dreamers(self) -> list[Agent]:
+        """Who dreams this hour. The rest of the night costs nothing: sleepers don't think."""
+        with self.lock:
+            return [a for a in self.agents.values() if a.dream_at == self.tick]
+
+    def dream(self, a: Agent):
+        """One model call in the night: look back on life, set an ambition, maybe wake with an idea, and fold old
+        memories into the summary (so no separate summary call is needed)."""
+        a.last_reflect, a.dream_at, tick = self.tick, -1, self.tick
+        upto = len(a.log) - KEEP_RECENT if a.needs_compaction() else None
+        try:
+            r = mind.dream(a, self.llm, tick, self._ideas(), a.log[a.sum_upto:upto] if upto else None)
+        except Exception as e:
+            self._error(a, e, "dream failed")
+            return
+        with self.lock:
+            if r["dream"]:
+                a.last_dream = [tick, r["dream"]]
+                a.remember(tick, f"I dreamt: {r['dream']}")
+            if r["insight"]:
+                a.remember(tick, f"Thinking in the night: {r['insight']}")
+            if r["ambition"] and r["ambition"] != a.ambition:
+                a.ambition = r["ambition"]
+                a.remember(tick, f"My ambition: {a.ambition}")
+                self.event(tick, a, f"set an ambition: {a.ambition}", "goal")
+            if r["plan"]:
+                a.plan = r["plan"]
+            if r["idea"]:
+                a.remember(tick, f"I woke up with an idea: {r['idea']}")
+                self.event(tick, a, f"dreamt up an idea: {r['idea']}", "dream")
+            if upto and r["summary"]:
+                a.summary, a.sum_upto = r["summary"], upto
+
     def think(self, a: Agent, job: dict) -> dict:
         """Ask the agent's brain (no lock held; runs in parallel with everyone else)."""
-        if self.tick - a.last_reflect >= REFLECT_EVERY:
-            a.last_reflect = self.tick
-            try:
-                r = mind.reflect(a, self.llm, self.tick, self._ideas())
-                with self.lock:
-                    if r["insight"]:
-                        a.remember(self.tick, f"Reflecting on my life: {r['insight']}")
-                    if r["ambition"] and r["ambition"] != a.ambition:
-                        a.ambition = r["ambition"]
-                        a.remember(self.tick, f"My ambition: {a.ambition}")
-                        self.event(self.tick, a, f"set an ambition: {a.ambition}", "goal")
-                    if r["plan"]:
-                        a.plan = r["plan"]
-            except Exception as e:
-                self._error(a, e, "reflection failed")
         try:
             act = mind.decide(a, self.llm, job["prompt"], job["others"])
         except Exception as e:                        # one broken brain must not stop everyone else
@@ -221,7 +258,7 @@ class Society:
                 act["gm"] = gm.judge(self, a, act)
             except Exception as e:
                 self._error(a, e, "Sol could not judge this")
-        if a.needs_compaction():
+        if len(a.log) - a.sum_upto > 3 * (KEEP_RECENT + COMPACT_AFTER):   # normally dreams fold memories in
             try:
                 mind.compact_memory(a, self.llm, self._summary_model())
             except Exception as e:
@@ -244,6 +281,8 @@ class Society:
             return
         t0 = time.time()
         self.begin_day()
+        for a in self.dreamers():
+            self.dream(a)
         agents = list(self.agents.values())
         jobs = []
         for a in agents:
@@ -486,8 +525,8 @@ class Society:
                 for d in self.discoveries]
 
     def _blueprints(self) -> list[str]:
-        return [f"{b['kind']}: {', '.join(f'{v} {k}' for k, v in b['cost'].items())} - {b['description']}"
-                for b in list(self.blueprints.values())[-12:]]
+        return [f"{b['kind']} ({', '.join(f'{v} {k}' for k, v in b['cost'].items()) or 'free'}"
+                + (f", {b['function']}" if b.get("function") else "") + ")" for b in list(self.blueprints.values())[-10:]]
 
     def _mentor_for(self, a: Agent) -> list[str]:
         return [t for d, t in a.advice if self.tick - d <= ADVICE_MEMORY][-3:]
@@ -651,7 +690,7 @@ class Society:
                 "dead": [{"agent": d["agent"].to_dict(), "tick": d["tick"], "cause": d["cause"]} for d in self.dead.values()],
                 "events": self.events, "inventions": self.inventions, "discoveries": self.discoveries,
                 "blueprints": self.blueprints, "sol_log": self.sol_log, "sol_last": self.sol_last, "sol_next": self.sol_next,
-                "sol_model": self.sol_model, "talk": self.talk, "stats": self.stats,
+                "sol_model": self.sol_model, "think_every": self.think_every, "talk": self.talk, "stats": self.stats,
                 "chat": [c for c in self.chat if not c.get("pending")],
             }
 
@@ -670,4 +709,5 @@ class Society:
         s.blueprints = d.get("blueprints", {})
         s.sol_log, s.sol_last = d.get("sol_log", []), d.get("sol_last", s.tick)
         s.sol_next = d.get("sol_next", s.tick + 1)
+        s.think_every = d.get("think_every", THINK_EVERY)
         return s
