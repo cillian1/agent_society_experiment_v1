@@ -638,12 +638,12 @@ async function poll() {
       <button class="btn" id="sol-now" style="float:right;padding:3px 10px">Review now</button>
       <div class="small" style="margin-top:6px">${so.log.length ? esc(so.log[so.log.length - 1].note || so.log[so.log.length - 1].speech) : 'Sol hasn\'t reviewed the society yet. Pick 🧙 Sol below to talk to Sol.'}</div>`;
     $('sol-now').onclick = () => api.post('/api/sol').then(() => toast('🧙 Sol is reviewing the society…', '#ffd93d'));
-    if (document.activeElement !== $('solm')) $('solm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[so.model] || 'local';
+    if (document.activeElement !== $('solm')) $('solm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[so.model] || (so.model.startsWith('local:') ? 'smart' : 'local');
     $('blueprints').innerHTML = st.blueprints.length ? st.blueprints.slice().reverse().map(b => `<div class="disc" style="background:var(--panel-2);border-color:var(--line)">${iconFor(b.kind)} <b>${esc(b.kind)}</b>
       <span class="muted">${b.by ? 'designed by ' + esc(b.by) : ''}</span><div>${esc(b.description)}</div>
       <span class="eff" style="color:var(--text-2)">needs ${Object.entries(b.cost).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing'}</span></div>`).join('')
       : '<p class="muted small">No blueprints yet. The first time someone builds a new kind of building, its cost and purpose are worked out and shared here.</p>';
-    if (document.activeElement !== $('gm')) $('gm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[st.gm_model] || 'local';
+    if (document.activeElement !== $('gm')) $('gm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[st.gm_model] || (st.gm_model.startsWith('local:') ? 'smart' : 'local');
     if (S.tab === 'settings') renderUsage();
   } catch (e) { console.error(e); }
   polling = false;

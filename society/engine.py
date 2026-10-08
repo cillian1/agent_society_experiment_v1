@@ -75,8 +75,8 @@ class Society:
         self.blueprints: dict[str, dict] = {}    # what each kind of building costs and does (shared knowledge)
         self.lock = threading.RLock()
         info = llm.info() if hasattr(llm, 'info') else {}
-        self.gm_model = HAIKU if info.get('claude') else LOCAL   # the referee for attempts and inventions
         smart = info.get("smart_local")
+        self.gm_model = HAIKU if info.get('claude') else (f"local:{smart}" if smart else LOCAL)   # the referee
         self.sol_model = HAIKU if info.get("claude") else (f"local:{smart}" if smart else LOCAL)   # Sol the mentor
         self.sol_log: list[dict] = []
         self.sol_last, self.sol_due = 0, False
