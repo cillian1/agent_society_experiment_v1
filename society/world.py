@@ -1,9 +1,12 @@
 """2D tile world: generation, walkability, food regrowth and local views."""
 import random
 
-GRASS, WATER, SAND, ROCK, FOOD = "grass", "water", "sand", "rock", "food"
-GLYPH = {GRASS: "G", WATER: "~", SAND: ".", ROCK: "#", FOOD: "F"}
-FOOD_REGROW_TICKS = 40
+GRASS, WATER, SAND, ROCK, FOOD, SPROUT, CROP = "grass", "water", "sand", "rock", "food", "sprout", "crop"
+GLYPH = {GRASS: "g", WATER: "~", SAND: ".", ROCK: "#", FOOD: "f", SPROUT: ",", CROP: "*"}
+FOOD_REGROW_TICKS = 150     # wild bushes come back slowly
+GROW_NEEDED = 8.0           # growth points for a planted sprout to ripen
+TEAMWORK_WINDOW = 6         # turns within which a second farmer counts as "working together"
+WALKABLE = (GRASS, SAND, FOOD, SPROUT, CROP)
 
 
 class World:
@@ -12,6 +15,10 @@ class World:
         self.rng = random.Random(seed)
         self.tiles = self._generate()
         self.regrow: dict[tuple[int, int], int] = {}  # (x, y) -> tick food returns
+        self.plants: dict[tuple[int, int], dict] = {}  # (x, y) -> {"growth": float, "tended": {name: tick}}
+        self.irrigated = {(x, y) for y in range(self.height) for x in range(self.width)
+                          if any(self.in_bounds(x + dx, y + dy) and self.tiles[y + dy][x + dx] == WATER
+                                 for dx in (-2, -1, 0, 1, 2) for dy in (-2, -1, 0, 1, 2))}
 
     def _noise(self) -> list[list[float]]:
         """Smooth value noise: bilinear-interpolated coarse grids at two scales."""
@@ -51,7 +58,7 @@ class World:
                 if tiles[y][x] == GRASS:
                     near_water = any(self.in_bounds(x + dx, y + dy) and tiles[y + dy][x + dx] == WATER
                                      for dx in (-2, -1, 0, 1, 2) for dy in (-2, -1, 0, 1, 2))
-                    if self.rng.random() < (0.14 if near_water else 0.05):
+                    if self.rng.random() < (0.09 if near_water else 0.03):
                         tiles[y][x] = FOOD
         return tiles
 
@@ -62,27 +69,63 @@ class World:
         return self.tiles[y][x]
 
     def walkable(self, x: int, y: int) -> bool:
-        return self.in_bounds(x, y) and self.tiles[y][x] in (GRASS, SAND, FOOD)
+        return self.in_bounds(x, y) and self.tiles[y][x] in WALKABLE
 
-    def take_food(self, x: int, y: int, tick: int) -> bool:
-        if self.in_bounds(x, y) and self.tiles[y][x] == FOOD:
+    def harvest(self, x: int, y: int, tick: int):
+        """Pick a bush (1 food, maybe a seed) or a ripe crop (3 food + seed, field replants itself)."""
+        if not self.in_bounds(x, y):
+            return None
+        t = self.tiles[y][x]
+        if t == FOOD:
             self.tiles[y][x] = GRASS
             self.regrow[(x, y)] = tick + FOOD_REGROW_TICKS
+            return 1, (1 if self.rng.random() < 0.5 else 0), t
+        if t == CROP:
+            self.tiles[y][x] = SPROUT
+            self.plants[(x, y)] = {"growth": 0.0, "tended": {}}
+            return 3, 1, t
+        return None
+
+    def plant(self, x: int, y: int) -> bool:
+        if self.in_bounds(x, y) and self.tiles[y][x] == GRASS and (x, y) not in self.regrow:
+            self.tiles[y][x] = SPROUT
+            self.plants[(x, y)] = {"growth": 0.0, "tended": {}}
             return True
         return False
+
+    def tend(self, x: int, y: int, who: str, tick: int):
+        """Work a sprout. A second farmer within TEAMWORK_WINDOW turns doubles the effect."""
+        p = self.plants[(x, y)]
+        partners = [n for n, t in p["tended"].items() if n != who and tick - t <= TEAMWORK_WINDOW]
+        p["growth"] += 2 if partners else 1
+        p["tended"][who] = tick
+        if p["growth"] >= GROW_NEEDED:
+            self.tiles[y][x] = CROP
+        return p["growth"], partners
 
     def update(self, tick: int):
         for pos, t in list(self.regrow.items()):
             if tick >= t:
-                self.tiles[pos[1]][pos[0]] = FOOD
+                if self.tiles[pos[1]][pos[0]] == GRASS:
+                    self.tiles[pos[1]][pos[0]] = FOOD
                 del self.regrow[pos]
+        for (x, y), p in self.plants.items():
+            if self.tiles[y][x] == SPROUT:
+                p["growth"] += 0.2 if (x, y) in self.irrigated else 0.05   # nature helps a little
+                if p["growth"] >= GROW_NEEDED:
+                    self.tiles[y][x] = CROP
+
+    def plants_near(self, x: int, y: int, reach: int = 1):
+        return [(fx, fy) for fy in range(max(0, y - reach), min(self.height, y + reach + 1))
+                for fx in range(max(0, x - reach), min(self.width, x + reach + 1))
+                if self.tiles[fy][fx] == SPROUT]
 
     def food_near(self, x: int, y: int, reach: int = 1):
-        """Food tiles within chebyshev distance `reach`, nearest first."""
+        """Food tiles (wild bushes or ripe crops) within chebyshev distance `reach`, nearest first."""
         found = [(max(abs(fx - x), abs(fy - y)), fx, fy)
                  for fy in range(max(0, y - reach), min(self.height, y + reach + 1))
                  for fx in range(max(0, x - reach), min(self.width, x + reach + 1))
-                 if self.tiles[fy][fx] == FOOD]
+                 if self.tiles[fy][fx] in (FOOD, CROP)]
         return [(fx, fy) for _, fx, fy in sorted(found)]
 
     def view(self, x: int, y: int, radius: int, others: dict[tuple[int, int], str]) -> str:

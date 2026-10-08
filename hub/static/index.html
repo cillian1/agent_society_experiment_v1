@@ -35,12 +35,12 @@ textarea{width:100%;resize:vertical;min-height:58px}
 .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-2px}
 </style></head><body>
 <header><h1>Agent Society Hub</h1>
-<span id="usage" class="dim" style="cursor:help">usage: –</span><span id="tick" class="dim">tick 0</span>
+<span id="usage" class="dim" style="cursor:help">usage: –</span><span id="pop" class="dim">👥 –</span><span id="tick" class="dim">tick 0</span>
 <button id="pause">Pause</button>
 <label class="dim">speed <select id="speed"><option value="2">slow</option><option value="1" selected>normal</option><option value="0.3">fast</option></select></label></header>
 <main>
 <div id="left"><canvas id="c"></canvas><div id="hover">Hover over the map for details · click an agent to inspect it</div>
-<div class="legend"><span><i style="background:#4e9a47"></i>grass</span><span><i style="background:#2f6fb5"></i>water (impassable)</span><span><i style="background:#d9c88a"></i>sand</span><span><i style="background:#7b7f86"></i>rock (impassable)</span><span><i style="background:#2f7d32;box-shadow:inset 0 0 0 3px #d62f4b"></i>food bush (regrows)</span><span>agent ring colour = hunger bar above head</span></div></div>
+<div class="legend"><span><i style="background:#4e9a47"></i>grass</span><span><i style="background:#2f6fb5"></i>water (impassable)</span><span><i style="background:#d9c88a"></i>sand</span><span><i style="background:#7b7f86"></i>rock (impassable)</span><span><i style="background:#2f7d32;box-shadow:inset 0 0 0 3px #d62f4b"></i>food bush (regrows)</span><span><i style="background:#4e9a47;box-shadow:inset 0 -6px 0 #6b4a2b"></i>young plant</span><span><i style="background:#e8c547"></i>ripe crop</span><span>🪦 dead · ❤️ in love · small = child</span></div></div>
 <div id="right">
 <div class="panel"><h2>🗣 Speak to the agents</h2><div class="chips" id="to"></div>
 <textarea id="msg" placeholder="Type a message… (Enter to send, Shift+Enter for a new line)"></textarea>
@@ -48,12 +48,13 @@ textarea{width:100%;resize:vertical;min-height:58px}
 <div class="tag" style="margin-top:6px">Agents hear you wherever they are, on their next turn, and can reply to “Human”.</div></div>
 <div class="panel"><h2>Agents</h2><div class="cards" id="cards"></div></div>
 <div class="panel" id="detail"><h2>Inspector</h2><div class="dim">Click an agent on the map or in the list to see what it is thinking and what it has done.</div></div>
+<div class="panel"><h2>💡 Ideas &amp; inventions <span class="tag">(shared culture)</span></h2><div class="scroll" id="ideas"><div class="dim">nothing invented yet</div></div></div>
 <div class="panel"><h2>World feed</h2><div class="scroll" id="feed"></div></div>
 </div></main>
 <script>
 const T=28,$=id=>document.getElementById(id);
 const cv=$('c'),ctx=cv.getContext('2d'),bg=document.createElement('canvas'),bctx=bg.getContext('2d');
-let W=0,H=0,tiles=[],drawn=[],agents=[],disp={},sel=null,state={},toSet=new Set(['*']),detailFor=null,histKey='';
+let dead=[],ideas=[],W=0,H=0,tiles=[],drawn=[],agents=[],disp={},sel=null,state={},toSet=new Set(['*']),detailFor=null,histKey='';
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const rnd=(x,y,k=0)=>{let h=(x*374761393+y*668265263+k*2147483647)>>>0;h=((h^(h>>>13))*1274126177)>>>0;return ((h^(h>>>16))>>>0)/4294967296};
 async function j(u,o){return (await fetch(u,o)).json()}
@@ -62,7 +63,7 @@ const post=(u,b)=>j(u,{method:'POST',body:JSON.stringify(b)});
 /* ---------- map rendering ---------- */
 function paintTile(x,y){
   const t=tiles[y][x],px=x*T,py=y*T,c=bctx,v=rnd(x,y);
-  const base={grass:[78,154,71],food:[78,154,71],water:[47,111,181],sand:[217,200,138],rock:[123,127,134]}[t];
+  const base={grass:[78,154,71],food:[78,154,71],sprout:[78,154,71],crop:[78,154,71],water:[47,111,181],sand:[217,200,138],rock:[123,127,134]}[t];
   const k=(v-.5)*14;c.fillStyle=`rgb(${base.map(n=>Math.round(n+k)).join(',')})`;c.fillRect(px,py,T,T);
   if(t==='grass'||t==='food'){
     c.strokeStyle='rgba(30,90,35,.55)';c.lineWidth=1.4;
@@ -74,6 +75,13 @@ function paintTile(x,y){
     c.fillStyle='#37803b';c.beginPath();c.arc(px+T/2-3,py+T/2-1,T*.22,0,7);c.fill();
     c.fillStyle='#e0334e';[[-6,3],[5,0],[0,8],[-1,-3],[7,7]].forEach(([a,b])=>{c.beginPath();c.arc(px+T/2+a,py+T/2+b,2.6,0,7);c.fill()});
     c.fillStyle='rgba(255,255,255,.7)';[[-6,3],[5,0]].forEach(([a,b])=>c.fillRect(px+T/2+a-1,py+T/2+b-1.5,1.3,1.3));
+  }
+  if(t==='sprout'||t==='crop'){
+    c.fillStyle='#6b4a2b';c.fillRect(px+3,py+T-9,T-6,6);c.fillStyle='#4f3820';for(let i=0;i<4;i++)c.fillRect(px+5+i*5,py+T-8,2,1.5);
+    if(t==='sprout'){c.strokeStyle='#8fe36b';c.lineWidth=2;[[-5,0],[0,-3],[5,0]].forEach(([a,b])=>{c.beginPath();c.moveTo(px+T/2,py+T-9);c.quadraticCurveTo(px+T/2+a,py+T-14+b,px+T/2+a*1.4,py+T-17+b);c.stroke()});
+      c.fillStyle='#b6f09a';c.beginPath();c.arc(px+T/2,py+T-12,2,0,7);c.fill()}
+    else{for(let i=0;i<5;i++){const a=px+5+i*4.5;c.strokeStyle='#d8b640';c.lineWidth=2;c.beginPath();c.moveTo(a,py+T-9);c.lineTo(a-1,py+7);c.stroke();
+      c.fillStyle='#f3d35a';c.beginPath();c.ellipse(a-1,py+8,2,4,0,0,7);c.fill()}}
   }
   if(t==='water'){
     c.strokeStyle='rgba(255,255,255,.22)';c.lineWidth=1.5;
@@ -96,9 +104,10 @@ function syncTiles(next){
 }
 function frame(){
   ctx.drawImage(bg,0,0);
+  for(const g of dead){ctx.font='18px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.globalAlpha=.85;ctx.fillText('🪦',g.x*T+T/2,g.y*T+T/2);ctx.globalAlpha=1}
   for(const a of agents){
     const d=disp[a.name]||(disp[a.name]={x:a.x,y:a.y});d.x+=(a.x-d.x)*.18;d.y+=(a.y-d.y)*.18;
-    const px=d.x*T+T/2,py=d.y*T+T/2,r=T/2-3;
+    const px=d.x*T+T/2,py=d.y*T+T/2,r=(T/2-3)*(a.adult?1:.72);
     ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(px,py+r+1,r*.9,r*.35,0,0,7);ctx.fill();
     if(sel===a.name){ctx.strokeStyle='#ffd93d';ctx.lineWidth=3;ctx.beginPath();ctx.arc(px,py,r+5,0,7);ctx.stroke()}
     ctx.fillStyle=a.color;ctx.strokeStyle='#111';ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(px,py,r,0,7);ctx.fill();ctx.stroke();
@@ -107,6 +116,7 @@ function frame(){
     ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(px-11,py-r-9,22,5);ctx.fillStyle=hc;ctx.fillRect(px-10,py-r-8,20*(1-a.hunger/100),3);
     if(a.food>0){ctx.fillStyle='#d62f4b';ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(px+r,py-r+2,5.5,0,7);ctx.fill();ctx.stroke();
       ctx.fillStyle='#fff';ctx.font='bold 8px system-ui';ctx.fillText(a.food>9?'9+':a.food,px+r,py-r+2.5)}
+    if(a.heart){ctx.font='15px system-ui';ctx.textAlign='center';ctx.fillText('❤️',px+r+2,py-r-12)}
     ctx.font='bold 11px system-ui';const nw=ctx.measureText(a.name).width+10;
     ctx.fillStyle='rgba(10,12,16,.75)';ctx.beginPath();ctx.roundRect(px-nw/2,py+r+4,nw,15,6);ctx.fill();
     ctx.fillStyle='#fff';ctx.fillText(a.name,px,py+r+11.5);
@@ -120,15 +130,17 @@ const tileAt=e=>{const r=cv.getBoundingClientRect();return{fx:(e.clientX-r.left)
 const nearest=(fx,fy,lim)=>{let best=null,bd=lim;for(const a of agents){const d=disp[a.name]||a,k=Math.hypot(d.x+.5-fx,d.y+.5-fy);if(k<bd){bd=k;best=a}}return best};
 cv.addEventListener('click',e=>{const{fx,fy}=tileAt(e),a=nearest(fx,fy,1.1);if(a)select(a.name)});
 cv.addEventListener('mousemove',e=>{const{fx,fy}=tileAt(e),x=Math.floor(fx),y=Math.floor(fy);if(!tiles[y]||!tiles[y][x])return;
-  const a=nearest(fx,fy,.8),names={grass:'grass (walkable)',water:'water (impassable)',sand:'sand (walkable)',rock:'rock (impassable)',food:'food bush (walkable, gather to eat)'};
+  const a=nearest(fx,fy,.8),names={grass:'grass (walkable)',water:'water (impassable)',sand:'sand (walkable)',rock:'rock (impassable)',food:'wild food bush (slow to regrow)',sprout:'young plant (tend it to grow)',crop:'ripe crop (gather: 3 food + seed)'};
   $('hover').innerHTML=`(${x}, ${y}) · ${names[tiles[y][x]]}`+(a?` · <b style="color:${a.color}">${esc(a.name)}</b> the ${esc(a.role)} — hunger ${a.hunger}/100, carrying ${a.food} food`:'')});
 
 /* ---------- agents list, speak panel ---------- */
+const TIER={haiku:'🌱',sonnet:'⭐',opus:'👑'};
 function renderCards(){
   $('cards').innerHTML=agents.map(a=>{const l=a.latest,hc=a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77';
-    return `<div class="card ${sel===a.name?'sel':''}" onclick="select('${a.name}')"><div class="top"><b><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</b><span class="tag">${esc(a.role)}</span></div>
+    return `<div class="card ${sel===a.name?'sel':''}" onclick="select('${a.name}')"><div class="top"><b><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</b><span class="tag">${TIER[a.tier]} ${esc(a.role)}${a.adult?'':' 👶'}</span></div>
     <div class="bar" style="margin-top:5px"><div style="width:${a.hunger}%;background:${hc}"></div></div>
-    <div class="now">${l?esc(l.action)+' → '+esc(l.result):'waiting…'}</div></div>`}).join('')}
+    <div class="now">${l?esc(l.action)+' → '+esc(l.result):'waiting…'}</div></div>`}).join('')
+   +dead.map(a=>`<div class="card ${sel===a.name?'sel':''}" style="opacity:.55" onclick="select('${a.name}')"><div class="top"><b>🪦 ${esc(a.name)}</b><span class="tag">died t${a.died}</span></div><div class="now">${esc(a.cause)}</div></div>`).join('')}
 function renderTo(){
   const all=toSet.has('*');
   $('to').innerHTML=`<span class="chip ${all?'on':''}" onclick="toggleTo('*')">Everyone</span>`+agents.map(a=>`<span class="chip ${!all&&toSet.has(a.name)?'on':''}" onclick="toggleTo('${a.name}')"><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</span>`).join('')}
@@ -145,20 +157,33 @@ $('send').onclick=speak;
 $('msg').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();speak()}});
 
 /* ---------- inspector ---------- */
+async function tier(name,t){await post('/api/tier',{name,tier:t});poll1()}
 function select(n){sel=n;toSet=new Set([n]);renderTo();renderCards();detailFor=null;histKey='';renderDetail();loadHistory()}
 function renderDetail(){
-  const a=agents.find(x=>x.name===sel),el=$('detail');if(!a)return;
+  const a=agents.find(x=>x.name===sel)||dead.find(x=>x.name===sel),el=$('detail');if(!a)return;
   if(detailFor!==sel){detailFor=sel;el.innerHTML=`<h2 id="d-title"></h2><div id="d-stats"></div>
+    <div class="section" id="d-tier"></div>
     <div class="section"><h2>Right now</h2><div id="d-now"></div></div>
+    <div class="section"><h2>Feelings &amp; family</h2><div id="d-rel"></div></div>
+    <div class="section"><h2>Long-term memory</h2><div id="d-mem"></div></div>
     <div class="section"><h2>Personality</h2><div id="d-traits"></div></div>
     <div class="section"><h2>Everything it has thought &amp; done <span class="tag">(newest first)</span></h2><div class="scroll" id="hist"><div class="dim">loading…</div></div></div>`}
   const hc=a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77',l=a.latest;
   $('d-title').innerHTML=`<span class="dot" style="background:${a.color}"></span>${esc(a.name)} · ${esc(a.role)}`;
   $('d-stats').innerHTML=`<div class="kv"><span class="dim">Goal</span><span>${esc(a.goal)}</span><span class="dim">Model</span><span>${esc(a.model||'default')}</span>
-    <span class="dim">Position</span><span>(${a.x}, ${a.y})</span><span class="dim">Carrying</span><span>${a.food} food</span><span class="dim">Skills</span><span>${esc(a.skills.join(', '))}</span>
+    <span class="dim">Position</span><span>(${a.x}, ${a.y})</span><span class="dim">Age</span><span>${a.age==null?'original settler':a.age+' turns'+(a.adult?' (adult)':' (child)')}</span><span class="dim">Carrying</span><span>${a.food} food, ${a.seeds} seeds</span><span class="dim">Health</span><span>${a.health}/100</span><span class="dim">Skills</span><span>${esc(a.skills.join(', '))}</span>
     <span class="dim">Hunger</span><span>${a.hunger}/100<div class="bar" style="margin-top:3px"><div style="width:${a.hunger}%;background:${hc}"></div></div></span></div>`;
   $('d-now').innerHTML=l?`${l.heard&&l.heard.length?`<div class="heard">👂 heard: ${l.heard.map(esc).join(' · ')}</div>`:''}
     <div class="thought">💭 ${esc(l.thought)}</div><div class="act">▶ <b>${esc(l.action)}</b> <span class="dim">→ ${esc(l.result)}</span></div>`:'<div class="dim">No turn taken yet.</div>';
+  $('d-tier').innerHTML=a.alive?`<span class="tag">Brain: <b>${TIER[a.tier]} ${a.tier}</b> (${esc(a.model||'default')})</span><div class="row" style="margin-top:6px">
+    <button ${a.tier==='haiku'?'':'disabled'} onclick="tier('${a.name}','sonnet')">⭐ Upgrade to Sonnet</button>
+    <button ${a.tier==='opus'?'disabled':''} onclick="tier('${a.name}','opus')">👑 Enlighten (Opus)</button>
+    <button ${a.tier==='haiku'?'disabled':''} onclick="tier('${a.name}','haiku')">🌱 Back to Haiku</button></div>
+    <div class="tag" style="margin-top:4px">Only one agent can be enlightened at a time; enlightening another drops the current one to Sonnet.</div>`:`<b>${esc(a.name)} died of ${esc(a.cause)} on turn ${a.died}.</b>`;
+  const bonds=Object.entries(a.bonds||{});
+  $('d-rel').innerHTML=(bonds.length?bonds.map(([n,v])=>`<div class="trait"><span>${v>=state.limits.love?'💖 ':''}${esc(n)}</span><div class="bar"><div style="width:${v}%;background:${v>=state.limits.love?'#f15bb5':'#b08ad8'}"></div></div><span>${v}</span></div>`).join(''):'<div class="dim">no strong feelings yet</div>')
+    +`<div class="tag" style="margin-top:6px">Parents: ${a.parents.map(esc).join(' & ')||'none'} · Children: ${a.children.map(esc).join(', ')||'none'}</div>`;
+  $('d-mem').innerHTML=(a.memory||[]).map(m=>`<div class="tag">• ${esc(m)}</div>`).join('')||'<div class="dim">nothing yet</div>';
   $('d-traits').innerHTML=Object.entries(a.traits).map(([k,v])=>`<div class="trait"><span class="dim">${k}</span><div class="bar"><div style="width:${v*100}%;background:#7aa2f7"></div></div><span>${Math.round(v*100)}</span></div>`).join('')}
 async function loadHistory(){
   if(!sel)return;const h=await j('/api/history?name='+encodeURIComponent(sel)),el=$('hist');if(!el)return;
@@ -172,12 +197,14 @@ const fmt=n=>n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':n;
 function renderUsage(u){if(!u)return;
   $('usage').textContent=`${u.calls} calls · ${fmt(u.input)} in / ${fmt(u.output)} out tokens`+(u.cost!=null?` · ~$${u.cost.toFixed(3)}`:'');
   $('usage').title=Object.entries(u.models).map(([m,x])=>`${m}: ${x.calls} calls, ${x.input} in, ${x.output} out`+(x.cost!=null?`, ~$${x.cost.toFixed(4)}`:'')).join('\n')||'no calls yet'}
-async function poll(){
-  try{const s=await j('/api/state'),first=!agents.length;state=s;agents=s.agents;syncTiles(s.tiles);
+async function poll1(){
+  try{const s=await j('/api/state'),first=!agents.length;state=s;agents=s.agents;dead=s.dead;syncTiles(s.tiles);
+    $('pop').textContent=`👥 ${agents.length} alive`+(dead.length?` · 🪦 ${dead.length}`:'')+` (max ${s.limits.max_agents})`;
+    $('ideas').innerHTML=s.inventions.slice().reverse().map(i=>`<div class="feedrow"><span class="tag">turn ${i.tick}</span> <span class="dot" style="background:${i.color}"></span><b>${esc(i.title)}</b> <span class="dim">by ${esc(i.by)}</span><div>${esc(i.text)}</div></div>`).join('')||'<div class="dim">nothing invented yet</div>';
     $('tick').textContent='turn '+s.tick;$('pause').textContent=s.paused?'▶ Resume':'⏸ Pause';
     renderUsage(s.usage);renderCards();if(first||$('to').children.length!==agents.length+1)renderTo();if(sel)renderDetail();
-    $('feed').innerHTML=s.events.slice().reverse().map(e=>`<div class="feedrow ${e.human?'you':''}"><span class="tag">turn ${e.tick}</span> <span class="dot" style="background:${e.color}"></span><b>${esc(e.agent)}</b> ${esc(e.text)}</div>`).join('')||'<div class="dim">quiet so far…</div>'}catch(e){}
-  setTimeout(poll,600)}
+    $('feed').innerHTML=s.events.slice().reverse().map(e=>`<div class="feedrow ${e.human?'you':''}"><span class="tag">turn ${e.tick}</span> <span class="dot" style="background:${e.color}"></span><b>${esc(e.agent)}</b> ${esc(e.text)}</div>`).join('')||'<div class="dim">quiet so far…</div>'}catch(e){console.error(e)}}
+function poll(){poll1().finally(()=>setTimeout(poll,600))}
 async function histLoop(){try{await loadHistory()}catch(e){}setTimeout(histLoop,1200)}
 $('pause').onclick=()=>post('/api/control',{paused:!state.paused});
 $('speed').onchange=e=>post('/api/control',{interval:+e.target.value});

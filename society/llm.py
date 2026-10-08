@@ -40,7 +40,7 @@ class UsageMixin:
 
 
 class ClaudeLLM(UsageMixin):
-    def __init__(self, model: str = "claude-haiku-5-5", max_tokens: int = 350, prices: dict | None = None):
+    def __init__(self, model: str = "claude-haiku-5-5", max_tokens: int = 500, prices: dict | None = None):
         self._init_usage(prices)
         import anthropic  # imported lazily so the mock works without the SDK
 
@@ -72,27 +72,46 @@ class MockLLM(UsageMixin):
 
     def complete(self, system: str, prompt: str, model: str | None = None) -> str:
         self._record("mock", 0, 0)
+        rng = self.rng
         if "The Human says" in prompt:
             return json.dumps(dict(thought="The human spoke to me, I should answer.", action="say", to="Human",
                                    message="I hear you, human! (mock reply)"))
         hunger = int(re.search(r"Hunger: (\d+)", prompt).group(1))
         carried = int(re.search(r"Food carried: (\d+)", prompt).group(1))
+        seeds = int(re.search(r"Seeds: (\d+)", prompt).group(1))
         reach = "reach to gather: yes" in prompt
+        tendable = int(re.search(r"to tend: (\d+)", prompt).group(1))
         m = re.search(r"Nearest food: dx=(-?\d+) dy=(-?\d+)", prompt)
-        if carried and hunger > 50:
+        partner = re.search(r"have a child right now with: (\w+)", prompt)
+        asked = re.search(r"Choose procreate with to=(\w+)", prompt)
+        near = re.search(r"Agents in view: (\w+) \[", prompt)
+        if partner or asked:
+            return json.dumps(dict(thought="We love each other; let's have a child.", action="procreate",
+                                   to=(partner or asked).group(1), baby_name=rng.choice(["Tiko", "Mara", "Bo", "Lio"])))
+        if carried and hunger > 45:
             d = dict(thought="I'm getting hungry, time to eat.", action="eat")
-        elif reach:
+        elif reach and hunger > 20:
             d = dict(thought="Food is right here, grabbing it.", action="gather")
-        elif m and self.rng.random() < 0.9:
+        elif tendable and rng.random() < 0.8:
+            d = dict(thought="This plant needs tending.", action="tend")
+        elif seeds and rng.random() < 0.5:
+            d = dict(thought="I'll plant a seed and start a little farm.", action="plant",
+                     direction=rng.choice(["north", "south", "east", "west"]))
+        elif near and rng.random() < 0.5:
+            d = dict(thought=f"I like {near.group(1)}; let me show it.", action="court", to=near.group(1),
+                     message="You make this world brighter.")
+        elif m and rng.random() < 0.9:
             dx, dy = int(m.group(1)), int(m.group(2))
             dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
-            d = dict(thought="I can sense food nearby, heading for it.", action="move", direction=dirn)
-        elif self.rng.random() < 0.2:
-            d = dict(thought="Let me tell the others something.", action="say", to="all",
-                     message=self.rng.choice(self.LINES))
+            d = dict(thought="I can sense food nearby, heading for it.", action="move", direction=dirn,
+                     remember="food is to the " + dirn)
+        elif rng.random() < 0.05:
+            d = dict(thought="An idea!", action="invent", title="Shared Harvest",
+                     message="Everyone brings extra food to the middle of the map.")
+        elif rng.random() < 0.2:
+            d = dict(thought="Let me tell the others something.", action="say", to="all", message=rng.choice(self.LINES))
         else:
-            d = dict(thought="Nothing in sight, wandering.", action="move",
-                     direction=self.rng.choice(["north", "south", "east", "west"]))
+            d = dict(thought="Nothing in sight, wandering.", action="move", direction=rng.choice(["north", "south", "east", "west"]))
         return json.dumps(d)
 
 

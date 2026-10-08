@@ -25,6 +25,17 @@ Watch agents move on the map, with speech bubbles and a world feed. Click an age
 to see its current thought and action, stats, and its full history of thoughts and actions. Pause/speed controls
 are in the header. `serve.py --host 0.0.0.0 --port 8000` exposes it beyond localhost.
 
+## Survival, farming, love and children
+- **Scarce food:** wild bushes take 150 turns to regrow. At hunger 100 an agent loses health and can starve to death (🪦).
+- **Farming (discovered, not taught):** picking a bush sometimes yields a seed. `plant` it on grass, then `tend` it. A second agent
+  tending within 6 turns doubles the effect (teamwork); ripe crops give 3 food + a seed and replant themselves.
+- **Imagination:** agents can `invent` ideas/customs/tools, which are shared with everyone (shown in the hub) and keep a
+  long-term `remember` memory.
+- **Love & children:** `court`, `give` and talking build a *bond*. When two adult, non-related agents each reach 50, both
+  choose `procreate` (each pays 2 food) and a baby spawns. Population is capped (`--max-agents`, default 14).
+- **Brains/cost tiers:** babies run on Haiku (cheap). In the hub's inspector, **Upgrade to Sonnet** or **Enlighten (Opus)**:
+  only one agent can be Opus at a time; Fenn starts enlightened. More agents = more API calls per turn.
+
 ## Speaking to the agents
 The **Speak** panel in the hub lets you message everyone, one agent, or any group (click the name chips, then type and press Enter).
 Agents hear you anywhere in the world on their next turn, see it in their prompt as "The Human says ...", and can answer with
