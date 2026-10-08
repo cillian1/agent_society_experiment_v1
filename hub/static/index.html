@@ -10,18 +10,17 @@
 <header class="topbar">
   <div class="brand">🌱 Agent Society</div>
   <div class="pills">
-    <span class="pill strong" id="p-day" title="Simulation day">Day –</span>
-    <span class="pill" id="p-brain" title="Which brains are available">🧠 –</span>
+    <span class="pill strong clock" id="p-day" title="World time: 1 turn = 1 hour, 24 hours a day, 30 days a month, 12 months a year">–</span>
     <span class="pill" id="p-pop" title="Agents alive / population cap">👥 –</span>
     <span class="pill" id="p-explored" title="How much of the world has been explored">🧭 –</span>
-    <span class="pill" id="p-speed" title="How long the last day took to think">⏱ –</span>
-    <span class="pill" id="p-usage" title="Model usage">💬 –</span>
+    <span class="pill" id="p-usage" title="Model usage (details in ⚙️ Settings)">💬 –</span>
+    <span class="pill" id="p-speed" hidden></span>
   </div>
   <div class="transport">
     <button id="b-pause" class="btn primary" title="Pause / resume (Space)">⏸ Pause</button>
-    <button id="b-step" class="btn" title="Advance one day while paused (N)">⏭ Day</button>
+    <button id="b-step" class="btn" title="Advance one hour while paused (N)">⏭ Hour</button>
     <div class="seg" id="speed" title="Simulation speed">
-      <button data-v="3" data-w="15" title="Days last at least 3 s and wait up to 15 s for slow brains">Slow</button><button data-v="1" data-w="5" class="on" title="At least 1 s per day; slow brains get up to 5 s">Normal</button><button data-v="0.2" data-w="1.5" title="As fast as possible; slow brains act a day or two later">Fast</button>
+      <button data-v="3" data-w="15" title="Hours last at least 3 s and wait up to 15 s for slow brains">Slow</button><button data-v="1" data-w="5" class="on" title="At least 1 s per hour; slow brains get up to 5 s">Normal</button><button data-v="0.2" data-w="1.5" title="As fast as possible; slow brains act an hour or two later">Fast</button>
     </div>
     <button id="b-help" class="btn icon" title="Help &amp; shortcuts (?)">?</button>
   </div>
@@ -35,23 +34,27 @@
         <button class="btn icon" id="z-out" title="Zoom out (-)">−</button>
         <button class="btn icon" id="z-in" title="Zoom in (+)">+</button>
         <button class="btn" id="z-fit" title="Fit the whole world (0)">Fit</button>
-        <label class="toggle" title="Darken land nobody has seen yet"><input type="checkbox" id="fog" checked> Fog</label>
-        <label class="toggle" title="Show speech bubbles on the map"><input type="checkbox" id="bubbles" checked> Bubbles</label>
-        <label class="toggle" title="Keep the selected agent centred (F)"><input type="checkbox" id="follow"> Follow</label>
+        <span class="sep"></span>
+        <label class="ttoggle" title="Darken land nobody has seen yet"><input type="checkbox" id="fog" checked>🌫️ Fog</label>
+        <label class="ttoggle" title="Show speech bubbles on the map"><input type="checkbox" id="bubbles" checked>💬 Bubbles</label>
+        <label class="ttoggle" title="Keep the selected agent centred (F)"><input type="checkbox" id="follow">🎯 Follow</label>
       </div>
       <div class="mapscroll" id="mapscroll"><canvas id="map"></canvas></div>
-      <details class="legend" open>
-        <summary>Legend</summary>
+      <details class="legend">
+        <summary>Legend &amp; controls</summary>
         <div class="legend-grid">
-          <span><i style="background:#4e9a47"></i>Grass</span><span><i style="background:#2f6fb5"></i>Water</span>
-          <span><i style="background:#d9c88a"></i>Sand</span><span><i style="background:#8f949c"></i>Rock (stone)</span>
-          <span><i style="background:#245c2a"></i>Tree (wood)</span><span><i style="background:#2b6a2f;box-shadow:inset 0 0 0 3px #e0334e"></i>Berry bush</span>
-          <span><i style="background:#6b4a2b;box-shadow:inset 0 -5px 0 #8fe36b"></i>Young plant</span><span><i style="background:#f3d35a"></i>Ripe crop</span>
-          <span>🏠 Built by agents</span><span>🪦 Grave</span><span>❤️ In love</span><span>🤰 Pregnant · 🍼 Baby</span>
+          <span><i style="background:#4f9a47"></i>Grass</span><span><i style="background:#2f6fb5"></i>Water (impassable)</span>
+          <span><i style="background:#d8c68a"></i>Sand</span><span>🪨 Rock → stone</span>
+          <span>🌳 Tree → wood</span><span>🫐 Berry bush → food</span>
+          <span>🌱 Young plant (grows itself)</span><span>🌾 Ripe crop</span>
+          <span>🏠 Building (walk-in)</span><span>🏗️ Construction + progress</span>
+          <span><b style="color:#5cc46e">▬</b> Hunger left</span><span><b style="color:#ffd93d">▬</b> Task progress</span>
+          <span>💤 Asleep (22:00–06:00)</span><span>❤️ In love · 💭 Thinking</span>
+          <span>🤰 Pregnant · 🍼 Baby</span><span>🪦 Grave</span>
         </div>
+        <div class="muted small" style="margin-top:6px">Scroll to zoom · drag to pan · click someone for their profile · double-click to follow · hover anything for details</div>
       </details>
     </div>
-    <div class="hint">Scroll to zoom · drag to pan · click an agent to open their profile · double-click to follow</div>
   </section>
 
   <aside class="side">
@@ -72,24 +75,25 @@
       <div id="profile" hidden></div>
     </section>
 
-    <section class="tab" id="tab-talk" hidden>
-      <div class="card" id="solcard" style="border-left:3px solid var(--gold)"></div>
+    <section class="tab talk" id="tab-talk" hidden>
+      <div class="solcard" id="solcard"></div>
       <div class="chat" id="chat"></div>
-      <div class="field-label">Talking to</div>
-      <div class="chips" id="to"></div>
-      <div class="composer">
-        <textarea id="msg" rows="2" placeholder="Say something… (Enter to send, Shift+Enter for a new line)"></textarea>
-        <button class="btn primary" id="send">Send</button>
+      <div class="talkbox">
+        <div class="tobar"><span class="field-label">To</span><div class="chips scroll" id="to"></div></div>
+        <div class="composer">
+          <textarea id="msg" rows="2" placeholder="Say something… (Enter to send, Shift+Enter for a new line)"></textarea>
+          <button class="btn primary" id="send">Send</button>
+        </div>
+        <div class="row tight">
+          <label class="field-label" for="auth">You are their</label>
+          <select id="auth" class="small-select">
+            <option value="leader">👑 Leader (they obey)</option>
+            <option value="advisor">🧭 Advisor (they usually follow)</option>
+            <option value="observer">👁 Observer (they're free)</option>
+          </select>
+          <span class="info" title="What you say can change their ambition and plans; they start on what you ask from their next turn. Everyone you address answers right away, in character, with their own brain (one extra model call each). Your request stays on their mind for 30 days.">ⓘ How talking works</span>
+        </div>
       </div>
-      <div class="row">
-        <label class="field-label" for="auth">They treat you as</label>
-        <select id="auth">
-          <option value="leader">👑 Their leader (they obey)</option>
-          <option value="advisor">🧭 An advisor (they usually follow)</option>
-          <option value="observer">👁 An observer (they're free)</option>
-        </select>
-      </div>
-      <p class="muted small">What you say can change their ambition and plans, and they can start on what you ask from the next day. Every agent you address answers right away, in character, with its own brain (one extra model call each). Your request stays on their mind for 30 days.</p>
     </section>
 
     <section class="tab" id="tab-world" hidden>
@@ -112,19 +116,19 @@
     <section class="tab" id="tab-settings" hidden>
       <h3>Save &amp; load</h3>
       <div class="composer"><input id="save-name" placeholder="Save name (optional)"><button class="btn primary" id="save">💾 Save</button></div>
-      <p class="muted small">The world also autosaves every 25 days as “autosave”. Start the hub with <code>--resume</code> to continue from it.</p>
+      <p class="muted small">The world also autosaves every day (at midnight) as “autosave”. Start the hub with <code>--resume</code> to continue from it.</p>
       <div id="saves"></div>
       <h3>New world</h3>
       <div class="composer"><input id="seed" placeholder="Seed (optional — same seed, same map)"><button class="btn danger" id="new">🌍 New world</button></div>
       <h3>Sol, mentor &amp; referee</h3>
       <div class="row"><label class="field-label" for="solm">Sol's brain</label>
         <select id="solm"><option value="local">🖥️ Local (free)</option><option value="smart">🧠 Smart local (free)</option><option value="haiku">🌱 Haiku</option><option value="sonnet">⭐ Sonnet</option><option value="opus">👑 Opus</option></select></div>
-      <p class="muted small">Sol reviews the society every 20 days (and when you ask), judges everything agents attempt or invent, and designs blueprints for new buildings. A smarter Sol makes a richer world.</p>
+      <p class="muted small">Sol reviews the society every few days (Sol decides when the next review is, and you can ask any time), judges everything agents attempt or invent, and designs blueprints for new buildings. A smarter Sol makes a richer world.</p>
       <h3>Brains &amp; usage</h3>
       <div id="usage"></div>
       <h3>Keyboard shortcuts</h3>
       <div class="keys">
-        <kbd>Space</kbd> pause / resume · <kbd>N</kbd> next day · <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>0</kbd> fit map ·
+        <kbd>Space</kbd> pause / resume · <kbd>N</kbd> next hour · <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>0</kbd> fit map ·
         <kbd>F</kbd> follow selected · <kbd>/</kbd> talk · <kbd>Esc</kbd> close · <kbd>1</kbd>–<kbd>5</kbd> tabs · <kbd>?</kbd> help
       </div>
     </section>
@@ -139,14 +143,14 @@
     <h2>Welcome to Agent Society 🌱</h2>
     <p>A handful of AI agents live in this world with nothing but a personality. They explore, talk, farm, build, craft tools, invent customs, fall in love, have children and grow old. <b>Nobody tells them who to be</b> — except you, if you want to.</p>
     <ul>
-      <li><b>Watch:</b> speech bubbles show who is talking to whom, and the fog lifts as they explore.</li>
+      <li><b>Watch:</b> speech bubbles show who is talking to whom, the fog lifts as they explore, and buildings rise as they work on them. One turn is one hour; they sleep at night.</li>
       <li><b>Get to know them:</b> click an agent (or open 👥 People) to see their thoughts, memories, friendships and family.</li>
       <li><b>Talk:</b> open 💬 Talk, pick who to talk to and type. From a profile you can also send gifts.</li>
       <li><b>Families:</b> a woman and a man in love can have a baby: 10 days of pregnancy, then a baby who needs feeding (<i>care</i>) for 5 days, a child for 5 more, then an adult.</li>
       <li><b>Brains:</b> each agent thinks with a model — free <i>Local</i>, or Claude <i>Haiku / Sonnet</i>. <i>Enlighten</i> gives one agent Opus. Change it in their profile → Brain.</li>
       <li><b>Keep it:</b> ⚙️ Settings saves and loads worlds; it also autosaves.</li>
     </ul>
-    <p class="muted small">Shortcuts: Space pause · N next day · +/− zoom · F follow · / talk · Esc close · ? this help</p>
+    <p class="muted small">Shortcuts: Space pause · N next hour · +/− zoom · F follow · / talk · Esc close · ? this help</p>
     <button class="btn primary" id="help-close">Let's go</button>
   </div>
 </div>

@@ -8,7 +8,7 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
 button, input, select, textarea { font: inherit; color: inherit; }
 code, kbd { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 kbd { background: var(--panel-3); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; margin: 0 2px; }
@@ -51,13 +51,15 @@ textarea { resize: vertical; width: 100%; }
 .pills { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
 .pill { background: var(--panel-2); border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px; font-size: 13px; color: var(--text-2); cursor: default; }
 .pill.strong { color: var(--text); font-weight: 600; }
+.pill.clock { font-variant-numeric: tabular-nums; background: #1d2a3b; border-color: #2e4560; }
+#p-usage { cursor: pointer; }
 .transport { display: flex; gap: 6px; align-items: center; }
 #banner > div { padding: 8px 14px; font-size: 13px; }
 #banner .bad { background: #4a1a20; color: #ffd5d9; }
 #banner .warn { background: #3f3110; color: #ffe9b0; }
 
 /* ---------- layout ---------- */
-.layout { display: flex; gap: 14px; padding: 14px; height: calc(100vh - 52px); min-height: 520px; }
+.layout { display: flex; gap: 14px; padding: 14px; flex: 1; min-height: 0; }
 .mapcol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .side { width: 440px; flex: none; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 0; }
 .tab { padding: 12px 14px; overflow: auto; flex: 1; min-height: 0; }
@@ -66,17 +68,24 @@ textarea { resize: vertical; width: 100%; }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
 
 /* ---------- map ---------- */
-.mapbox { position: relative; flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: #0b0d10; }
-.mapscroll { position: absolute; inset: 0; overflow: auto; cursor: grab; }
+.mapbox { position: relative; flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(ellipse at center, #13233a 0%, #0b1220 70%); }
+.mapscroll { position: absolute; inset: 0; overflow: auto; cursor: grab; display: grid; }
+.mapbox::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px rgba(0,0,0,.55); border-radius: inherit; }
 .mapscroll.dragging { cursor: grabbing; }
-#map { display: block; }
-.maptools { position: absolute; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center; padding: 6px; background: rgba(17,20,24,.88); border: 1px solid var(--line); border-radius: 10px; z-index: 2; }
-.legend { position: absolute; left: 8px; bottom: 8px; background: rgba(17,20,24,.92); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 12px; color: var(--text-2); z-index: 2; max-width: 340px; }
-.legend summary { cursor: pointer; }
+#map { display: block; margin: auto; }
+.maptools { position: absolute; top: 8px; left: 8px; right: auto; max-width: calc(100% - 16px); flex-wrap: wrap; display: flex; gap: 6px; align-items: center; padding: 6px; background: rgba(17,20,24,.88); border: 1px solid var(--line); border-radius: 10px; z-index: 2; }
+.legend { position: absolute; right: 8px; bottom: 8px; background: rgba(17,20,24,.92); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 12px; color: var(--text-2); z-index: 2; max-width: 340px; }
+.legend summary { cursor: pointer; color: var(--text-2); }
+.legend:not([open]) { padding: 4px 10px; }
 .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 14px; margin-top: 6px; }
 .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
 .tip { position: fixed; pointer-events: none; z-index: 20; background: rgba(12,14,18,.96); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font-size: 12px; max-width: 280px; }
-.hint { color: var(--muted); font-size: 12px; }
+.maptools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 2px; }
+.ttoggle { display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); cursor: pointer; user-select: none; font-size: 13px; white-space: nowrap; }
+.ttoggle input { position: absolute; opacity: 0; pointer-events: none; }
+.ttoggle:hover { border-color: #46525f; }
+.ttoggle:has(input:checked) { color: var(--text); border-color: var(--accent); background: #16324f; }
+.ttoggle:has(input:focus-visible) { outline: 2px solid var(--accent); }
 
 /* ---------- people ---------- */
 .search { width: 100%; margin-bottom: 8px; }
@@ -90,6 +99,7 @@ textarea { resize: vertical; width: 100%; }
 .person .sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .person .right { text-align: right; font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .person .bar { grid-column: 2 / 4; }
+.person .bar.task { height: 4px; margin-top: -2px; }
 .graves { margin-top: 10px; }
 .grave { color: var(--muted); font-size: 12px; padding: 4px 8px; cursor: pointer; }
 .grave:hover { color: var(--text-2); }
@@ -118,7 +128,27 @@ textarea { resize: vertical; width: 100%; }
 .tiers .btn small { display: block; color: var(--muted); font-weight: 400; }
 
 /* ---------- talk ---------- */
-.chat { display: flex; flex-direction: column; gap: 6px; min-height: 160px; max-height: 46vh; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+.tab.talk:not([hidden]) { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.solcard { flex: none; background: linear-gradient(135deg, rgba(255,217,61,.09), rgba(255,217,61,.02)); border: 1px solid rgba(255,217,61,.3); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.solhead { display: flex; gap: 10px; align-items: center; }
+.solmeta { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.solmeta > div { overflow: hidden; text-overflow: ellipsis; }
+.solbtns { display: flex; gap: 6px; flex: none; }
+.solbtns .btn { padding: 4px 10px; font-size: 13px; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-2); }
+.chat { flex: 1; min-height: 120px; display: flex; flex-direction: column; gap: 6px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.talkbox { flex: none; }
+.tobar { display: flex; gap: 8px; align-items: center; }
+.chips.scroll { flex-wrap: nowrap; overflow-x: auto; margin: 0; padding-bottom: 2px; scrollbar-width: thin; }
+.chips.scroll .chip { flex: none; }
+.row.tight { margin: 0; gap: 6px; }
+.small-select { padding: 3px 8px; font-size: 12px; }
+.info { font-size: 12px; color: var(--muted); cursor: help; margin-left: auto; }
+.bub.review { border-left: 3px solid var(--gold); max-width: 96%; }
+.bub details summary { cursor: pointer; list-style: none; }
+.bub details summary::-webkit-details-marker { display: none; }
+.bub details[open] summary .more { display: none; }
+.more { color: var(--accent); font-size: 12px; }
 .bub { max-width: 86%; padding: 6px 10px; border-radius: 12px; background: var(--panel-2); font-size: 13px; }
 .bub.me { align-self: flex-end; background: #15364a; }
 .bub b { display: block; font-size: 11px; margin-bottom: 1px; }
@@ -160,6 +190,7 @@ th:first-child, td:first-child { text-align: left; }
 
 /* ---------- narrow screens (keep last so it wins) ---------- */
 @media (max-width: 1000px) {
+  body { height: auto; overflow: auto; }
   .layout { flex-direction: column; height: auto; }
   .side { width: 100%; height: 640px; }
   .mapcol { height: 65vh; flex: none; }

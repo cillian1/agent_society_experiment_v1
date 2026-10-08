@@ -33,104 +33,245 @@ const extras = a => `${STAGE[a.stage] || ''}${a.pregnant ? '🤰' : ''}`;
 const S = {
   st: null, W: 0, H: 0, tiles: [], agents: [], sel: null, detail: null,
   tab: 'people', ptab: 'overview', to: new Set(['*']), filter: 'all',
-  zoom: 1, disp: {}, offset: {}, lastEvent: null, stats: [], hover: null, brainKey: '',
+  zoom: 1, disp: {}, offset: {}, head: {}, inside: new Set(), dark: 0, props: [], water: [], lastEvent: null, stats: [], hover: null, brainKey: '',
 };
 
-// ======================================================================= map
-const T = 28;
+// ======================================================================= map (isometric)
+// The world is drawn as diamonds: tile (x, y) sits at iso(x, y). The ground is painted once into `bg` (and repainted
+// tile by tile when it changes); trees, rocks, buildings and people are drawn every frame, back to front.
+const TW = 40, TH = 20, TOP = 80, PAD = 24;
 const cv = $('map'), ctx = cv.getContext('2d');
 const bg = document.createElement('canvas'), bctx = bg.getContext('2d');
+const fogc = document.createElement('canvas'), fctx = fogc.getContext('2d');
+const FOG_SCALE = 4;
 const scroller = $('mapscroll');
 const drawn = [];
 const rnd = (x, y, k = 0) => { let h = (x * 374761393 + y * 668265263 + k * 2147483647) >>> 0; h = ((h ^ (h >>> 13)) * 1274126177) >>> 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+const iso = (x, y) => [(x - y) * TW / 2 + S.H * TW / 2 + PAD, (x + y) * TH / 2 + TOP];
+const ground = (x, y) => iso(x + .5, y + .5);                       // centre of a tile on screen
+function unIso(px, py) {                                             // screen pixel -> fractional tile
+  const u = (px - S.H * TW / 2 - PAD) / (TW / 2), v = (py - TOP) / (TH / 2);
+  return { fx: (u + v) / 2, fy: (v - u) / 2 };
+}
+function diamond(c, x, y, w = 1, h = 1, lift = 0) {
+  const p = [iso(x, y), iso(x + w, y), iso(x + w, y + h), iso(x, y + h)];
+  c.beginPath(); p.forEach(([a, b], i) => i ? c.lineTo(a, b - lift) : c.moveTo(a, b - lift)); c.closePath();
+  return p;
+}
+const shade = (hex, k) => {                                          // lighten (k > 0) or darken (k < 0) a #rrggbb colour
+  const n = parseInt(hex.slice(1), 16), f = v => Math.max(0, Math.min(255, Math.round(k > 0 ? v + (255 - v) * k : v * (1 + k))));
+  return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
+};
 
+// ---- ground
+const GROUND = { grass: '#4f9a47', food: '#4f9a47', tree: '#478f40', sprout: '#7a5634', crop: '#7a5634', water: '#2f6fb5',
+  sand: '#d8c68a', rock: '#8c8a80', structure: '#8f7a55' };
 function paintTile(x, y) {
-  const t = S.tiles[y][x], px = x * T, py = y * T, c = bctx, v = rnd(x, y);
-  const base = { grass: [78, 154, 71], food: [78, 154, 71], sprout: [78, 154, 71], crop: [78, 154, 71], water: [47, 111, 181],
-    sand: [217, 200, 138], rock: [123, 127, 134], tree: [78, 154, 71], structure: [150, 118, 78] }[t] || [60, 60, 60];
-  const k = (v - .5) * 14;
-  c.fillStyle = `rgb(${base.map(n => Math.round(n + k)).join(',')})`; c.fillRect(px, py, T, T);
-  if (t === 'grass' || t === 'food') {
-    c.strokeStyle = 'rgba(30,90,35,.55)'; c.lineWidth = 1.4;
-    for (let i = 0; i < 4; i++) { const a = px + 3 + rnd(x, y, i + 1) * (T - 6), b = py + 6 + rnd(x, y, i + 9) * (T - 9); c.beginPath(); c.moveTo(a, b); c.lineTo(a - 2, b - 4); c.moveTo(a, b); c.lineTo(a + 2, b - 4); c.stroke(); }
-    if (t === 'grass' && rnd(x, y, 20) > .9) { c.fillStyle = rnd(x, y, 21) > .5 ? '#fff3a0' : '#f8c8e0'; c.beginPath(); c.arc(px + 6 + rnd(x, y, 22) * (T - 12), py + 6 + rnd(x, y, 23) * (T - 12), 2.2, 0, 7); c.fill(); }
+  const t = S.tiles[y][x], c = bctx, v = rnd(x, y), base = GROUND[t] || '#444';
+  const col = shade(base, (v - .5) * .12);
+  diamond(c, x, y); c.fillStyle = col; c.strokeStyle = col; c.lineWidth = 1; c.fill(); c.stroke();
+  const [cx, cy] = ground(x, y);
+  if (t === 'grass' || t === 'food' || t === 'tree') {
+    c.strokeStyle = 'rgba(25,80,30,.5)'; c.lineWidth = 1;
+    for (let i = 0; i < 3; i++) { const a = cx + (rnd(x, y, i + 1) - .5) * TW * .5, b = cy + (rnd(x, y, i + 9) - .5) * TH * .45; c.beginPath(); c.moveTo(a, b); c.lineTo(a - 1.5, b - 3); c.moveTo(a, b); c.lineTo(a + 1.5, b - 3); c.stroke(); }
+    if (t === 'grass' && rnd(x, y, 20) > .92) { c.fillStyle = rnd(x, y, 21) > .5 ? '#fff3a0' : '#f8c8e0'; c.beginPath(); c.arc(cx + (rnd(x, y, 22) - .5) * TW * .4, cy + (rnd(x, y, 23) - .5) * TH * .4, 1.8, 0, 7); c.fill(); }
   }
-  if (t === 'food') {
-    c.fillStyle = '#2b6a2f'; c.beginPath(); c.arc(px + T / 2, py + T / 2 + 2, T * .36, 0, 7); c.fill();
-    c.fillStyle = '#37803b'; c.beginPath(); c.arc(px + T / 2 - 3, py + T / 2 - 1, T * .22, 0, 7); c.fill();
-    c.fillStyle = '#e0334e'; [[-6, 3], [5, 0], [0, 8], [-1, -3], [7, 7]].forEach(([a, b]) => { c.beginPath(); c.arc(px + T / 2 + a, py + T / 2 + b, 2.6, 0, 7); c.fill(); });
-  }
-  if (t === 'tree') {
-    c.fillStyle = 'rgba(0,0,0,.25)'; c.beginPath(); c.ellipse(px + T / 2, py + T - 4, T * .38, T * .13, 0, 0, 7); c.fill();
-    c.fillStyle = '#5b3d22'; c.fillRect(px + T / 2 - 2.5, py + T - 12, 5, 9);
-    [['#245c2a', T / 2, T / 2 - 1, T * .38], ['#2e7a35', T / 2 - 3, T / 2 - 4, T * .27], ['#3c9744', T / 2 + 3, T / 2 - 5, T * .2]]
-      .forEach(([col, a, b, r]) => { c.fillStyle = col; c.beginPath(); c.arc(px + a, py + b, r, 0, 7); c.fill(); });
-  }
-  if (t === 'structure') { c.fillStyle = 'rgba(0,0,0,.12)'; for (let i = 0; i < 4; i++) c.fillRect(px, py + i * 7, T, 1); }
-  if (t === 'sprout' || t === 'crop') {
-    c.fillStyle = '#6b4a2b'; c.fillRect(px + 3, py + T - 9, T - 6, 6);
-    if (t === 'sprout') {
-      c.strokeStyle = '#8fe36b'; c.lineWidth = 2;
-      [[-5, 0], [0, -3], [5, 0]].forEach(([a, b]) => { c.beginPath(); c.moveTo(px + T / 2, py + T - 9); c.quadraticCurveTo(px + T / 2 + a, py + T - 14 + b, px + T / 2 + a * 1.4, py + T - 17 + b); c.stroke(); });
-    } else {
-      for (let i = 0; i < 5; i++) { const a = px + 5 + i * 4.5; c.strokeStyle = '#d8b640'; c.lineWidth = 2; c.beginPath(); c.moveTo(a, py + T - 9); c.lineTo(a - 1, py + 7); c.stroke(); c.fillStyle = '#f3d35a'; c.beginPath(); c.ellipse(a - 1, py + 8, 2, 4, 0, 0, 7); c.fill(); }
-    }
+  if (t === 'sand') { c.fillStyle = 'rgba(120,95,40,.35)'; for (let i = 0; i < 5; i++) c.fillRect(cx + (rnd(x, y, i + 30) - .5) * TW * .5, cy + (rnd(x, y, i + 40) - .5) * TH * .5, 1.5, 1.5); }
+  if (t === 'rock') { c.fillStyle = 'rgba(60,60,60,.3)'; for (let i = 0; i < 4; i++) c.fillRect(cx + (rnd(x, y, i + 50) - .5) * TW * .5, cy + (rnd(x, y, i + 60) - .5) * TH * .5, 2, 1.5); }
+  if (t === 'sprout' || t === 'crop') {                              // tilled furrows
+    c.strokeStyle = 'rgba(50,30,15,.45)'; c.lineWidth = 1.2;
+    for (let i = 1; i < 4; i++) { const [a1, b1] = iso(x + i / 4, y + .12), [a2, b2] = iso(x + i / 4, y + .88); c.beginPath(); c.moveTo(a1, b1); c.lineTo(a2, b2); c.stroke(); }
   }
   if (t === 'water') {
-    c.strokeStyle = 'rgba(255,255,255,.22)'; c.lineWidth = 1.5;
-    for (let i = 0; i < 2; i++) { const a = px + 4 + rnd(x, y, i + 3) * (T - 14), b = py + 7 + i * 11 + rnd(x, y, i + 5) * 4; c.beginPath(); c.moveTo(a, b); c.quadraticCurveTo(a + 4, b - 3, a + 8, b); c.quadraticCurveTo(a + 12, b + 3, a + 16, b); c.stroke(); }
-    c.fillStyle = 'rgba(255,255,255,.3)';
-    [[0, -1, px, py, T, 2], [0, 1, px, py + T - 2, T, 2], [-1, 0, px, py, 2, T], [1, 0, px + T - 2, py, 2, T]].forEach(([dx, dy, a, b, w, h]) => {
-      const n = S.tiles[y + dy]?.[x + dx]; if (n && n !== 'water') c.fillRect(a, b, w, h); });
-  }
-  if (t === 'sand') { c.fillStyle = 'rgba(120,95,40,.35)'; for (let i = 0; i < 6; i++) c.fillRect(px + rnd(x, y, i + 30) * (T - 2), py + rnd(x, y, i + 40) * (T - 2), 1.6, 1.6); }
-  if (t === 'rock') {
-    c.fillStyle = 'rgba(0,0,0,.28)'; c.beginPath(); c.ellipse(px + T / 2, py + T - 5, T * .42, T * .14, 0, 0, 7); c.fill();
-    c.fillStyle = '#8f949c'; c.beginPath(); c.moveTo(px + 4, py + T - 6); c.lineTo(px + 7, py + 9); c.lineTo(px + 15, py + 4); c.lineTo(px + 23, py + 9); c.lineTo(px + T - 3, py + T - 6); c.closePath(); c.fill();
-    c.fillStyle = '#a9aeb6'; c.beginPath(); c.moveTo(px + 7, py + 9); c.lineTo(px + 15, py + 4); c.lineTo(px + 17, py + 13); c.lineTo(px + 9, py + 16); c.closePath(); c.fill();
+    c.fillStyle = 'rgba(10,40,90,.18)'; diamond(c, x + .15, y + .15, .7, .7); c.fill();
+    c.strokeStyle = 'rgba(220,240,255,.55)'; c.lineWidth = 2;                          // foam where water meets land
+    const p = [iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)];
+    [[0, -1, 0, 1], [1, 0, 1, 2], [0, 1, 2, 3], [-1, 0, 3, 0]].forEach(([dx, dy, i, j]) => {
+      const n = S.tiles[y + dy]?.[x + dx]; if (n && n !== 'water') { c.beginPath(); c.moveTo(...p[i]); c.lineTo(...p[j]); c.stroke(); } });
   }
 }
-
 function syncTiles(next) {
-  S.tiles = next;
+  S.tiles = next; let changed = false;
   for (let y = 0; y < S.H; y++) for (let x = 0; x < S.W; x++) {
     if (!drawn[y]) drawn[y] = [];
-    if (drawn[y][x] !== next[y][x]) { drawn[y][x] = next[y][x]; paintTile(x, y); }
+    if (drawn[y][x] !== next[y][x]) { drawn[y][x] = next[y][x]; changed = true; }
+  }
+  if (changed) {                                                      // repaint back to front so seams stay clean
+    for (let y = 0; y < S.H; y++) for (let x = 0; x < S.W; x++) paintTile(x, y);
+    S.props = []; S.water = [];
+    for (let y = 0; y < S.H; y++) for (let x = 0; x < S.W; x++) {
+      const t = next[y][x];
+      if (PROP[t]) S.props.push({ x, y, t, v: Math.floor(rnd(x, y, 7) * 3) });
+      if (t === 'water' && rnd(x, y, 8) > .6) S.water.push({ x, y, ph: rnd(x, y, 9) * 6.3 });
+    }
   }
 }
 
+// ---- props (cached sprites, anchored at the tile centre)
+const SPR = {};
+function sprite(key, w, h, draw) {
+  if (!SPR[key]) { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h); SPR[key] = c; }
+  return SPR[key];
+}
+const blob = (c, x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); };
+const shadow = (c, x, y, rx, ry, a = .28) => { c.fillStyle = `rgba(0,0,0,${a})`; c.beginPath(); c.ellipse(x, y, rx, ry, 0, 0, 7); c.fill(); };
+const PROP = {
+  tree: { w: 46, h: 64, ax: 23, ay: 56, draw(c, v) {
+    shadow(c, 23, 56, 15, 6);
+    c.fillStyle = '#5b3d22'; c.fillRect(21, 38, 5, 18);
+    if (v === 1) {                                                    // pine
+      [[44, 15, '#1f5a2c'], [34, 12, '#27703a'], [24, 9, '#2f8645']].forEach(([y, r, col]) => {
+        c.fillStyle = col; c.beginPath(); c.moveTo(23 - r, y); c.lineTo(23, y - 18); c.lineTo(23 + r, y); c.closePath(); c.fill(); });
+    } else {
+      const k = v === 2 ? 1.12 : 1;
+      blob(c, 23, 32, 15 * k, '#245c2a'); blob(c, 18, 27, 11 * k, '#2e7a35'); blob(c, 28, 24, 9 * k, '#3c9744'); blob(c, 21, 20, 5 * k, '#4fae55');
+    }
+  } },
+  rock: { w: 42, h: 36, ax: 21, ay: 28, draw(c, v) {
+    shadow(c, 21, 28, 16, 6);
+    c.fillStyle = '#7f848c'; c.beginPath(); c.moveTo(5, 27); c.lineTo(9, 13); c.lineTo(19, 6 + v * 2); c.lineTo(31, 10); c.lineTo(37, 26); c.closePath(); c.fill();
+    c.fillStyle = '#a5aab2'; c.beginPath(); c.moveTo(9, 13); c.lineTo(19, 6 + v * 2); c.lineTo(22, 16); c.lineTo(12, 20); c.closePath(); c.fill();
+    c.fillStyle = '#62666d'; c.beginPath(); c.moveTo(22, 16); c.lineTo(31, 10); c.lineTo(37, 26); c.lineTo(24, 28); c.closePath(); c.fill();
+  } },
+  food: { w: 36, h: 32, ax: 18, ay: 25, draw(c) {
+    shadow(c, 18, 25, 13, 5);
+    blob(c, 18, 17, 11, '#2b6a2f'); blob(c, 14, 14, 7, '#37803b'); blob(c, 22, 13, 6, '#3f8f44');
+    c.fillStyle = '#e0334e'; [[-6, 3], [5, 0], [0, 6], [-1, -4], [7, 6], [-7, -2]].forEach(([a, b]) => blob(c, 18 + a, 16 + b, 2.3, '#e0334e'));
+  } },
+  sprout: { w: 30, h: 22, ax: 15, ay: 17, draw(c) {
+    c.strokeStyle = '#8fe36b'; c.lineWidth = 2;
+    [[-6, 0], [0, -3], [6, 0]].forEach(([a, b]) => { c.beginPath(); c.moveTo(15 + a * .5, 17); c.quadraticCurveTo(15 + a, 11 + b, 15 + a * 1.3, 7 + b); c.stroke(); });
+  } },
+  crop: { w: 34, h: 36, ax: 17, ay: 28, draw(c) {
+    for (let i = 0; i < 6; i++) { const a = 6 + i * 4.4, b = 28 - (i % 2) * 3; c.strokeStyle = '#c9a63a'; c.lineWidth = 1.6; c.beginPath(); c.moveTo(a, b); c.lineTo(a - 1, b - 18); c.stroke(); c.fillStyle = '#f3d35a'; c.beginPath(); c.ellipse(a - 1, b - 19, 2, 4, 0, 0, 7); c.fill(); }
+  } },
+};
+function drawProp(p, fade) {
+  const P = PROP[p.t], img = sprite(p.t + p.v, P.w, P.h, c => P.draw(c, p.v)), [gx, gy] = ground(p.x, p.y);
+  if (fade) ctx.globalAlpha = .45;
+  ctx.drawImage(img, gx - P.ax, gy - P.ay);
+  ctx.globalAlpha = 1;
+}
+
+// ---- buildings
 const ICONS = [['bridge', '🌉'], ['dock', '⚓'], ['pier', '⚓'], ['house', '🏠'], ['hut', '🛖'], ['shelter', '🏕️'], ['home', '🏠'], ['wall', '🧱'],
-  ['fence', '🧱'], ['sign', '🪧'], ['fire', '🔥'], ['storage', '📦'], ['store', '📦'], ['barn', '🏚️'], ['farm', '🌾'], ['garden', '🌷'],
-  ['well', '⛲'], ['temple', '⛩️'], ['shrine', '⛩️'], ['school', '🏫'], ['market', '🏪'], ['tower', '🗼'], ['bed', '🛏️'], ['path', '🟫'],
+  ['fence', '🧱'], ['sign', '🪧'], ['fire', '🔥'], ['hearth', '🔥'], ['storage', '📦'], ['store', '📦'], ['granary', '📦'], ['barn', '🏚️'], ['farm', '🌾'], ['garden', '🌷'],
+  ['well', '⛲'], ['temple', '⛩️'], ['shrine', '⛩️'], ['school', '🏫'], ['market', '🏪'], ['tower', '🗼'], ['workshop', '🔨'], ['forge', '⚒️'], ['bed', '🛏️'], ['path', '🟫'],
   ['road', '🟫'], ['floor', '🟫'], ['bench', '🪑'], ['table', '🪑'], ['monument', '🗿'], ['statue', '🗿'], ['gate', '⛩️'], ['door', '🚪'], ['boat', '⛵'], ['raft', '⛵']];
-const iconFor = k => { k = (k || '').toLowerCase(); for (const [w, i] of ICONS) if (k.includes(w)) return i; return '🏗️'; };
+const FUNC_ICON = { storage: '📦', home: '🏠', fire: '🔥', well: '⛲', workshop: '🔨' };
+const iconFor = (k, f) => { k = (k || '').toLowerCase(); for (const [w, i] of ICONS) if (k.includes(w)) return i; return FUNC_ICON[f] || '🏗️'; };
+const FLAT = ['bridge', 'path', 'road', 'floor', 'dock', 'pier', 'field', 'farm', 'garden', 'plaza', 'square', 'paving', 'track', 'trail', 'raft'];
+const LOW = ['wall', 'fence', 'barrier', 'hedge'];
+const STYLE = {                       // walls, roof
+  storage: ['#a7754a', '#b5523b'], home: ['#e6d3a6', '#c0603f'], workshop: ['#9c8f80', '#56708a'],
+  well: ['#9aa0a8', '#7b5a3a'], fire: ['#a08060', '#8a4a32'], '': ['#cdb88d', '#6f8f5a'],
+};
+const isFlat = s => FLAT.some(w => s.kind.toLowerCase().includes(w));
+const isLow = s => !s.walkable && LOW.some(w => s.kind.toLowerCase().includes(w));
+const wallH = s => isLow(s) ? 9 : 14 + 5 * Math.min(s.w, s.h);
 
-function drawFrame() {
-  ctx.drawImage(bg, 0, 0);
-  const st = S.st;
-  if (st) {
-    if ($('fog').checked && st.fog) {
-      ctx.fillStyle = 'rgba(6,8,12,.62)';
-      st.fog.forEach((row, y) => { let x = 0; while (x < S.W) { if (row[x] === '0') { let e = x; while (e < S.W && row[e] === '0') e++; ctx.fillRect(x * T, y * T, (e - x) * T, T); x = e; } else x++; } });
+function box(s, H, wall, alpha) {     // the two visible walls of a building's footprint
+  const [, R, B, L] = [iso(s.x, s.y), iso(s.x + s.w, s.y), iso(s.x + s.w, s.y + s.h), iso(s.x, s.y + s.h)];
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = shade(wall, -.12); ctx.beginPath(); ctx.moveTo(...L); ctx.lineTo(...B); ctx.lineTo(B[0], B[1] - H); ctx.lineTo(L[0], L[1] - H); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = shade(wall, -.3); ctx.beginPath(); ctx.moveTo(...B); ctx.lineTo(...R); ctx.lineTo(R[0], R[1] - H); ctx.lineTo(B[0], B[1] - H); ctx.closePath(); ctx.fill();
+  ctx.globalAlpha = 1;
+  return { R, B, L };
+}
+function drawBuilding(s, t) {
+  const func = s.func || '', [wall, roof] = STYLE[func] || STYLE[''], occupied = S.inside.has(s.x + ',' + s.y);
+  const [cx, cy] = iso(s.x + s.w / 2, s.y + s.h / 2);
+  if (!s.done) {                                                       // construction site: foundation, rising walls, scaffold
+    const p = s.work ? Math.min(1, s.progress / s.work) : 0, H = wallH(s);
+    diamond(ctx, s.x, s.y, s.w, s.h); ctx.fillStyle = 'rgba(160,125,80,.75)'; ctx.fill();
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = 'rgba(255,230,160,.8)'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.setLineDash([]);
+    if (!isFlat(s)) {
+      box(s, H * p, wall, .85);
+      ctx.strokeStyle = '#6b4a2b'; ctx.lineWidth = 2;
+      [iso(s.x, s.y), iso(s.x + s.w, s.y), iso(s.x + s.w, s.y + s.h), iso(s.x, s.y + s.h)].forEach(([a, b]) => { ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(a, b - H - 4); ctx.stroke(); });
+      ctx.lineWidth = 1; ctx.beginPath(); diamond(ctx, s.x, s.y, s.w, s.h, H * .6); ctx.stroke();
     }
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    for (const s of st.structures) { ctx.font = (s.walkable ? '17px' : '22px') + ' system-ui'; ctx.fillText(iconFor(s.kind), s.x * T + T / 2, s.y * T + T / 2 + 1); }
-    ctx.globalAlpha = .85; ctx.font = '18px system-ui';
-    for (const g of st.dead) ctx.fillText('🪦', g.x * T + T / 2, g.y * T + T / 2);
-    ctx.globalAlpha = 1;
-    for (const a of S.agents) drawAgent(a);
-    if ($('bubbles').checked) {
-      for (const a of S.agents) if (a.say) drawTalkLine(a);
-      for (const a of S.agents) if (a.say) drawBubble(a);
-    }
+    return;
   }
-  requestAnimationFrame(drawFrame);
+  if (isFlat(s)) {                                                      // paths, bridges, fields: on the ground
+    diamond(ctx, s.x, s.y, s.w, s.h);
+    const water = S.tiles[s.y]?.[s.x] === 'structure' && s.kind.toLowerCase().match(/bridge|dock|pier|raft/);
+    ctx.fillStyle = water ? '#9a6b3f' : s.kind.toLowerCase().match(/field|farm|garden/) ? '#6f5232' : '#b39a6e'; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1;
+    if (water) for (let i = 1; i < 4; i++) { const [a1, b1] = iso(s.x + i / 4 * s.w, s.y), [a2, b2] = iso(s.x + i / 4 * s.w, s.y + s.h); ctx.beginPath(); ctx.moveTo(a1, b1); ctx.lineTo(a2, b2); ctx.stroke(); }
+    ctx.stroke();
+    return;
+  }
+  if (func === 'fire' && s.w * s.h === 1) {                           // camp fire: stone ring and flickering flames
+    shadow(ctx, cx, cy, 13, 6, .3);
+    for (let i = 0; i < 8; i++) { const a = i / 8 * 6.28; blob(ctx, cx + Math.cos(a) * 9, cy + Math.sin(a) * 4.5, 2.8, i % 2 ? '#8a8f96' : '#a3a8af'); }
+    for (let i = 0; i < 3; i++) {
+      const f = Math.sin(t * 9 + i * 2) * 2, hgt = 12 + f + (i === 1 ? 5 : 0), x0 = cx + (i - 1) * 4;
+      ctx.fillStyle = ['#ff8a2a', '#ffd23f', '#ff6a1a'][i]; ctx.beginPath(); ctx.moveTo(x0 - 4, cy); ctx.quadraticCurveTo(x0 - 3, cy - hgt * .6, x0 + f * .3, cy - hgt); ctx.quadraticCurveTo(x0 + 3, cy - hgt * .6, x0 + 4, cy); ctx.fill();
+    }
+    return;
+  }
+  if (func === 'well' && s.w * s.h === 1) {
+    shadow(ctx, cx, cy + 2, 12, 5, .3);
+    ctx.fillStyle = '#8b9098'; ctx.fillRect(cx - 10, cy - 10, 20, 10); ctx.beginPath(); ctx.ellipse(cx, cy, 10, 4.5, 0, 0, 3.15); ctx.fill();
+    ctx.fillStyle = '#a9aeb5'; ctx.beginPath(); ctx.ellipse(cx, cy - 10, 10, 4.5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#25507f'; ctx.beginPath(); ctx.ellipse(cx, cy - 10, 7, 3, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#5b3d22'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - 9, cy - 10); ctx.lineTo(cx - 9, cy - 26); ctx.moveTo(cx + 9, cy - 10); ctx.lineTo(cx + 9, cy - 26); ctx.stroke();
+    ctx.fillStyle = '#8a4a32'; ctx.beginPath(); ctx.moveTo(cx - 13, cy - 24); ctx.lineTo(cx, cy - 32); ctx.lineTo(cx + 13, cy - 24); ctx.closePath(); ctx.fill();
+    return;
+  }
+  const H = wallH(s), alpha = occupied ? .55 : 1;
+  shadow(ctx, cx + 4, cy + 2, (s.w + s.h) * TW / 4 + 2, (s.w + s.h) * TH / 4 + 1, .22);
+  const { R, B, L } = box(s, H, wall, alpha);
+  ctx.globalAlpha = alpha;
+  // door on the left wall, windows on the right
+  const dm = [(L[0] + B[0]) / 2, (L[1] + B[1]) / 2];
+  if (!isLow(s)) {
+    ctx.fillStyle = '#4a321e'; ctx.beginPath(); ctx.moveTo(dm[0] - 4, dm[1] - 2); ctx.lineTo(dm[0] + 4, dm[1] + 2); ctx.lineTo(dm[0] + 4, dm[1] + 2 - 11); ctx.lineTo(dm[0] - 4, dm[1] - 2 - 11); ctx.closePath(); ctx.fill();
+    const night = S.dark > .2, wm = [(B[0] + R[0]) / 2, (B[1] + R[1]) / 2 - H * .55];
+    ctx.fillStyle = night && (func === 'home' || func === 'fire') ? '#ffd27a' : '#2b3a4a';
+    ctx.beginPath(); ctx.moveTo(wm[0] - 4, wm[1] + 2); ctx.lineTo(wm[0] + 4, wm[1] - 2); ctx.lineTo(wm[0] + 4, wm[1] - 7); ctx.lineTo(wm[0] - 4, wm[1] - 3); ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  if (isLow(s)) { diamond(ctx, s.x, s.y, s.w, s.h, H); ctx.fillStyle = shade(wall, .1); ctx.fill(); return; }
+  // hip roof: four faces meeting at a peak; see-through when someone is inside
+  const Tp = iso(s.x, s.y), lift = H, peak = [cx, cy - H - 8 - 4 * Math.max(s.w, s.h)], o = 3;
+  const up = ([a, b]) => [a, b - lift], [t2, r2, b2, l2] = [up(Tp), up(R), up(B), up(L)].map(([a, b], i) => [a + [0, o, 0, -o][i], b + [-o / 2, 0, o / 2, 0][i]]);
+  ctx.globalAlpha = occupied ? .3 : 1;
+  [[t2, r2, -.05], [l2, t2, .12], [l2, b2, -.12], [b2, r2, -.3]].forEach(([p, q, k]) => {
+    ctx.fillStyle = shade(roof, k); ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.lineTo(...peak); ctx.closePath(); ctx.fill(); });
+  if (func === 'fire' || func === 'workshop') {                        // chimney with a wisp of smoke
+    const ch = [peak[0] + 8, peak[1] + 8];
+    ctx.fillStyle = '#6b5a4a'; ctx.fillRect(ch[0] - 2.5, ch[1] - 9, 5, 9);
+    ctx.fillStyle = 'rgba(220,220,220,.35)'; for (let i = 0; i < 3; i++) blob(ctx, ch[0] + Math.sin(t * 1.5 + i) * 3, ch[1] - 13 - i * 6 - (t * 6 % 6), 3 + i, 'rgba(220,220,220,.3)');
+  }
+  ctx.globalAlpha = 1;
+}
+function buildingOverlay(s) {
+  const [cx, cy] = iso(s.x + s.w / 2, s.y + s.h / 2), small = s.w * s.h === 1 && (s.func === 'fire' || s.func === 'well');
+  const top = cy - (!s.done ? wallH(s) + 10 : isFlat(s) ? 6 : small ? 34 : wallH(s) + 14 + 4 * Math.max(s.w, s.h));
+  if (!s.done) {
+    const p = s.work ? Math.min(1, s.progress / s.work) : 0;
+    bar(cx, top - 8, 44, p, '#ffd93d');
+    ctx.font = 'bold 10px system-ui'; ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = 3;
+    const label = `🏗️ ${s.kind} ${Math.round(p * 100)}%`; ctx.strokeText(label, cx, top - 18); ctx.fillText(label, cx, top - 18);
+  } else if (!isFlat(s) && !small) { ctx.font = '13px system-ui'; ctx.fillText(iconFor(s.kind, s.func), cx, top - 4); }
+}
+function bar(x, y, w, frac, color) {
+  ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.beginPath(); ctx.roundRect(x - w / 2 - 1, y - 1, w + 2, 6, 3); ctx.fill();
+  ctx.fillStyle = color; ctx.beginPath(); ctx.roundRect(x - w / 2, y, Math.max(2, w * frac), 4, 2); ctx.fill();
 }
 
+// ---- people
+const SKIN = ['#f1c7a3', '#e0ac85', '#c68863', '#8d5a3b', '#f5d6b8', '#b07850'];
+const HAIR = ['#2b1d14', '#5a3a1e', '#a0522d', '#d9b26a', '#1a1a1a', '#7a4a2a'];
+const scaleOf = a => a.stage === 'baby' ? .55 : a.adult ? 1 : .75;
 function pos(a) {                       // smooth movement; agents sharing a tile fan out a little
   const d = S.disp[a.name] || (S.disp[a.name] = { x: a.x, y: a.y });
   const [ox, oy] = S.offset[a.name] || [0, 0];
-  d.x += (a.x + ox - d.x) * .18; d.y += (a.y + oy - d.y) * .18;
+  d.moving = Math.hypot(a.x + ox - d.x, a.y + oy - d.y) > .03;
+  d.x += (a.x + ox - d.x) * .12; d.y += (a.y + oy - d.y) * .12;
   return d;
 }
 function spread(agents) {
@@ -138,38 +279,71 @@ function spread(agents) {
   for (const a of agents) (groups[a.x + ',' + a.y] ||= []).push(a.name);
   S.offset = {};
   for (const names of Object.values(groups)) names.forEach((n, i) => {
-    if (names.length > 1) { const ang = i / names.length * Math.PI * 2; S.offset[n] = [Math.cos(ang) * .28, Math.sin(ang) * .28]; }
+    if (names.length > 1) { const ang = i / names.length * Math.PI * 2; S.offset[n] = [Math.cos(ang) * .25, Math.sin(ang) * .25]; }
   });
 }
-
-function drawAgent(a) {
-  const d = pos(a), px = d.x * T + T / 2, py = d.y * T + T / 2, r = (T / 2 - 3) * (a.stage === 'baby' ? .55 : a.adult ? 1 : .72);
-  ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(px, py + r + 1, r * .9, r * .35, 0, 0, 7); ctx.fill();
-  if (S.sel === a.name) { ctx.strokeStyle = '#ffd93d'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(px, py, r + 5, 0, 7); ctx.stroke(); }
-  ctx.fillStyle = a.color; ctx.strokeStyle = '#111'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(px, py, r, 0, 7); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = '#111'; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(a.name[0], px, py + .5);
-  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(px - 11, py - r - 9, 22, 5);             // hunger bar
-  ctx.fillStyle = a.hunger > 70 ? '#e0525e' : a.hunger > 40 ? '#e0a252' : '#5cc46e'; ctx.fillRect(px - 10, py - r - 8, 20 * (1 - a.hunger / 100), 3);
-  if (a.heart) { ctx.font = '15px system-ui'; ctx.fillText('❤️', px + r + 2, py - r - 12); }
-  if (a.pregnant) { ctx.font = '13px system-ui'; ctx.fillText('🤰', px + r + 3, py + 2); }
-  if (a.stage === 'baby') { ctx.font = '12px system-ui'; ctx.fillText('🍼', px + r + 3, py + 2); }
-  if (a.slow) { ctx.font = '14px system-ui'; ctx.fillText('💭', px - r - 4, py - r - 10); }
-  ctx.font = 'bold 11px system-ui';
-  const tag = `${a.name} · ${Math.floor(a.age / 24)}d`, nw = ctx.measureText(tag).width + 10;
-  ctx.fillStyle = 'rgba(10,12,16,.78)'; ctx.beginPath(); ctx.roundRect(px - nw / 2, py + r + 4, nw, 15, 6); ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.fillText(tag, px, py + r + 11.5);
+function drawPerson(a, t) {
+  const d = pos(a), [gx, gy] = ground(d.x, d.y), s = scaleOf(a), h = hash(a.name);
+  const skin = SKIN[h % SKIN.length], hair = a.stage === 'elder' ? '#d8d8d8' : HAIR[(h >> 3) % HAIR.length];
+  if (S.sel === a.name) { ctx.strokeStyle = '#ffd93d'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.ellipse(gx, gy, 13 * s + 3, 6 * s + 2, 0, 0, 7); ctx.stroke(); }
+  shadow(ctx, gx, gy, 9 * s, 4 * s, .3);
+  let head;
+  if (a.stage === 'baby') {                                            // swaddled
+    ctx.fillStyle = '#f3ead8'; ctx.beginPath(); ctx.ellipse(gx, gy - 6, 7, 5, 0, 0, 7); ctx.fill(); ctx.strokeStyle = a.color; ctx.lineWidth = 1.5; ctx.stroke();
+    blob(ctx, gx - 4, gy - 8, 3.5, skin); head = [gx, gy - 14];
+  } else if (a.asleep) {                                               // lying down
+    ctx.fillStyle = '#7a6a55'; ctx.beginPath(); ctx.ellipse(gx, gy - 2, 13 * s, 5 * s, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = a.color; ctx.beginPath(); ctx.ellipse(gx + 2 * s, gy - 4 * s, 9 * s, 4 * s, 0, 0, 7); ctx.fill();
+    blob(ctx, gx - 9 * s, gy - 5 * s, 4.5 * s, skin); blob(ctx, gx - 10 * s, gy - 7 * s, 3.5 * s, hair);
+    head = [gx, gy - 16 * s];
+  } else {
+    const ph = h % 7, step = d.moving ? Math.sin(t * 11 + ph) : 0, bob = Math.abs(step) * 1.8 * s;
+    ctx.strokeStyle = '#2a2a35'; ctx.lineWidth = 2.6 * s; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(gx - 2.5 * s, gy - 8 * s - bob); ctx.lineTo(gx - 2.5 * s + step * 2.5 * s, gy - 1);
+    ctx.moveTo(gx + 2.5 * s, gy - 8 * s - bob); ctx.lineTo(gx + 2.5 * s - step * 2.5 * s, gy - 1); ctx.stroke(); ctx.lineCap = 'butt';
+    const by = gy - 21 * s - bob;
+    ctx.fillStyle = a.color; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.roundRect(gx - 6 * s, by, 12 * s, 14 * s, 4 * s); ctx.fill(); ctx.stroke();
+    if (a.pregnant) { ctx.beginPath(); ctx.arc(gx + 4 * s, by + 9 * s, 4.5 * s, 0, 7); ctx.fill(); ctx.stroke(); }
+    ctx.strokeStyle = shade(a.color, -.25); ctx.lineWidth = 2.4 * s; ctx.lineCap = 'round';      // arms
+    ctx.beginPath(); ctx.moveTo(gx - 6 * s, by + 3 * s); ctx.lineTo(gx - 7.5 * s - step * 2 * s, by + 10 * s);
+    ctx.moveTo(gx + 6 * s, by + 3 * s); ctx.lineTo(gx + 7.5 * s + step * 2 * s, by + 10 * s); ctx.stroke(); ctx.lineCap = 'butt';
+    const hy = by - 5 * s;
+    blob(ctx, gx, hy, 6 * s, skin);
+    ctx.fillStyle = hair; ctx.beginPath(); ctx.arc(gx, hy - 1 * s, 6.2 * s, Math.PI * 1.05, Math.PI * 1.95); ctx.fill();
+    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(gx - 2.6 * s, hy, 1.4 * s, 1.6 * s); ctx.fillRect(gx + 1.3 * s, hy, 1.4 * s, 1.6 * s);
+    head = [gx, hy - 7 * s];
+  }
+  S.head[a.name] = { x: gx, y: head[1], gy, s };
 }
-
+function personOverlay(a) {
+  const H = S.head[a.name]; if (!H) return;
+  const { x, y, gy, s } = H;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  let top = y - 4;
+  if (a.task) { bar(x, top - 4, 28, Math.min(1, a.task.progress / a.task.total), '#ffd93d'); top -= 8; }
+  bar(x, top - 4, 20, 1 - a.hunger / 100, a.hunger > 70 ? '#e0525e' : a.hunger > 40 ? '#e0a252' : '#5cc46e');
+  ctx.font = '12px system-ui';
+  if (a.heart) ctx.fillText('❤️', x + 14, top - 8);
+  if (a.slow) ctx.fillText('💭', x - 14, top - 8);
+  if (a.asleep && a.stage !== 'baby') { ctx.globalAlpha = .9; ctx.fillText('💤', x + 10 + Math.sin(performance.now() / 600) * 2, top - 10); ctx.globalAlpha = 1; }
+  if (a.stage === 'baby') return;
+  ctx.font = 'bold 10px system-ui';
+  const tag = a.name, nw = ctx.measureText(tag).width + 10;
+  ctx.fillStyle = S.sel === a.name ? 'rgba(90,70,0,.85)' : 'rgba(10,12,16,.7)'; ctx.beginPath(); ctx.roundRect(x - nw / 2, gy + 3, nw, 13, 6); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.fillText(tag, x, gy + 10);
+}
 function drawTalkLine(a) {
   const d = S.disp[a.name], tg = a.say_to && a.say_to !== 'all' && a.say_to !== 'Human' ? S.disp[a.say_to] : null;
   if (!d || !tg) return;
-  ctx.strokeStyle = a.color; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); ctx.globalAlpha = .8;
-  ctx.beginPath(); ctx.moveTo(d.x * T + T / 2, d.y * T + T / 2); ctx.lineTo(tg.x * T + T / 2, tg.y * T + T / 2); ctx.stroke();
+  const [x1, y1] = ground(d.x, d.y), [x2, y2] = ground(tg.x, tg.y);
+  ctx.strokeStyle = a.color; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); ctx.globalAlpha = .7;
+  ctx.beginPath(); ctx.moveTo(x1, y1 - 12); ctx.lineTo(x2, y2 - 12); ctx.stroke();
   ctx.setLineDash([]); ctx.globalAlpha = 1;
 }
-
 function drawBubble(a) {
-  const d = S.disp[a.name], px = d.x * T + T / 2, py = d.y * T + T / 2, r = (T / 2 - 3) * (a.stage === 'baby' ? .55 : a.adult ? 1 : .72);
+  const H = S.head[a.name]; if (!H) return;
+  const px = H.x, py = H.y - 12;
   const label = `${a.name} → ${a.say_to === 'all' ? 'everyone' : a.say_to === 'Human' ? 'you' : a.say_to}`;
   const txt = a.say.length > 90 ? a.say.slice(0, 88) + '…' : a.say;
   ctx.font = '12px system-ui';
@@ -177,7 +351,7 @@ function drawBubble(a) {
   for (const w of txt.split(' ')) { if (ctx.measureText(cur + ' ' + w).width > 200 && cur) { lines.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w; }
   lines.push(cur);
   const w = Math.max(...lines.map(l => ctx.measureText(l).width), ctx.measureText(label).width) + 16, h = lines.length * 15 + 22;
-  const bx = Math.min(Math.max(px - w / 2, 3), cv.width - w - 3), by = Math.max(3, py - r - h - 14);
+  const bx = Math.min(Math.max(px - w / 2, 3), cv.width - w - 3), by = Math.max(3, py - h - 8);
   ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.beginPath(); ctx.roundRect(bx, by, w, h, 8); ctx.fill();   // see-through
   ctx.globalAlpha = .7; ctx.strokeStyle = a.color; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
   ctx.beginPath(); ctx.moveTo(px - 6, by + h); ctx.lineTo(px, by + h + 8); ctx.lineTo(px + 6, by + h); ctx.fill();
@@ -186,30 +360,114 @@ function drawBubble(a) {
   lines.forEach((l, k) => { ctx.strokeText(l, bx + 8, by + 17 + k * 15); ctx.fillStyle = '#111'; ctx.fillText(l, bx + 8, by + 17 + k * 15); });
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 }
+function drawGrave(g) {
+  const [gx, gy] = ground(g.x, g.y);
+  shadow(ctx, gx, gy, 7, 3);
+  ctx.fillStyle = '#8d929a'; ctx.beginPath(); ctx.roundRect(gx - 5, gy - 13, 10, 13, [5, 5, 0, 0]); ctx.fill();
+  ctx.fillStyle = '#6c7078'; ctx.fillRect(gx - 1, gy - 10, 2, 6); ctx.fillRect(gx - 3, gy - 8, 6, 2);
+}
+
+// ---- fog, light and the frame
+let fogKey = '';
+function syncFog(fog) {
+  const key = fog.join('');
+  if (key === fogKey) return;
+  fogKey = key;
+  fctx.setTransform(1, 0, 0, 1, 0, 0); fctx.clearRect(0, 0, fogc.width, fogc.height);
+  fctx.setTransform(1 / FOG_SCALE, 0, 0, 1 / FOG_SCALE, 0, 0);       // low resolution, scaled up = soft edges
+  fctx.fillStyle = '#06080c';
+  fog.forEach((row, y) => { for (let x = 0; x < S.W; x++) if (row[x] === '0') { diamond(fctx, x - .08, y - .08, 1.16, 1.16); fctx.fill(); } });
+}
+function darkness(h) {               // 0 = full day, ~.5 = deep night
+  return h >= 22 || h < 5 ? .5 : h === 5 ? .38 : h === 6 ? .22 : h === 7 ? .08 : h < 18 ? 0 : h === 18 ? .08 : h === 19 ? .18 : h === 20 ? .3 : .42;
+}
+function view() {                     // the part of the canvas on screen (canvas pixels), for culling
+  const z = S.zoom, m = 90;
+  return { x0: scroller.scrollLeft / z - m, y0: scroller.scrollTop / z - m, x1: (scroller.scrollLeft + scroller.clientWidth) / z + m, y1: (scroller.scrollTop + scroller.clientHeight) / z + m + 60 };
+}
+function drawFrame(now) {
+  const t = now / 1000, st = S.st, V = view();
+  const vx = Math.max(0, V.x0), vy = Math.max(0, V.y0), vw = Math.min(cv.width, V.x1) - vx, vh = Math.min(cv.height, V.y1) - vy;
+  ctx.fillStyle = '#0b1220'; ctx.fillRect(vx, vy, vw, vh);
+  if (vw > 0 && vh > 0) ctx.drawImage(bg, vx, vy, vw, vh, vx, vy, vw, vh);
+  if (st) {
+    const vis = (x, y) => { const [a, b] = ground(x, y); return a > V.x0 && a < V.x1 && b > V.y0 && b < V.y1; };
+    // water shimmer
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.3;
+    for (const w of S.water || []) {
+      if (!vis(w.x, w.y)) continue;
+      const k = (Math.sin(t * 1.6 + w.ph) + 1) / 2, [a, b] = ground(w.x, w.y), o = Math.sin(t * .8 + w.ph) * 3;
+      ctx.globalAlpha = k * .35; ctx.beginPath(); ctx.moveTo(a - 6 + o, b); ctx.quadraticCurveTo(a + o, b - 2.5, a + 6 + o, b); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // everything that stands up, back to front
+    S.inside = new Set(); const items = [], spots = new Set();
+    for (const a of S.agents) { const d = S.disp[a.name] || a; spots.add(Math.round(d.x) + ',' + Math.round(d.y)); }
+    const byTile = {};
+    for (const s of st.structures) for (let i = 0; i < s.w; i++) for (let j = 0; j < s.h; j++) byTile[(s.x + i) + ',' + (s.y + j)] = s;
+    for (const a of S.agents) {
+      const b = a.inside && byTile[a.x + ',' + a.y];
+      if (b) S.inside.add(b.x + ',' + b.y);
+      const d = S.disp[a.name] || a;
+      if (vis(d.x, d.y)) items.push([b && b.done && !isFlat(b) ? b.x + b.y + b.w + b.h - 1.4 : d.x + d.y + .5, () => drawPerson(a, t)]);
+      else S.head[a.name] = null;
+    }
+    for (const p of S.props || []) if (vis(p.x, p.y)) items.push([p.x + p.y, () => drawProp(p, spots.has((p.x - 1) + ',' + (p.y - 1)) || spots.has(p.x + ',' + (p.y - 1)) || spots.has((p.x - 1) + ',' + p.y))]);
+    for (const s of st.structures) if (vis(s.x + s.w / 2, s.y + s.h / 2)) items.push([isFlat(s) ? -1e6 + s.x + s.y : s.x + s.y + s.w + s.h - 1.5, () => drawBuilding(s, t)]);
+    for (const g of st.dead) if (vis(g.x, g.y)) items.push([g.x + g.y + .2, () => drawGrave(g)]);
+    items.sort((p, q) => p[0] - q[0]).forEach(([, f]) => f());
+    // fog of war
+    if ($('fog').checked && st.fog) { syncFog(st.fog); ctx.globalAlpha = .62; ctx.drawImage(fogc, vx / FOG_SCALE, vy / FOG_SCALE, vw / FOG_SCALE, vh / FOG_SCALE, vx, vy, vw, vh); ctx.globalAlpha = 1; }
+    // time of day: darken, warm dawn/dusk, and let fires and homes glow
+    const hour = st.time?.hour ?? 12, target = darkness(hour);
+    S.dark += (target - S.dark) * .03;
+    if (S.dark > .01) {
+      ctx.fillStyle = `rgba(12,18,52,${S.dark})`; ctx.fillRect(vx, vy, vw, vh);
+      if (hour === 6 || hour === 7 || hour === 18 || hour === 19) { ctx.fillStyle = 'rgba(255,140,60,.08)'; ctx.fillRect(vx, vy, vw, vh); }
+      ctx.globalCompositeOperation = 'lighter';
+      for (const s of st.structures) {
+        if (!s.done || (s.func !== 'fire' && s.func !== 'home')) continue;
+        const [cx, cy] = iso(s.x + s.w / 2, s.y + s.h / 2), r = s.func === 'fire' ? 70 : 40, k = S.dark * (s.func === 'fire' ? .9 + Math.sin(t * 7) * .08 : .5);
+        const g = ctx.createRadialGradient(cx, cy - 8, 2, cx, cy - 8, r); g.addColorStop(0, `rgba(255,170,70,${k * .7})`); g.addColorStop(1, 'rgba(255,170,70,0)');
+        ctx.fillStyle = g; ctx.fillRect(cx - r, cy - 8 - r, r * 2, r * 2);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    // labels on top, always readable
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const s of st.structures) if (vis(s.x + s.w / 2, s.y + s.h / 2)) buildingOverlay(s);
+    for (const a of S.agents) personOverlay(a);
+    if ($('bubbles').checked) {
+      for (const a of S.agents) if (a.say) drawTalkLine(a);
+      for (const a of S.agents) if (a.say && S.head[a.name]) drawBubble(a);
+    }
+  }
+  requestAnimationFrame(drawFrame);
+}
 
 // zoom & pan
 function setZoom(z, cx, cy) {
-  const old = S.zoom; S.zoom = Math.min(2, Math.max(.25, z));
+  const old = S.zoom; S.zoom = Math.min(2.5, Math.max(.2, z));
   const r = scroller.getBoundingClientRect();
   cx = cx ?? r.width / 2; cy = cy ?? r.height / 2;
-  const wx = (scroller.scrollLeft + cx) / old, wy = (scroller.scrollTop + cy) / old;     // world px under the pointer
-  cv.style.width = Math.round(S.W * T * S.zoom) + 'px'; cv.style.height = Math.round(S.H * T * S.zoom) + 'px';
+  const wx = (scroller.scrollLeft + cx) / old, wy = (scroller.scrollTop + cy) / old;     // canvas px under the pointer
+  cv.style.width = Math.round(cv.width * S.zoom) + 'px'; cv.style.height = Math.round(cv.height * S.zoom) + 'px';
   scroller.scrollLeft = wx * S.zoom - cx; scroller.scrollTop = wy * S.zoom - cy;
   store.set('zoom', S.zoom);
 }
-const fitZoom = () => setZoom(Math.min(scroller.clientWidth / (S.W * T), scroller.clientHeight / (S.H * T)));
+const fitZoom = () => setZoom(Math.min(scroller.clientWidth / cv.width, scroller.clientHeight / cv.height));
 function centerOn(name, smooth = true) {
   const a = S.agents.find(x => x.name === name); if (!a) return;
-  const d = S.disp[a.name] || a;
-  scroller.scrollTo({ left: (d.x + .5) * T * S.zoom - scroller.clientWidth / 2, top: (d.y + .5) * T * S.zoom - scroller.clientHeight / 2, behavior: smooth ? 'smooth' : 'auto' });
+  const d = S.disp[a.name] || a, [px, py] = ground(d.x, d.y);
+  scroller.scrollTo({ left: px * S.zoom - scroller.clientWidth / 2, top: (py - 15) * S.zoom - scroller.clientHeight / 2, behavior: smooth ? 'smooth' : 'auto' });
 }
-function worldAt(e) {
+function canvasAt(e) {
   const r = cv.getBoundingClientRect();
-  return { fx: (e.clientX - r.left) / r.width * S.W, fy: (e.clientY - r.top) / r.height * S.H };
+  return { px: (e.clientX - r.left) / r.width * cv.width, py: (e.clientY - r.top) / r.height * cv.height };
 }
-function agentAt(fx, fy, lim = 1.1) {
+function agentAt(px, py, lim = 18) {   // nearest agent to a canvas point, measured to the middle of the body
   let best = null, bd = lim;
-  for (const a of S.agents) { const d = S.disp[a.name] || a, k = Math.hypot(d.x + .5 - fx, d.y + .5 - fy); if (k < bd) { bd = k; best = a; } }
+  for (const a of S.agents) { const H = S.head[a.name]; if (!H) continue; const k = Math.hypot(H.x - px, (H.y + H.gy) / 2 - py); if (k < bd) { bd = k; best = a; } }
   return best;
 }
 scroller.addEventListener('wheel', e => {
@@ -227,25 +485,22 @@ window.addEventListener('pointermove', e => {
   }
 });
 window.addEventListener('pointerup', e => {
-  if (drag && !drag.moved && e.target === cv) {
-    const { fx, fy } = worldAt(e), a = agentAt(fx, fy);
-    if (a) select(a.name);
-  }
+  if (drag && !drag.moved && e.target === cv) { const { px, py } = canvasAt(e), a = agentAt(px, py); if (a) select(a.name); }
   drag = null; scroller.classList.remove('dragging');
 });
-cv.addEventListener('dblclick', e => { const { fx, fy } = worldAt(e), a = agentAt(fx, fy); if (a) { select(a.name); $('follow').checked = true; } });
+cv.addEventListener('dblclick', e => { const { px, py } = canvasAt(e), a = agentAt(px, py); if (a) { select(a.name); $('follow').checked = true; } });
 cv.addEventListener('mousemove', e => {
-  const { fx, fy } = worldAt(e), x = Math.floor(fx), y = Math.floor(fy), tip = $('tip');
+  const { px, py } = canvasAt(e), { fx, fy } = unIso(px, py), x = Math.floor(fx), y = Math.floor(fy), tip = $('tip');
   const t = S.tiles[y]?.[x], st = S.st;
   if (!t || !st || drag?.moved) { tip.hidden = true; return; }
   const names = { grass: 'Grass', water: 'Water — impassable', sand: 'Sand', rock: 'Rock — gather for stone', tree: 'Tree — gather for wood',
-    food: 'Berry bush — food (slow to regrow)', sprout: 'Young plant — tend it to grow', crop: 'Ripe crop — 3 food + a seed', structure: 'Built structure' };
+    food: 'Berry bush — food (slow to regrow)', sprout: 'Young plant — grows by itself', crop: 'Ripe crop — 3 food + a seed', structure: 'Built' };
   const unseen = st.fog && st.fog[y][x] === '0';
   let html = `<div class="muted">(${x}, ${y}) · ${unseen ? 'Unexplored' : names[t]}</div>`;
-  const a = agentAt(fx, fy, .8);
-  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${SEX[a.sex]} ${a.stage} ${extras(a)} · ${a.age} days old · hunger ${a.hunger} · ${a.food} food${a.pregnant ? ` · due ${ts(a.due)}` : ''}</div><div class="muted">${esc(a.doing)}</div>` + html;
-  const s = st.structures.find(q => q.x === x && q.y === y);
-  if (s) html += `<div>${iconFor(s.kind)} <b>${esc(s.kind)}</b> by ${esc(s.by)}${s.function ? `<div style="color:var(--gold)">⚙️ ${esc(s.function)}</div>` : '<div class="muted">decorative</div>'}${s.stock ? `<div>📦 ${Object.entries(s.stock).map(([k, v]) => `${v} ${k}`).join(' · ')}</div>` : ''}${s.text ? `<div class="muted">“${esc(s.text)}”</div>` : ''}</div>`;
+  const a = agentAt(px, py, 16);
+  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${SEX[a.sex]} ${a.stage} ${extras(a)} · ${esc(a.age_text)} old · hunger ${a.hunger} · ${a.food} food${a.pregnant ? ` · due ${ts(a.due)}` : ''}</div><div class="muted">${a.asleep ? '💤 asleep' : esc(a.doing)}</div>` + html;
+  const s = st.structures.find(q => x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h);
+  if (s) html += `<div>${iconFor(s.kind, s.func)} <b>${esc(s.kind)}</b> <span class="muted">${s.w}×${s.h} · by ${esc(s.by)}</span>${!s.done ? `<div style="color:var(--gold)">🏗️ under construction: ${s.progress}/${s.work} hours of work</div>` : ''}${s.function ? `<div style="color:var(--gold)">⚙️ ${esc(s.function)}</div>` : '<div class="muted">decorative</div>'}${s.stock && Object.keys(s.stock).length ? `<div>📦 ${Object.entries(s.stock).map(([k, v]) => `${v} ${k}`).join(' · ')}</div>` : ''}${s.text ? `<div class="muted">“${esc(s.text)}”</div>` : ''}</div>`;
   const g = st.dead.find(q => q.x === x && q.y === y);
   if (g) html += `<div>🪦 ${esc(g.name)} — died of ${esc(g.cause)} aged ${g.age_text} (${ts(g.died)})</div>`;
   tip.innerHTML = html; tip.hidden = false;
@@ -263,16 +518,17 @@ setInterval(() => { if ($('follow').checked && S.sel) centerOn(S.sel); }, 1200);
 
 // ======================================================================= top bar & banner
 function renderTop(st) {
-  $('p-day').textContent = `${ts(st.day, true)}`;
+  const tm = st.time || {}, PART = { morning: '🌅', afternoon: '☀️', evening: '🌇', night: '🌙' };
+  $('p-day').textContent = `${PART[tm.part] || '☀️'} ${tm.stamp || ts(st.day, true)}`;
   const B = st.backends || {};
-  $('p-brain').textContent = B.mock ? '🎭 Mock (scripted)' : '🧠 ' + [B.local ? 'Local: ' + B.local_model : '', B.smart_local ? 'Smart: ' + B.smart_local : '', B.claude ? 'Claude' : ''].filter(Boolean).join(' + ');
   $('p-pop').textContent = `👥 ${st.agents.length} / ${st.limits.max_agents}` + (st.dead.length ? ` · 🪦 ${st.dead.length}` : '');
   $('p-explored').textContent = `🧭 ${st.explored}% explored`;
-  $('p-speed').textContent = `⏱ ${st.day_seconds || 0}s / day` + (st.thinking ? ` · 💭 ${st.thinking} thinking` : '');
-  $('p-speed').title = 'Seconds the last day took. 💭 = agents whose brain is still working (slow brains act a little later instead of holding everyone up).';
+  $('p-speed').hidden = !st.thinking;
+  $('p-speed').textContent = `💭 ${st.thinking} thinking`;
+  $('p-speed').title = `Agents whose brain is still working: they act as soon as it answers instead of holding everyone up. The last hour took ${st.day_seconds || 0}s.`;
   const u = st.usage;
-  $('p-usage').textContent = `💬 ${fmt(u.calls)} calls · ${fmt(u.input + u.output)} tokens` + (u.cost != null && u.cost > 0 ? ` · ~$${u.cost.toFixed(2)}` : '');
-  $('p-usage').title = Object.entries(u.models).map(([m, x]) => `${m}: ${x.calls} calls, ${x.input} in / ${x.output} out`).join('\n') || 'No model calls yet';
+  $('p-usage').textContent = `💬 ${fmt(u.calls)} calls` + (u.cost != null && u.cost > 0 ? ` · ~$${u.cost.toFixed(2)}` : '');
+  $('p-usage').title = `${fmt(u.input + u.output)} tokens in total\n` + (Object.entries(u.models).map(([m, x]) => `${m}: ${x.calls} calls, ${x.input} in / ${x.output} out`).join('\n') || 'No model calls yet') + '\nClick for details';
   $('b-pause').textContent = st.paused ? '▶ Resume' : '⏸ Pause';
   $('b-pause').classList.toggle('primary', !st.paused);
   $('b-step').disabled = !st.paused;
@@ -284,6 +540,7 @@ function renderTop(st) {
     + (!B.mock && notes.length ? `<div class="warn">ℹ ${esc(notes.join(' · '))}</div>` : '')
     + (err ? `<div class="bad">Brain error — ${esc(err.agent)} (${esc(err.model)}): ${esc(err.error)}</div>` : '');
 }
+$('p-usage').onclick = () => showTab('settings');
 $('b-pause').onclick = () => api.post('/api/control', { paused: !S.st?.paused }).then(poll);
 $('b-step').onclick = () => api.post('/api/control', { step: true }).then(() => setTimeout(poll, 300));
 for (const b of $('speed').children) b.onclick = () => api.post('/api/control', { interval: +b.dataset.v, max_wait: +b.dataset.w }).then(poll);
@@ -308,14 +565,15 @@ function renderList(st) {
   const rows = st.agents.filter(a => !q || a.name.toLowerCase().includes(q) || (a.role || '').toLowerCase().includes(q));
   $('list').innerHTML = `<div class="person" id="sol-row" title="Sol watches over everyone and gives advice. Click to talk to Sol.">
       <div class="avatar" style="background:#ffd93d">🧙</div><div><div class="name">Sol <span class="muted small">the mentor</span></div>
-      <div class="sub">reviews everyone every 20 days · next in ${st.sol.next_in} days · click to talk</div></div>
+      <div class="sub">next review ${esc(st.sol.next_at)} · click to talk</div></div>
       <div class="right">${TIER[st.sol.model === 'local' ? 'local' : st.sol.model.startsWith('local:') ? 'smart' : 'haiku'] || ''}</div></div>` + rows.map(a => `
     <div class="person ${S.sel === a.name ? 'sel' : ''}" data-name="${esc(a.name)}">
       <div class="avatar" style="background:${a.color}">${esc(a.name[0])}</div>
-      <div><div class="name">${esc(a.name)} <span class="muted" title="${a.sex}">${SEX[a.sex]}</span> <span title="${a.stage === 'baby' ? 'babies don\'t use a brain' : a.tier}">${a.stage === 'baby' ? '' : TIER[a.tier]}</span> ${extras(a)}</div>
-        <div class="sub">${a.role ? esc(a.role) : '<i>no role yet</i>'} · ${esc(a.doing) || 'getting started'}</div></div>
+      <div><div class="name">${esc(a.name)} <span class="muted" title="${a.sex}">${SEX[a.sex]}</span> <span title="${a.stage === 'baby' ? 'babies don\'t use a brain' : a.tier}">${a.stage === 'baby' ? '' : TIER[a.tier]}</span> ${extras(a)}${a.asleep && a.stage !== 'baby' ? ' 💤' : ''}${a.slow ? ' 💭' : ''}</div>
+        <div class="sub">${a.role ? esc(a.role) : '<i>no role yet</i>'} · ${a.task ? '🏗️ ' + esc(a.task.label) : a.asleep ? 'asleep' : a.inside ? 'in the ' + esc(a.inside) + ' · ' + esc(a.doing) : esc(a.doing) || 'getting started'}</div></div>
       <div class="right">🎂 ${a.age_text}<br>🍎 ${a.food}</div>
       <div class="bar" title="Hunger ${a.hunger}/100"><div style="width:${a.hunger}%;background:${hungerColor(a.hunger)}"></div></div>
+      ${a.task ? `<div class="bar task" title="${esc(a.task.label)}: ${a.task.progress}/${a.task.total} hours of work"><div style="width:${Math.min(100, a.task.progress / a.task.total * 100)}%;background:var(--gold)"></div></div>` : ''}
     </div>`).join('') || '<p class="muted">Nobody matches.</p>';
   $('graves').innerHTML = st.dead.length ? '<h3>In memory</h3>' + st.dead.map(g =>
     `<div class="grave" data-name="${esc(g.name)}">🪦 ${esc(g.name)} — ${esc(g.cause)}, aged ${g.age_text} (${ts(g.died)})</div>`).join('') : '';
@@ -367,7 +625,7 @@ function renderProfile() {
   for (const b of $('pt').children) b.classList.toggle('on', b.dataset.k === S.ptab);
   $('ph').innerHTML = `<div class="avatar big" style="background:${a.color}">${esc(a.name[0])}</div>
     <div><h2>${esc(a.name)} ${!a.alive ? '🪦' : a.stage === 'baby' ? '' : TIER[a.tier]}</h2>
-    <div class="muted">${SEX[a.sex]} ${a.adult ? (a.sex === 'female' ? 'woman' : 'man') : (a.sex === 'female' ? 'girl' : 'boy')} · ${a.role ? esc(a.role) : 'no role yet'} · ${a.age} days old · ${a.alive ? a.stage + ' ' + extras(a) : `died of ${esc(a.cause)} on ${ts(a.died)}`}</div></div>`;
+    <div class="muted">${SEX[a.sex]} ${a.adult ? (a.sex === 'female' ? 'woman' : 'man') : (a.sex === 'female' ? 'girl' : 'boy')} · ${a.role ? esc(a.role) : 'no role yet'} · ${esc(a.age_text || a.age + ' hours')} old · ${a.alive ? a.stage + ' ' + extras(a) : `died of ${esc(a.cause)} on ${ts(a.died)}`}</div></div>`;
   $('pa').innerHTML = a.alive ? `<button class="btn" data-do="talk">💬 Talk</button><button class="btn" data-do="locate">📍 Find on map</button>
     <button class="btn" data-do="follow">${$('follow').checked ? '⏹ Stop following' : '👁 Follow'}</button>
     <button class="btn" data-gift="food" title="Give 3 food">🎁 🍎</button><button class="btn" data-gift="seeds" title="Give 3 seeds">🎁 🌱</button>
@@ -390,7 +648,11 @@ function overview(a) {
   const notes = (a.pregnancy ? `<div class="card">🤰 Pregnant by <a href="#" data-goto="${esc(a.pregnancy.father)}">${esc(a.pregnancy.father)}</a> — the baby is due on ${ts(a.pregnancy.due)}.</div>` : '')
     + (a.stage === 'baby' ? `<div class="card">🍼 A baby: can't think or feed themselves yet, and stays with their mother. Others must <b>care</b> for them (or you can send food). A child from day 5, an adult from day 10.</div>` : '')
     + (a.stage === 'child' ? '<div class="card">👶 A child: thinks and acts on their own, an adult from day 10.</div>' : '');
-  return notes + `${meter('Hunger', a.hunger, hungerColor(a.hunger))}${meter('Health', a.health, a.health < 40 ? 'var(--bad)' : 'var(--good)')}
+  const now = S.st?.agents.find(x => x.name === a.name);
+  const doing = now ? (now.task ? `<div class="card" style="border-left:3px solid var(--gold)">🏗️ <b>${esc(now.task.label)}</b> — ${now.task.progress}/${now.task.total} hours of work
+      <div class="bar" style="margin-top:6px"><div style="width:${Math.min(100, now.task.progress / now.task.total * 100)}%;background:var(--gold)"></div></div></div>` : '')
+    + (now.asleep && now.stage !== 'baby' ? '<div class="card">💤 Asleep — back at work at 06:00.</div>' : now.inside ? `<div class="card">🏠 Inside the ${esc(now.inside)}.</div>` : '') : '';
+  return notes + doing + `${meter('Hunger', a.hunger, hungerColor(a.hunger))}${meter('Health', a.health, a.health < 40 ? 'var(--bad)' : 'var(--good)')}
     <div class="kv" style="margin-top:8px"><span>Carrying</span><span>🍎 ${a.food} food · 🌱 ${a.seeds} seeds · 🪵 ${a.wood} wood · 🪨 ${a.stone} stone</span>
     <span>Objects</span><span class="objs">${a.items.map(i => `<span class="obj" title="${esc(i.text)}">🔧 ${esc(i.name)}</span>`).join('') || '<span class="muted">none yet</span>'}</span>
     <span>Explored</span><span>${a.discoveries} tiles seen first</span>
@@ -475,7 +737,7 @@ function renderChat(force) {
   const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
   el.innerHTML = c.length ? c.map(m => m.from === 'You'
     ? `<div class="bub me"><b style="color:var(--you)">You → ${esc(m.to)}</b>${esc(m.text)}</div>`
-    : m.review ? `<div class="bub" style="border-left:3px solid var(--gold)"><b style="color:var(--gold)">🧙 Sol's review · ${ts(m.tick)}</b>${esc(m.text)}</div>`
+    : m.review ? `<div class="bub review"><b style="color:var(--gold)">🧙 Sol's review · ${ts(m.tick)}</b>${m.text.length > 220 ? `<details><summary>${esc(m.text.slice(0, 200))}… <span class="more">more</span></summary>${esc(m.text.slice(200))}</details>` : esc(m.text)}</div>`
     : `<div class="bub"><b style="color:${m.color}">${esc(m.from)}</b>${m.pending ? '<span class="muted typing">thinking</span>' : esc(m.text)}${(m.changes || []).map(c => `<div class="tag" style="margin-top:4px;color:var(--gold)">${esc(c)}</div>`).join('')}</div>`).join('')
     : '<p class="muted">Pick who to talk to below and say hello. Ask what they are up to, give them a task, or tell them a story.</p>';
   if (stick || force) el.scrollTop = el.scrollHeight;
@@ -542,8 +804,8 @@ function drawCharts() {
   $('readout').innerHTML = `<b>${ts(d.day, true)}</b> — ` + METRICS.map(([k, l]) => `${l}: <b>${fmt(d[k])}${k === 'explored' ? '%' : ''}</b>`).join(' · ') + ` · Deaths so far: <b>${d.deaths}</b>`;
   if ($('stats-table').checked) {
     const step = Math.max(1, Math.ceil(data.length / 30)), rows = data.filter((_, i) => i % step === 0 || i === data.length - 1).reverse();
-    $('table').innerHTML = `<table><tr><th>Day</th>${METRICS.map(([, l]) => `<th>${l}</th>`).join('')}</tr>` +
-      rows.map(r => `<tr><td>${r.day}</td>${METRICS.map(([k]) => `<td>${fmt(r[k])}</td>`).join('')}</tr>`).join('') + '</table>';
+    $('table').innerHTML = `<table><tr><th>When</th>${METRICS.map(([, l]) => `<th>${l}</th>`).join('')}</tr>` +
+      rows.map(r => `<tr><td>${ts(r.day)}</td>${METRICS.map(([k]) => `<td>${fmt(r[k])}</td>`).join('')}</tr>`).join('') + '</table>';
   } else $('table').innerHTML = '';
 }
 $('charts').addEventListener('pointermove', e => {
@@ -579,11 +841,12 @@ $('new').onclick = async () => {
 };
 function renderUsage() {
   const u = S.st?.usage; if (!u) return;
-  const rows = Object.entries(u.models);
-  $('usage').innerHTML = rows.length ? `<table><tr><th>Model</th><th>Calls</th><th>Input</th><th>Output</th><th>Cost</th></tr>` +
+  const rows = Object.entries(u.models), B = S.st.backends || {};
+  const brains = B.mock ? '🎭 Mock (scripted, not real thinking)' : [B.local ? '🖥️ Local: ' + esc(B.local_model) : '', B.smart_local ? '🧠 Smart local: ' + esc(B.smart_local) : '', B.claude ? '🌱 Claude (Haiku / Sonnet / Opus)' : ''].filter(Boolean).join(' · ');
+  $('usage').innerHTML = `<div class="card small">Available brains: ${brains || 'none'}</div>` + (rows.length ? `<table><tr><th>Model</th><th>Calls</th><th>Input</th><th>Output</th><th>Cost</th></tr>` +
     rows.map(([m, x]) => `<tr><td>${esc(m)}</td><td>${fmt(x.calls)}</td><td>${fmt(x.input)}</td><td>${fmt(x.output)}</td><td>${x.cost != null ? '$' + x.cost.toFixed(3) : '–'}</td></tr>`).join('') + '</table>'
     + '<p class="muted small">Local models are free. For Claude cost estimates start the hub with --price MODEL=IN,OUT (USD per million tokens).</p>'
-    : '<p class="muted">No model calls yet.</p>';
+    : '<p class="muted">No model calls yet.</p>');
 }
 async function resetView() {
   S.disp = {}; S.lastEvent = null; S.stats = []; closeProfile(); drawn.length = 0;
@@ -637,6 +900,11 @@ async function poll() {
   try {
     const st = await api.get('/api/state');
     S.st = st; S.agents = st.agents; spread(st.agents);
+    if (S.centerOnce && st.agents.length) {          // first visit: look at where the people are
+      S.centerOnce = false;
+      const [px, py] = ground(st.agents.reduce((n, a) => n + a.x, 0) / st.agents.length, st.agents.reduce((n, a) => n + a.y, 0) / st.agents.length);
+      scroller.scrollLeft = px * S.zoom - scroller.clientWidth / 2; scroller.scrollTop = py * S.zoom - scroller.clientHeight / 2;
+    }
     if (st.tiles.length === S.H) syncTiles(st.tiles);
     renderTop(st);
     if (!S.sel) renderList(st);
@@ -648,9 +916,12 @@ async function poll() {
       <div>${esc(d.description)}</div><span class="eff">⚡ ${esc(d.meaning)}</span></div>`).join('')
       : '<p class="muted small">Nothing yet. When an agent attempts or invents something genuinely useful, it shows up here and changes the rules for everyone.</p>';
     const so = st.sol;
-    $('solcard').innerHTML = `<b style="color:var(--gold)">🧙 Sol, the mentor</b> <span class="muted small">reviews everyone every 20 days · next in ${so.next_in} days</span>
-      <span style="float:right;display:flex;gap:6px"><button class="btn primary" id="sol-talk" style="padding:3px 10px">💬 Talk to Sol</button><button class="btn" id="sol-now" style="padding:3px 10px">Review now</button></span>
-      <div class="small" style="margin-top:6px">${so.log.length ? esc(so.log[so.log.length - 1].note || so.log[so.log.length - 1].speech) : 'Sol hasn\'t reviewed the society yet. Pick 🧙 Sol below to talk to Sol.'}</div>`;
+    const last = so.log.length ? so.log[so.log.length - 1] : null, note = last ? (last.note || last.speech || '') : '';
+    $('solcard').innerHTML = `<div class="solhead"><div class="avatar" style="background:#ffd93d">🧙</div>
+        <div class="solmeta"><b>Sol</b> <span class="small">${TIER[so.model === 'local' ? 'local' : so.model.startsWith('local:') ? 'smart' : 'haiku'] || ''}</span> <span class="muted small">mentor &amp; referee</span>
+        <div class="muted small" title="Sol decides when to look again">next review ${so.next_in ? ts(st.day + so.next_in) : 'soon'}</div></div>
+        <div class="solbtns"><button class="btn primary" id="sol-talk">💬 Talk</button><button class="btn" id="sol-now" title="Ask Sol to review the society now">🔍 Review now</button></div></div>
+      ${note ? `<div class="small clamp" title="${esc(note)}">${esc(note)}</div>` : '<div class="small muted">No review yet. Sol looks over everyone, gives advice and decides when to look again.</div>'}`;
     $('sol-now').onclick = () => api.post('/api/sol').then(() => toast('🧙 Sol is reviewing the society…', '#ffd93d'));
     $('sol-talk').onclick = talkToSol;
     if (document.activeElement !== $('solm')) $('solm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[so.model] || (so.model.startsWith('local:') ? 'smart' : 'local');
@@ -666,14 +937,16 @@ async function poll() {
 async function loadWorld() {
   const w = await api.get('/api/world');
   S.W = w.width; S.H = w.height; S.tiles = w.tiles;
-  cv.width = bg.width = S.W * T; cv.height = bg.height = S.H * T;
+  cv.width = bg.width = (S.W + S.H) * TW / 2 + PAD * 2; cv.height = bg.height = (S.W + S.H) * TH / 2 + TOP + PAD;
+  fogc.width = Math.ceil(cv.width / FOG_SCALE); fogc.height = Math.ceil(cv.height / FOG_SCALE); fogKey = '';
+  drawn.length = 0; bctx.clearRect(0, 0, bg.width, bg.height);
   syncTiles(w.tiles);
 }
 (async () => {
   if (innerWidth < 1000) document.querySelector('.legend').open = false;
   await loadWorld();
   const z = store.get('zoom', null);
-  z ? setZoom(z) : fitZoom();
+  if (z) setZoom(z); else { setZoom(1); S.centerOnce = true; }
   showTab(store.get('tab', 'people'));
   await poll();
   requestAnimationFrame(drawFrame);

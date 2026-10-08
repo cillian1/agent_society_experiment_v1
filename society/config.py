@@ -13,7 +13,7 @@ FOOD_REGROW_DAYS = 100                # hours until a picked bush regrows (~4 da
 TREE_REGROW_DAYS = 300                # hours
 GROW_NEEDED = 8.0                     # growth points for a planted sprout to ripen
 PLANT_GROWTH_PER_DAY = 0.4            # per hour: plants grow by themselves (~20 hours)...
-IRRIGATED_GROWTH_PER_DAY = 0.6        # ...faster near water (~13 days)
+IRRIGATED_GROWTH_PER_DAY = 0.6        # ...faster near water (~13 hours)
 TEND_COOLDOWN = 3                     # hours: tending helps at most once every few hours - then it just needs time
 TEAMWORK_WINDOW = 6                   # hours within which a second farmer counts as "working together"
 
