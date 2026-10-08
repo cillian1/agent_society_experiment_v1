@@ -514,7 +514,7 @@ def reply_prompt(a: Agent, situation: str, human_msg: str, also_to: list[str]) -
             f'  "next": up to {MAX_QUEUE} actions to start doing from tomorrow, in the same format as your daily actions '
             f"(actions: {', '.join(a_ for a_ in ACTIONS if a_ not in ('wait', 'attempt', 'invent'))}), e.g. "
             '[{"action": "go", "target": "wood"}, {"action": "gather"}, {"action": "build", "direction": "east", "title": "storehouse"}].\n'
-            'Reply ONLY with JSON: {"thought": "<private reasoning>", "message": "<what you say to them>", '
+            'Reply ONLY with JSON: {"message": "<what you say to them>", "thought": "<private reasoning, short>", '
             '"ambition": "...", "plan": "...", "next": [...]}')
 
 
@@ -533,6 +533,23 @@ def _json(raw: str) -> dict:
     except json.JSONDecodeError:
         data = {}
     return data if isinstance(data, dict) else {}
+
+
+def said(raw: str) -> str:
+    """The "message" from an answer even when the JSON is cut off or missing (a small model ran out of words).
+    Ignores messages inside "advice" (those are for other people)."""
+    data = _json(raw)
+    if data.get("message"):
+        return str(data["message"]).strip()
+    m = re.search(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)', raw)
+    if m and '"advice"' in raw[:m.start()]:
+        m = None
+    if m:
+        try:
+            return json.loads(f'"{m.group(1).rstrip(chr(92))}"').strip()
+        except json.JSONDecodeError:
+            return m.group(1).strip()
+    return "" if raw.lstrip().startswith("{") else raw.strip()
 
 
 def parse_action(raw: str, others: list[str], depth: int = 0) -> dict:
@@ -568,11 +585,12 @@ def decide(a: Agent, llm, prompt: str, others: list[str]) -> dict:
 
 
 def reply(a: Agent, llm, situation: str, human_msg: str, others: list[str], also_to: list[str]) -> dict:
-    raw = llm.complete(system_prompt(a, others), reply_prompt(a, situation, human_msg, also_to), model=a.model, urgent=True)
+    raw = llm.complete(system_prompt(a, others), reply_prompt(a, situation, human_msg, also_to), model=a.model, urgent=True,
+                       max_tokens=700)
     data = _json(raw)
     nxt = parse_action(json.dumps({"action": "wait", "next": data.get("next") or []}), others)["next"]
     return {"thought": str(data.get("thought") or "").strip(),
-            "message": str(data.get("message") or (raw if not data else "")).strip(),
+            "message": said(raw)[:600],
             "ambition": str(data.get("ambition") or "").strip()[:240], "plan": str(data.get("plan") or "").strip()[:240],
             "next": nxt}
 

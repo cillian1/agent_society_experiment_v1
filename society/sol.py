@@ -2,17 +2,19 @@
 everyone is doing, speaks to the whole society, and gives individuals concrete advice (and can line up next steps
 for agents who are drifting). The Human can talk to Sol, and Sol passes things on."""
 import collections
+import re
 import json
 import threading
 
 from .clock import age_text, stamp
 from .clock import DAY
 from .config import FUNCTIONS, MAX_QUEUE, SOL_MAX_DAYS, SOL_MIN_DAYS
-from .mind import ACTIONS, _json, failed, parse_action
+from .mind import ACTIONS, _json, failed, parse_action, said
 from . import clock, culture, history, social
 from . import tech as techtree
 
 NAME = "Sol"
+SOL_TOKENS = 1500         # Sol talks to everyone and advises many people at once: allow a long answer
 COLOR = "#ffd93d"
 
 
@@ -78,7 +80,7 @@ def review(sim) -> dict:
                   '"chapter": {"title": "...", "text": "..."}.')
     prompt = (f"SOL_REVIEW\n{overview(sim)}\n\nThis is your morning address to the society. Your last words to them: "
               f"{sim.sol_log[-1]['speech'] if sim.sol_log else '(this is your first review)'}\n\n{FORMAT}{extra}")
-    return _json(sim.llm.complete(INSTRUCTIONS, prompt, model=sim.sol_model))
+    return _json(sim.llm.complete(INSTRUCTIONS, prompt, model=sim.sol_model, max_tokens=SOL_TOKENS))
 
 
 def chat(sim, message: str) -> dict:
@@ -86,9 +88,15 @@ def chat(sim, message: str) -> dict:
     prompt = (f"SOL_CHAT\n{overview(sim)}\n\nYour recent conversation with the Human:\n{talk or '(none)'}\n\n"
               f'The Human (who founded this world) says to you: "{message}"\n'
               "Answer the Human helpfully and honestly in 1-4 sentences. If they ask you to pass something on or to guide "
-              "people, also include a speech to everyone and/or advice (with next actions) for specific people. "
-              + FORMAT.replace('"note_to_human"', '"message": "<your answer to the Human>", "note_to_human"'))
-    return _json(sim.llm.complete(INSTRUCTIONS, prompt, model=sim.sol_model, urgent=True))
+              "people, also include a speech to everyone and/or advice (with next actions) for specific people - but keep "
+              "it short. Put your answer to the Human FIRST. "
+              + FORMAT.replace('Reply ONLY with JSON: {', 'Reply ONLY with JSON: {"message": "<your answer to the Human>", '))
+    raw = sim.llm.complete(INSTRUCTIONS, prompt, model=sim.sol_model, urgent=True, max_tokens=SOL_TOKENS)
+    data = _json(raw)
+    data["message"] = said(raw)[:600]
+    if not data.get("message"):
+        raise RuntimeError(f"Sol's answer couldn't be read: {raw[:160]!r}")
+    return data
 
 
 def apply(sim, data: dict, source: str):
@@ -168,8 +176,10 @@ def reply_async(sim, message: str, slot: dict):
     def go():
         try:
             data = chat(sim, message)
-            text = str(data.get("message") or data.get("note_to_human") or "...").strip()
+            text = str(data.get("message") or data.get("note_to_human") or data.get("speech") or "").strip()
+            text = text or "(Sol nodded but said nothing - try asking again)"
         except Exception as e:
+            sim.errors.append({"tick": sim.tick, "agent": NAME, "model": sim.sol_model, "error": f"Sol's reply failed: {e}"[:300]})
             data, text = {}, f"(Sol couldn't answer: {e})"
         with sim.lock:
             given = apply(sim, data, "human") if data else {}

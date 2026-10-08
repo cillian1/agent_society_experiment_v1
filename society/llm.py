@@ -64,11 +64,12 @@ class ClaudeLLM(UsageMixin):
         self.model = model
         self.max_tokens = max_tokens
 
-    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True) -> str:
+    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True,
+                 max_tokens: int | None = None) -> str:
         model = model or self.model
         resp = self.client.messages.create(
             model=model,
-            max_tokens=self.max_tokens,
+            max_tokens=max_tokens or self.max_tokens,
             # the shared rules are identical for every agent: cache them (reads cost a tenth). Models only cache
             # prompts above a minimum length; shorter ones are simply sent normally.
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}] if len(system) > 2000 else system,
@@ -133,19 +134,20 @@ class LocalLLM(UsageMixin):
             raise RuntimeError(f"can't reach the local model server at {self.base} ({e})") from e
 
     def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True,
-                 urgent: bool = False) -> str:
+                 urgent: bool = False, max_tokens: int | None = None) -> str:
         model = model or self.model
+        limit = max_tokens or self.max_tokens
         msgs = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
         with self.slots.take(urgent):
             if self.api == "ollama":
                 body = {"model": model, "messages": msgs, "stream": False, "keep_alive": "30m",
-                        "options": {"num_ctx": self.ctx, "temperature": 0.6, "num_predict": self.max_tokens}}
+                        "options": {"num_ctx": self.ctx, "temperature": 0.6, "num_predict": limit}}
                 if json_mode:
                     body["format"] = "json"
                 r = self._post("/api/chat", body)
                 text, inp, out = r["message"]["content"], r.get("prompt_eval_count", 0), r.get("eval_count", 0)
             else:
-                body = {"model": model, "messages": msgs, "max_tokens": self.max_tokens, "temperature": 0.6}
+                body = {"model": model, "messages": msgs, "max_tokens": limit, "temperature": 0.6}
                 try:
                     r = self._post("/v1/chat/completions",
                                    {**body, **({"response_format": {"type": "json_object"}} if json_mode else {})})
@@ -182,18 +184,19 @@ class RouterLLM:
         self.default_model = LOCAL if local else HAIKU
 
     def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True,
-                 urgent: bool = False) -> str:
-        """urgent: someone (the Human) is waiting for this answer - it skips the queue of routine thinking."""
+                 urgent: bool = False, max_tokens: int | None = None) -> str:
+        """urgent: someone (the Human) is waiting for this answer - it skips the queue of routine thinking.
+        max_tokens: a longer answer than usual is allowed (Sol speaks to and advises many people at once)."""
         model = model or self.default_model
         if self.mock:
             return self.mock.complete(system, prompt, model, json_mode)
         if is_local(model):
             if not self.local:
                 raise RuntimeError("no local model server available (is Ollama running?)")
-            return self.local.complete(system, prompt, None if model == LOCAL else model[6:], json_mode, urgent)
+            return self.local.complete(system, prompt, None if model == LOCAL else model[6:], json_mode, urgent, max_tokens)
         if not self.claude:
             raise RuntimeError("no ANTHROPIC_API_KEY set, so Claude models are unavailable")
-        return self.claude.complete(system, prompt, model, json_mode)
+        return self.claude.complete(system, prompt, model, json_mode, max_tokens)
 
     def usage(self) -> dict:
         parts = [b.usage() for b in (self.claude, self.local, self.mock) if b]
