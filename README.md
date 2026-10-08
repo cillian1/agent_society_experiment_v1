@@ -24,7 +24,10 @@ uses the local model; without a local server everyone uses Haiku. Change any age
 (Local / Haiku / Sonnet / **Enlighten** = Opus, one agent at a time, or any model id; `local:<name>` for another local model).
 
 ### Local models (RTX 5070 Ti, 16 GB)
-Smarter agents = a bigger model. `qwen2.5:7b-instruct` is the fast default; `ollama pull qwen2.5:14b-instruct` and start with
+Smarter agents = a bigger model. Easiest: keep the fast 7B for everyone and add a bigger one as **Smart local**:
+`ollama pull qwen2.5:14b-instruct`, then `py serve.py --local-concurrency 20 --smart-local-model qwen2.5:14b-instruct`
+and pick 🧠 Smart local in the Brain tab of the agents you care about (both models must fit in VRAM together).
+Or switch everyone: `qwen2.5:7b-instruct` is the fast default; `ollama pull qwen2.5:14b-instruct` and start with
 `--local-model qwen2.5:14b-instruct --local-concurrency 8` (and `OLLAMA_NUM_PARALLEL=8`) for noticeably better decisions at
 roughly half the speed. Or give your favourite agents Haiku/Sonnet in their profile → Brain.
 

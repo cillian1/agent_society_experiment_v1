@@ -39,8 +39,10 @@ def load_agents(path: str) -> list[Agent]:
 
 
 def tier_of(model: str | None) -> str:
-    if model in (None, LOCAL) or model.startswith("local:"):
+    if model in (None, LOCAL):
         return "local"
+    if model.startswith("local:"):
+        return "smart"
     return {OPUS: "opus", SONNET: "sonnet", HAIKU: "haiku"}.get(model, "custom")
 
 
@@ -520,7 +522,10 @@ class Society:
         """Any brain: local / haiku / sonnet / opus, or any model id ('local:<name>' for another local model).
         Opus ('enlighten') is limited to one agent at a time; the previous one drops to Sonnet."""
         spec = (spec or "").strip()
-        model = TIERS.get(spec.lower(), spec)
+        smart = (self.llm.info() if hasattr(self.llm, "info") else {}).get("smart_local")
+        if spec.lower() == "smart" and not smart:
+            return None
+        model = f"local:{smart}" if spec.lower() == "smart" else TIERS.get(spec.lower(), spec)
         if not model or len(model) > 80 or not re.fullmatch(r"[\w.:\-/]+", model):
             return None
         with self.lock:
@@ -534,7 +539,8 @@ class Society:
                         o.heard.append("The enlightenment has passed to someone else; you are now at the Sonnet level.")
                 a.heard.append("You have been ENLIGHTENED: your mind is now sharper than anyone else's.")
             a.model = model
-            label = {"local": "now thinks with the free local model", "haiku": "now thinks with Haiku",
+            label = {"local": "now thinks with the free local model", "smart": f"now thinks with the smart local model ({model[6:]})",
+                     "haiku": "now thinks with Haiku",
                      "sonnet": "was upgraded to Sonnet", "opus": "was ENLIGHTENED (Opus)"}
             self.event(self.tick, a, label.get(tier_of(model), f"now thinks with {model}"), "brain")
             return model

@@ -15,7 +15,7 @@ const store = {                       // per-browser conveniences only; the page
 };
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
 const hungerColor = h => h > 70 ? 'var(--bad)' : h > 40 ? 'var(--warn)' : 'var(--good)';
-const TIER = { local: '🖥️', haiku: '🌱', sonnet: '⭐', opus: '👑', custom: '🔧' };
+const TIER = { local: '🖥️', smart: '🧠', haiku: '🌱', sonnet: '⭐', opus: '👑', custom: '🔧' };
 const STAGE = { baby: '🍼', child: '👶', adult: '', elder: '🧓' };
 const SEX = { female: '♀', male: '♂' };
 const extras = a => `${STAGE[a.stage] || ''}${a.pregnant ? '🤰' : ''}`;
@@ -364,7 +364,7 @@ function renderProfile() {
   if (S.ptab === 'memory') body.innerHTML = memory(a);
   if (S.ptab === 'relations') body.innerHTML = relations(a);
   if (S.ptab === 'brain') {
-    const B = S.st?.backends || {}, key = a.name + a.model + B.local + B.claude + B.mock + a.alive;
+    const B = S.st?.backends || {}, key = a.name + a.model + B.local + B.smart_local + B.claude + B.mock + a.alive;
     if (key !== S.brainKey) { S.brainKey = key; body.innerHTML = brain(a, B); }
   }
 }
@@ -421,7 +421,8 @@ function brain(a, B) {
   const opt = (t, title, sub, ok, why) => `<button class="btn ${a.tier === t ? 'on' : ''}" data-model="${t}" ${ok ? '' : `disabled title="${why}"`}>${TIER[t]} ${title}<small>${sub}</small></button>`;
   return `<p>Thinks with <b>${TIER[a.tier]} ${esc(a.model === 'local' ? 'local model (' + (B.local_model || '?') + ')' : a.model || 'default')}</b></p>
     <div class="tiers" id="tiers">
-      ${opt('local', 'Local', 'free, on your PC', canL, 'No local model server found')}
+      ${opt('local', 'Local', `free · ${esc(B.local_model || '')}`, canL, 'No local model server found')}
+      ${opt('smart', 'Smart local', B.smart_local ? `free · ${esc(B.smart_local)}` : 'start the hub with --smart-local-model', !!B.smart_local || B.mock, 'Start the hub with --smart-local-model qwen2.5:14b-instruct')}
       ${opt('haiku', 'Haiku', 'cheap & quick', canC, 'Set ANTHROPIC_API_KEY to use Claude')}
       ${opt('sonnet', 'Sonnet', 'smarter', canC, 'Set ANTHROPIC_API_KEY to use Claude')}
       ${opt('opus', 'Enlighten', 'Opus — only one agent', canC, 'Set ANTHROPIC_API_KEY to use Claude')}

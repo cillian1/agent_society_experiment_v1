@@ -13,6 +13,8 @@ def add_llm_args(p):
                    help="local model server (default: Ollama on 127.0.0.1:11434)")
     p.add_argument("--local-model", default=os.environ.get("LOCAL_LLM_MODEL", "qwen2.5:7b-instruct"),
                    help="local model name (e.g. one you pulled with `ollama pull`)")
+    p.add_argument("--smart-local-model", default=os.environ.get("SMART_LOCAL_MODEL"),
+                   help="a bigger local model offered as 'Smart local' in each agent's Brain tab (e.g. qwen2.5:14b-instruct)")
     p.add_argument("--local-api", choices=["ollama", "openai"], default="ollama",
                    help="'openai' for LM Studio / llama.cpp / vLLM style servers (use --local-url .../ without /v1)")
     p.add_argument("--local-concurrency", type=int, default=8, help="max simultaneous requests sent to the local server")
@@ -36,6 +38,12 @@ def build_llm(args) -> RouterLLM:
         ok, msg = cand.probe()
         notes.append(msg)
         local = cand if ok else None
+        if local and args.smart_local_model:
+            smart = LocalLLM(args.local_url, args.smart_local_model, args.local_api)
+            ok2, msg2 = smart.probe()
+            notes.append(msg2.replace("local model", "smart local model"))
+            if ok2:
+                local.smart_model = args.smart_local_model
     if not claude and not local:
         notes.append("NO BRAINS AVAILABLE: falling back to scripted mock agents")
         return RouterLLM(mock=MockLLM(), notes=notes)

@@ -80,6 +80,7 @@ class LocalLLM(UsageMixin):
         self.base, self.model, self.api = base_url.rstrip("/"), model, api
         self.ctx, self.max_tokens, self.timeout = ctx, max_tokens, timeout
         self.sem = threading.Semaphore(concurrency)   # how many requests we send to the server at once
+        self.smart_model = None                       # optional bigger model ("Smart local")
 
     def usage(self) -> dict:
         u = super().usage()
@@ -170,4 +171,5 @@ class RouterLLM:
 
     def info(self) -> dict:
         return {"mock": bool(self.mock), "claude": bool(self.claude), "local": bool(self.local),
-                "local_model": self.local.model if self.local else None, "notes": self.notes}
+                "local_model": self.local.model if self.local else None,
+                "smart_local": self.local.smart_model if self.local else None, "notes": self.notes}
