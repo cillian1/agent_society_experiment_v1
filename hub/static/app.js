@@ -110,7 +110,10 @@ function drawFrame() {
     for (const g of st.dead) ctx.fillText('🪦', g.x * T + T / 2, g.y * T + T / 2);
     ctx.globalAlpha = 1;
     for (const a of S.agents) drawAgent(a);
-    for (const a of S.agents) if (a.say) drawBubble(a);
+    if ($('bubbles').checked) {
+      for (const a of S.agents) if (a.say) drawTalkLine(a);
+      for (const a of S.agents) if (a.say) drawBubble(a);
+    }
   }
   requestAnimationFrame(drawFrame);
 }
@@ -148,10 +151,16 @@ function drawAgent(a) {
   ctx.fillStyle = '#fff'; ctx.fillText(tag, px, py + r + 11.5);
 }
 
+function drawTalkLine(a) {
+  const d = S.disp[a.name], tg = a.say_to && a.say_to !== 'all' && a.say_to !== 'Human' ? S.disp[a.say_to] : null;
+  if (!d || !tg) return;
+  ctx.strokeStyle = a.color; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); ctx.globalAlpha = .8;
+  ctx.beginPath(); ctx.moveTo(d.x * T + T / 2, d.y * T + T / 2); ctx.lineTo(tg.x * T + T / 2, tg.y * T + T / 2); ctx.stroke();
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
+
 function drawBubble(a) {
   const d = S.disp[a.name], px = d.x * T + T / 2, py = d.y * T + T / 2, r = (T / 2 - 3) * (a.stage === 'baby' ? .55 : a.adult ? 1 : .72);
-  const tg = a.say_to && a.say_to !== 'all' && a.say_to !== 'Human' ? S.disp[a.say_to] : null;
-  if (tg) { ctx.strokeStyle = a.color; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); ctx.globalAlpha = .8; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(tg.x * T + T / 2, tg.y * T + T / 2); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
   const label = `${a.name} → ${a.say_to === 'all' ? 'everyone' : a.say_to === 'Human' ? 'you' : a.say_to}`;
   const txt = a.say.length > 90 ? a.say.slice(0, 88) + '…' : a.say;
   ctx.font = '12px system-ui';
@@ -160,10 +169,12 @@ function drawBubble(a) {
   lines.push(cur);
   const w = Math.max(...lines.map(l => ctx.measureText(l).width), ctx.measureText(label).width) + 16, h = lines.length * 15 + 22;
   const bx = Math.min(Math.max(px - w / 2, 3), cv.width - w - 3), by = Math.max(3, py - r - h - 14);
-  ctx.fillStyle = '#fff'; ctx.strokeStyle = a.color; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.roundRect(bx, by, w, h, 8); ctx.fill(); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(px - 6, by + h - 1); ctx.lineTo(px, by + h + 8); ctx.lineTo(px + 6, by + h - 1); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.beginPath(); ctx.roundRect(bx, by, w, h, 8); ctx.fill();   // see-through
+  ctx.globalAlpha = .7; ctx.strokeStyle = a.color; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.beginPath(); ctx.moveTo(px - 6, by + h); ctx.lineTo(px, by + h + 8); ctx.lineTo(px + 6, by + h); ctx.fill();
   ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = '#556'; ctx.font = '10px system-ui'; ctx.fillText(label, bx + 8, by + 4);
-  ctx.fillStyle = '#111'; ctx.font = '12px system-ui'; lines.forEach((l, k) => ctx.fillText(l, bx + 8, by + 17 + k * 15));
+  ctx.font = '12px system-ui'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineJoin = 'round';
+  lines.forEach((l, k) => { ctx.strokeText(l, bx + 8, by + 17 + k * 15); ctx.fillStyle = '#111'; ctx.fillText(l, bx + 8, by + 17 + k * 15); });
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
 }
 
@@ -237,6 +248,8 @@ $('z-out').onclick = () => setZoom(S.zoom / 1.25);
 $('z-fit').onclick = fitZoom;
 $('fog').checked = store.get('fog', true);
 $('fog').onchange = e => store.set('fog', e.target.checked);
+$('bubbles').checked = store.get('bubbles', true);
+$('bubbles').onchange = e => store.set('bubbles', e.target.checked);
 setInterval(() => { if ($('follow').checked && S.sel) centerOn(S.sel); }, 1200);
 
 // ======================================================================= top bar & banner
