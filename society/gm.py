@@ -6,6 +6,8 @@ import re
 
 from .config import DISCOVERY_COOLDOWN, EFFECTS, FUNCTIONS, MAX_BUILD_COST, MAX_ITEMS
 from .mind import DIRS, _json
+from . import clock
+from . import tech as techtree
 
 USES = ("wood", "stone", "farm", "fish", "none")
 
@@ -44,12 +46,15 @@ def judge(sim, a, act: dict) -> dict | None:
               f"\nA DISCOVERY permanently helps the whole society. Only grant one for a genuinely new, useful idea that "
               f"isn't already discovered{' (this person discovered something very recently: no new discovery now)' if recent else ''}. "
               f"Allowed discovery effects:\n{effects}\n"
+              f"HIDDEN (never mention to them) - breakthroughs now within reach: {techtree.hints(sim.techs) or 'none'}. "
+              f"Already known: {', '.join(techtree.name(t) for t in sim.techs) or 'nothing'}. It is {clock.season(sim.tick)}.\n"
               "Reply ONLY with JSON (use null / 0 for anything that doesn't apply):\n"
               '{"success": true, "story": "<1-2 vivid sentences of what happened>", '
               '"gain": {"food": 0, "seeds": 0, "wood": 0, "stone": 0}, "cost": {"food": 0, "seeds": 0, "wood": 0, "stone": 0}, '
               '"item": {"name": "...", "description": "...", "use": "wood|stone|farm|fish|none"}, '
               '"structure": {"kind": "...", "description": "..."}, '
               '"discovery": {"name": "...", "description": "...", "effect": "<one key above>", "amount": 1}, '
+              '"breakthrough": "<id from the hidden list below, ONLY if this attempt clearly achieves it, else null>", '
               '"hunger": 0, "health": 0}')
     model = sim.sol_model
     data = _json(sim.llm.complete("You are Sol, mentor and referee of a society simulation. Be fair, vivid and concise.",

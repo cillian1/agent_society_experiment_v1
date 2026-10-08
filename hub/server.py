@@ -117,6 +117,8 @@ class Hub:
             return views.agent_detail(sim, q.get("name", [""])[0]) or {"error": "no such agent"}
         if path == "/api/stats":
             return sim.stats
+        if path == "/api/history":
+            return views.history_view(sim)
         if path == "/api/saves":
             return persistence.list_saves()
         return None
@@ -124,6 +126,8 @@ class Hub:
     def post(self, path: str, d: dict):
         sim = self.society
         if path == "/api/control":
+            if isinstance(d.get("focus"), list) and len(d["focus"]) == 2:
+                sim.focus = (int(d["focus"][0]), int(d["focus"][1]))     # where the Human is looking
             if "paused" in d:
                 self.paused = bool(d["paused"])
             if "interval" in d:

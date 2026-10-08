@@ -8,10 +8,14 @@ from .config import (DEFAULT_COSTS, FUNCTIONS, ADULT_AGE, BABY_DAYS, CHILD_FOOD_
 from . import clock
 from .clock import DAY, age_text
 from .models import Agent
+from . import culture, memory, needs, social
+from . import tech as techtree
 
 DIRS = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
 ACTIONS = ("go", "move", "gather", "eat", "say", "give", "plant", "tend", "build", "craft", "court", "procreate",
-           "care", "store", "take", "work", "invent", "attempt", "wait")
+           "care", "store", "take", "work", "invent", "attempt", "wait", "rest", "hunt", "tame", "teach", "offer",
+           "accept", "decline", "promise", "steal", "found", "join", "leave", "vote", "propose", "support", "punish",
+           "forgive", "exile", "name", "tell")
 
 INSPIRATION = [   # one is offered each day to spark creativity
     "Could you name a place - a lake, a hill, your camp - and put up a sign?",
@@ -97,13 +101,31 @@ def rules(authority: str = "leader") -> str:
             'attempt {"what": "<anything: tame a deer, brew medicine, hold a festival, make a map...>"} Sol decides what '
             "happens; you may gain things or make a DISCOVERY that changes the world\n"
             'invent {"title": "...", "message": "<idea, custom, tool or law>"} shared with everyone\n'
+            "rest - recover when exhausted (better near a home)\n"
+            'hunt {"target": "deer|rabbit|boar|goat|sheep"} an animal next to you (spears/bows reach 3 tiles); go target '
+            'animal to find one.  tame {"target": "goat|sheep"} costs 1 food; tame goats/sheep follow you and give food daily\n'
+            'teach {"to": "<name>", "title": "farming|gathering|building|crafting|hunting"} someone next to you. Skills grow by doing\n'
+            'TRADE: offer {"to": "<name>", "give": "2 food", "want": "3 wood", "within": hours} -> they accept/decline '
+            '{"target": "<deal id or name>"}. promise {"to", "give": "...", "within": hours}. Give delivers what you owe '
+            '(give {"to", "title": "wood", "amount": 3}). Broken promises destroy trust; everyone hears. steal {"to", "title": "food"} '
+            "(a crime)\n"
+            'GROUPS: found {"title": "<name>", "message": "<purpose>"} / join {"title": "<group>"} / leave / vote {"to": "<leader>"}. '
+            'Leaders may add "group_plan" to a reply. LAWS: propose {"title": "<law, e.g. no taking from the granary at night>"} '
+            '(leaders decree; otherwise members support {"target": "<proposal id>"}). Witnesses see law-breaking: punish '
+            '{"to", "message"} (fine), forgive {"to"}, exile {"to"} (leaders only)\n'
+            'CULTURE: name {"title": "<name for this place>"}. tell {"to": "<name|all>", "title": "<story>", "message": '
+            '"<a new story, if it is new>"}\n'
             "wait\n"
             + HUMAN_NOTES[authority] + " (That chat is separate and doesn't use your turn.)\n"
             "Sol is a wise mentor who sees the bigger picture, judges attempts and designs blueprints: take Sol's advice seriously.\n"
+            "SEASONS: spring, summer, autumn, winter (3 months each, 10 days a month). In winter wild bushes are bare, crops "
+            "don't grow and nights are freezing outside a home or away from a fire - prepare food and shelter in autumn. "
+            "Farmed soil tires; let it rest. Breakthroughs (fire, tools, farming, pottery, weaving, bronze...) are found by "
+            "attempting them.\n"
             f'THINK IN PROJECTS: "next" lines up to {MAX_QUEUE} more actions that run on their own over the following hours '
             "(you are interrupted if something important happens). Use it - it gets real work done.\n"
             "Reply ONLY with compact JSON. Keep \"thought\" to one short sentence. Optional: \"next\", \"plan\", "
-            '\"remember\", \"role\". Example: {"thought": "Need shelter; no wood yet.", "action": "go", "target": "wood", '
+            '\"remember\", \"role\", \"believe\" (a conclusion you now hold, e.g. \"Dov cannot be trusted\"). Example: {"thought": "Need shelter; no wood yet.", "action": "go", "target": "wood", '
             '"next": [{"action": "gather"}, {"action": "gather"}, {"action": "build", "direction": "east", "title": "house"}], '
             '"plan": "house by the forest"}'
         )
@@ -116,7 +138,9 @@ def system_prompt(a: Agent, others: list[str] | None = None) -> str:
 
 def identity(a: Agent, others: list[str], tick: int) -> str:
     """Who this agent is - the part of the prompt that differs between agents."""
-    return (f"You are {a.name}, a {a.word(tick)}. Others alive: {', '.join(others) or 'nobody'}.\n"
+    return (f"You are {a.name}, a {a.word(tick)}" + (f" of the {a.people}" if a.people else "")
+            + f". Others alive: {', '.join(others) or 'nobody'}.\n"
+            + needs.describe(a, tick) + f" Skills: {needs.skills_text(a)}.\n"
             f"Personality: {a.traits.describe()} - act like it. Abilities (1-10): {a.abilities.describe()}. "
             f"You walk up to {a.abilities.steps()} tiles a turn and expect to live about {a.abilities.lifespan()} days.\n"
             f"Goal: {a.goal}")
@@ -202,6 +226,8 @@ def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[s
         add("take a real step toward your ambition", action="attempt", what=f"<something concrete toward: {a.ambition[:80]}>")
     elif a.hunger < HUNGER_WARNING and (a.traits.curious >= 0.7 or tick % 3 == hash(a.name) % 3):
         add("try something nobody has tried before", action="attempt", what="<your boldest useful idea>")
+    if a.needs.get("rest", 0) >= 70 and not clock.is_night(tick):
+        add("you are exhausted - rest a while", action="rest")
     if world.nearest_unexplored(a.x, a.y):
         add("much of the world is still unexplored", action="go", target="explore")
     seen, unique = set(), []
@@ -225,8 +251,80 @@ def routine(a: Agent, world, agents: list[Agent], tick: int) -> dict | None:
     return None
 
 
+def society_lines(sim, a: Agent, tick: int) -> list[str]:
+    """Season, technology, animals, deals, group & laws, culture, beliefs and recalled memories."""
+    out = []
+    season = clock.season(tick)
+    nxt = {"spring": "summer", "summer": "autumn", "autumn": "winter", "winter": "spring"}[season]
+    days = clock.days_until(tick, nxt)
+    warn = {"autumn": "Store food and build shelter and fires before winter.",
+            "winter": "Wild bushes are bare and crops don't grow; nights outside a home or away from a fire are freezing.",
+            "spring": "Crops grow fastest now; rivers may flood fields near water.",
+            "summer": "Good growing; dry woods can catch fire."}[season]
+    soon = (f"{nxt} comes in {days} days" if sim.has("calendar") else
+            f"{nxt} is coming soon" if days <= 4 else "")
+    out.append(f"Season: {season}" + (f" ({soon})" if soon else "") + f". {warn}")
+    out.append(f"Your society is in the {techtree.age(sim.techs)}"
+               + (f"; it knows: {', '.join(techtree.name(t) for t in sim.techs)}" if sim.techs else
+                  "; nobody has made fire, pottery or real tools yet") + ".")
+    beasts = sim.eco.near(a.x, a.y, a.abilities.view())
+    if beasts:
+        out.append("Animals nearby: " + "; ".join(
+            f"{b['kind']}" + (f" (tame, {'yours' if b['owner'] == a.name else b['owner'] + chr(39) + 's'})" if b["owner"] else "")
+            + f" dx={b['x'] - a.x} dy={b['y'] - a.y}" for b in beasts[:5]))
+    plants = sim.world.plants_near(a.x, a.y, 1)
+    tired = [p for p in plants if sim.eco.soil(*p) < 0.6]
+    if tired:
+        out.append(f"The soil here is worn out ({int(sim.eco.soil(*tired[0]) * 100)}% fertile) - crops grow slowly; farm fresh ground and let this rest.")
+    if any(max(abs(x - a.x), abs(y - a.y)) <= 6 for x, y in sim.eco.burning):
+        out.append("!!! WILDFIRE nearby in the trees - keep away from burning woods.")
+    for d in social.open_offers(sim, a, tick):
+        out.append(f'Offer from {d["from"]} (deal {d["id"]}): {social.text(d["give"])} for {social.text(d["want"])}'
+                   + (f" within {d['within']} hours" if d["within"] else " now") + " - accept or decline.")
+    for p in social.owed(sim, a):
+        if p["from"] == a.name:
+            out.append(f"You promised {p['to']} {social.text(p['left'])} by {clock.short(p['due'])} "
+                       f"({max(0, p['due'] - tick)} hours left) - deliver with give or lose their trust.")
+        else:
+            out.append(f"{p['from']} owes you {social.text(p['left'])} by {clock.short(p['due'])}.")
+    g = social.group_of(sim, a)
+    if g:
+        out.append(f'Your group: "{g["name"]}" - leader {g["leader"] or "none"}, members {", ".join(g["members"])}'
+                   + (f". Plan: {g['plan']}" if g["plan"] else "") + (". You lead it: set a group_plan, make laws." if g["leader"] == a.name else "."))
+        if g["laws"]:
+            out.append("Your group's laws: " + "; ".join(f'"{l["text"]}"' for l in g["laws"][-5:]))
+        for pr in g["proposals"][-2:]:
+            if a.name not in pr["support"]:
+                out.append(f'Proposed law (id {pr["id"]}) by {pr["by"]}: "{pr["text"]}" - support it if you agree.')
+    elif sim.groups:
+        out.append("Groups: " + "; ".join(f'"{x["name"]}" ({len(x["members"])}, led by {x["leader"]})' for x in list(sim.groups.values())[:4])
+                   + " - you could join one, or found your own.")
+    land = social.land_of(sim, a.x, a.y)
+    if land and land is not g:
+        out.append(f'You are on the land of "{land["name"]}"' + (f' - their laws here: {"; ".join(chr(34) + l["text"] + chr(34) for l in land["laws"][-3:])}' if land["laws"] else "") + ".")
+    for o in sim.agents.values():
+        off = social.open_offense(o, tick, a.name) if o is not a else None
+        if off and a.dist(o) <= 8:
+            out.append(f'You saw {o.name} break "{off["law"]}" - punish, forgive, or let it go.')
+    place = culture.nearest_place(sim, a.x, a.y)
+    if place:
+        out.append(f"You are near {place['name']} (dx={place['x'] - a.x} dy={place['y'] - a.y}).")
+    tales = culture.stories_for(sim, a)
+    if tales:
+        out.append("Stories you know: " + " | ".join(tales))
+    if a.beliefs:
+        out.append("Your beliefs (they may be wrong): " + "; ".join(b["text"] for b in a.beliefs))
+    cues = [o.name for o in sim.agents.values() if o is not a and a.dist(o) <= a.abilities.view()]
+    cues += [h.split(" ", 1)[0] for h in a.heard] + re.findall(r"[A-Z][a-z]{2,}", a.plan or "")
+    start = max(a.sum_upto, len(a.log) - a.abilities.memory() - (4 if sim.has("writing") else 0))
+    old = memory.recall(a.log, start, cues)
+    if old:
+        out.append("Older memories that matter now:\n" + "\n".join("- " + m for m in old))
+    return out
+
+
 def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str],
-                discoveries: list[str] = (), blueprints: list[str] = (), mentor: list[str] = ()) -> str:
+                discoveries: list[str] = (), blueprints: list[str] = (), mentor: list[str] = (), sim=None) -> str:
     """Everything the agent perceives and remembers this turn."""
     others = {(o.x, o.y): o.symbol for o in agents if o is not a}
     stage = {"child": f"a child - you become an adult at {ADULT_AGE // DAY} days old", "adult": "an adult",
@@ -262,7 +360,10 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
                         "Everything else can wait."))
     near = [f"{o.name} [{o.symbol}] dx={o.x - a.x} dy={o.y - a.y}, {o.word(tick)}" + (f", role: {o.role}" if o.role else "")
             + f", {age_text(o.age(tick))} old" + {"baby": " (BABY)", "child": " (child)"}.get(o.stage(tick), "")
-            + (" (pregnant)" if o.pregnancy else "") for o in agents if o is not a and a.dist(o) <= view]
+            + (" (pregnant)" if o.pregnancy else "")
+            + (f", a stranger of the {o.people}" if o.people and a.people and o.people != a.people else "")
+            + (f", looks {needs.mood(o, tick)}" if needs.mood(o, tick) not in ("content",) else "")
+            + (f", {social.reputation(o)}" if social.reputation(o) else "") for o in agents if o is not a and a.dist(o) <= view]
     ways = world.open_ways(a.x, a.y)
     lines.append("Open directions: " + ", ".join(f"{d} {v} tiles" if isinstance(v, int) else f"{d} blocked ({v})"
                                                  for d, v in ways.items()))
@@ -323,10 +424,11 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
         soonest = min(world.days_to_ripe(x, y) for x, y in plants)
         lines.append(f"Young plants within reach: {len(plants)}, could use tending: {todo} (the nearest ripens in about "
                      f"{soonest} hours on its own - no need to stay and watch)")
-    feelings = sorted(((b, n) for n, b in a.bonds.items() if b >= 10), reverse=True)
+    feelings = sorted(((b, n) for n, b in a.bonds.items() if b >= 10 or b <= -10), reverse=True)
     if feelings:
         lines.append("Your feelings toward others: " + ", ".join(
-            f"{n} {int(b)}" + (" (in love)" if b >= LOVE_BOND else " (friend)" if b >= FRIEND_BOND else "") for b, n in feelings))
+            f"{n} {int(b)}" + (" (in love)" if b >= LOVE_BOND else " (friend)" if b >= FRIEND_BOND else
+                               " (grudge)" if b <= -10 else "") for b, n in feelings))
     partners = a.child_partners(agents, tick)
     if partners:
         lines.append("You could have a child right now with: " + ", ".join(partners))
@@ -351,6 +453,8 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
     if discoveries:
         lines.append("Discoveries your society has made (they really work - build on them!):\n"
                      + "\n".join("- " + d for d in discoveries))
+    if sim is not None:
+        lines += society_lines(sim, a, tick)
     if a.heard:
         lines.append("Heard this turn:\n" + "\n".join(a.heard))
     if tick % 3 == 0 and a.hunger < HUNGER_WARNING:          # a spark of inspiration now and then
@@ -442,6 +546,8 @@ def parse_action(raw: str, others: list[str], depth: int = 0) -> dict:
             "direction": data.get("direction"), "to": to, "target": s("target") or s("to"), "message": s("message"), "title": s("title"),
             "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"), "plan": s("plan"), "what": s("what"), "amount": data.get("amount"),
             "steps": data.get("steps") if isinstance(data.get("steps"), int) else 1,
+            "give": data.get("give"), "want": data.get("want"), "believe": s("believe"), "group_plan": s("group_plan"),
+            "within": data.get("within") if isinstance(data.get("within"), int) else 0,
             "next": [] if depth else [
                 parse_action(json.dumps(n), others, 1) for n in (data.get("next") or [])[:MAX_QUEUE]
                 if isinstance(n, dict) and n.get("action") in ACTIONS and n.get("action") not in ("wait", "attempt", "invent")]}
@@ -488,11 +594,14 @@ def dream(a: Agent, llm, tick: int, ideas: list[str], fold: list[str] | None = N
               + ("FOLD_MEMORIES: also rewrite your life summary to include these older memories (first person, under 150 "
                  "words; keep names, relationships, promises, places, inventions; drop trivia):\n" + "\n".join(fold) + "\n"
                  if fold else "")
+              + (f"Your beliefs so far: {'; '.join(b['text'] for b in a.beliefs)}\n" if a.beliefs else "")
               + 'Reply ONLY with compact JSON: {"dream": "<one sentence>", "insight": "<one sentence>", '
-              '"ambition": "...", "plan": "...", "idea": "<or empty>"' + (', "summary": "..."' if fold else "") + "}")
+              '"ambition": "...", "plan": "...", "idea": "<or empty>", "beliefs": ["<up to 3 things you now believe about '
+              'people, places or the world - they may be wrong>"]' + (', "summary": "..."' if fold else "") + "}")
     data = _json(llm.complete(f"You are the sleeping mind of {a.name}.", prompt, model=a.model))
     out = {k: str(data.get(k) or "").strip()[:240] for k in ("dream", "insight", "ambition", "plan", "idea")}
     out["summary"] = str(data.get("summary") or "").strip()[:1500]
+    out["beliefs"] = [str(b)[:160] for b in (data.get("beliefs") or []) if isinstance(b, str)][:3]
     return out
 
 

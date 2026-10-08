@@ -115,6 +115,8 @@ class World:
             self.regrow[(x, y)] = (tick + FOOD_REGROW_DAYS, FOOD)
             return {"what": "a wild bush", "food": 1, "seeds": 1 if self.rng.random() < 0.5 else 0, "wood": 0, "stone": 0}
         if t == CROP:
+            if getattr(self, "eco", None):
+                self.eco.tire(x, y)                          # every harvest tires the soil a little
             self.tiles[y][x] = SPROUT
             self.plants[(x, y)] = {"growth": 0.0, "tended": {}}
             return {"what": "a ripe crop", "food": 3, "seeds": 1, "wood": 0, "stone": 0}
@@ -319,17 +321,18 @@ class World:
 
     def nearest_unexplored(self, x: int, y: int, cell: int = 6):
         """(dx, dy) to the middle of the closest mostly-unexplored area, or None when it's all known."""
-        best = None
-        for sy in range(0, self.height, cell):
-            for sx in range(0, self.width, cell):
-                cx, cy = min(sx + cell // 2, self.width - 1), min(sy + cell // 2, self.height - 1)
-                total = (min(sx + cell, self.width) - sx) * (min(sy + cell, self.height) - sy)
-                seen = sum((xx, yy) in self.explored for yy in range(sy, min(sy + cell, self.height))
-                           for xx in range(sx, min(sx + cell, self.width)))
-                if seen / total < 0.5:
-                    d = max(abs(cx - x), abs(cy - y))
-                    if best is None or d < best[0]:
-                        best = (d, cx - x, cy - y)
+        key = (len(self.explored), cell)
+        if getattr(self, "_unexplored_key", None) != key:     # recount only when the explored map changed
+            cells = []
+            for sy in range(0, self.height, cell):
+                for sx in range(0, self.width, cell):
+                    total = (min(sx + cell, self.width) - sx) * (min(sy + cell, self.height) - sy)
+                    seen = sum((xx, yy) in self.explored for yy in range(sy, min(sy + cell, self.height))
+                               for xx in range(sx, min(sx + cell, self.width)))
+                    if seen / total < 0.5:
+                        cells.append((min(sx + cell // 2, self.width - 1), min(sy + cell // 2, self.height - 1)))
+            self._unexplored_key, self._unexplored = key, cells
+        best = min(((max(abs(cx - x), abs(cy - y)), cx - x, cy - y) for cx, cy in self._unexplored), default=None)
         return best[1:] if best else None
 
     def explored_rows(self) -> list[str]:
@@ -340,15 +343,25 @@ class World:
                    for dx in (-1, 0, 1) for dy in (-1, 0, 1))
 
     # ---- time ----
-    def update(self, tick: int, growth_bonus: float = 0.0):
+    SEASON_GROWTH = {"spring": 1.2, "summer": 1.0, "autumn": 0.7, "winter": 0.0}
+
+    def update(self, tick: int, growth_bonus: float = 0.0, season: str = "summer", soil=None):
+        """One hour: things regrow (not wild food in winter) and crops grow - by season, and slower in tired soil."""
+        self.season = season
         for pos, (t, tile) in list(self.regrow.items()):
             if tick >= t:
+                if tile == FOOD and season == "winter":
+                    continue                                 # bushes wait for spring
                 if self.tiles[pos[1]][pos[0]] == GRASS:
                     self.tiles[pos[1]][pos[0]] = tile
                 del self.regrow[pos]
+        factor = self.SEASON_GROWTH.get(season, 1.0)
+        if not factor:
+            return
         for (x, y), p in self.plants.items():
             if self.tiles[y][x] == SPROUT:
-                p["growth"] += (IRRIGATED_GROWTH_PER_DAY if (x, y) in self.irrigated else PLANT_GROWTH_PER_DAY) + growth_bonus
+                base = (IRRIGATED_GROWTH_PER_DAY if (x, y) in self.irrigated else PLANT_GROWTH_PER_DAY) + growth_bonus
+                p["growth"] += base * factor * (0.35 + 0.65 * soil(x, y) if soil else 1)
                 if p["growth"] >= GROW_NEEDED:
                     self.tiles[y][x] = CROP
 

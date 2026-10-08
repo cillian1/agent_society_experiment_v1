@@ -4,6 +4,8 @@ import re
 
 from .config import (FUNCTIONS, FIRE_MEAL_BONUS, BOND, FRIEND_BOND, BUILD_COST, CARE_RELIEF, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN,
                      GROW_NEEDED, HEARING_RADIUS, LOVE_BOND, MAX_ITEMS)
+from . import clock, culture, needs, social
+from .ecology import ANIMALS
 from .mind import DIRS
 
 HANDLERS = {}
@@ -70,6 +72,14 @@ def route_to(sim, a, target: str):
         return w.path((a.x, a.y), near((ROCK,))), "rocks"
     if low in ("water", "lake", "fishing"):
         return w.path((a.x, a.y), near((WATER,))), "water"
+    kinds = [k for k in ANIMALS if k in low] or (list(ANIMALS) if low in ("animal", "animals", "game", "hunt", "prey") else [])
+    if kinds:
+        prey = [b for b in sim.eco.animals.values() if b["kind"] in kinds and not b["owner"]
+                and max(abs(b["x"] - a.x), abs(b["y"] - a.y)) <= 14]
+        if not prey:
+            return None, f"{low} (none seen nearby)"
+        b = min(prey, key=lambda b: max(abs(b["x"] - a.x), abs(b["y"] - a.y)))
+        return w.path((a.x, a.y), lambda x, y: max(abs(x - b["x"]), abs(y - b["y"])) <= 1), f"the {b['kind']}"
     who = next((o for n, o in sim.agents.items() if n.lower() == low and o is not a), None)
     if who:
         return w.path((a.x, a.y), lambda x, y: max(abs(x - who.x), abs(y - who.y)) <= 1), who.name
@@ -86,7 +96,7 @@ def go(sim, a, act, tick):
     target = act.get("target") or act.get("title") or act.get("message")
     path, label = route_to(sim, a, target)
     if label is None:
-        return f'unknown destination "{target}" - use food, explore, wood, stone, water, a name, or x,y'
+        return f'unknown destination "{target}" - use food, explore, wood, stone, water, animal, a name, or x,y'
     if path is None:
         return f"there is no way to reach {label} from here"
     if not path:
@@ -102,11 +112,27 @@ def go(sim, a, act, tick):
 @action("gather")
 def gather(sim, a, act, tick):
     w = sim.world
+    bare = False
     for fx, fy in w.gather_options(a.x, a.y):
+        if w.tiles[fy][fx] == "food" and clock.season(tick) == "winter":
+            bare = True                                      # wild bushes are bare in winter
+            continue
         got = w.harvest(fx, fy, tick)
         if not got:
             continue
         bonus = ""
+        if sim.rng.random() < needs.skill(a, "gathering") * 0.07:
+            k = "food" if got["food"] else "wood" if got["wood"] else "stone" if got["stone"] else None
+            if k:
+                got[k] += 1
+                bonus = " (skilled hands)"
+        if got["food"] and "crop" in got["what"] and needs.skill(a, "farming") >= 5:
+            got["food"] += 1
+            bonus = " (expert farmer)"
+        if needs.tired_factor(a) < 1 and sum(got[k] for k in ("food", "wood", "stone")) > 1 and sim.rng.random() < 0.5:
+            k = max(("food", "wood", "stone"), key=lambda k: got[k])
+            got[k] -= 1
+            bonus += " (too tired to do it well)"
         if got["food"]:
             got["food"] += int(sim.tech("harvest"))
         if got["wood"] or got["stone"]:
@@ -133,10 +159,11 @@ def gather(sim, a, act, tick):
         if tick - a.last_fish_tick < FISH_COOLDOWN:
             return "the fish aren't biting yet - try again in a moment"
         a.last_fish_tick = tick
-        a.food += 1
+        n = 2 if sim.has("boats") else 1
+        a.food += n
         sim.event(tick, a, "caught a fish", "food")
-        return "caught a fish: +1 food"
-    return "nothing to gather within reach"
+        return f"caught {'two fish' if n > 1 else 'a fish'} in the water: +{n} food"
+    return "the bushes are bare in winter - hunt, fish, farm or take from a store" if bare else "nothing to gather within reach"
 
 
 @action("eat")
@@ -208,6 +235,12 @@ def say(sim, a, act, tick):
         return "said nothing"
     targets = [o for o in sim.agents.values() if o is not a and a.dist(o) <= HEARING_RADIUS and to in ("all", o.name)]
     for o in targets:
+        if not culture.understands(o, a):              # a stranger of another people
+            o.heard.append(f"{a.name} {culture.garble(msg)}")
+            o.remember(tick, f"{a.name} {culture.garble(msg)}")
+            culture.exchange(a, o)
+            continue
+        culture.exchange(a, o)
         o.heard.append(f'{a.name} says{"" if to == "all" else " to you"}: "{msg}"')
         o.remember(tick, f'{a.name} said to {"everyone nearby" if to == "all" else "me"}: "{msg}"')
         if to == o.name:
@@ -235,11 +268,18 @@ def give(sim, a, act, tick):
         o.items.append(item)
         what = f"a {item['name']}"
     else:
-        if a.food <= 0:
-            return "no food to give"
-        a.food -= 1
-        o.food += 1
-        what = "food"
+        res = (act["title"] or "food").lower().rstrip("s") if (act["title"] or "food").lower() != "seeds" else "seeds"
+        res = {"seed": "seeds"}.get(res, res)
+        if res not in GOODS:
+            return f"you don't have a {act['title']} (objects: {', '.join(i['name'] for i in a.items) or 'none'})"
+        n = max(1, min(int(act.get("amount") or 1) if str(act.get("amount") or "1").isdigit() else 1, getattr(a, res)))
+        if getattr(a, res) <= 0:
+            return f"no {res} to give"
+        setattr(a, res, getattr(a, res) - n)
+        setattr(o, res, getattr(o, res) + n)
+        what = f"{n} {res}" if (n > 1 or res != "food") else "food"
+        what += social.delivered(sim, a, o, res, n, tick)
+        culture.exchange(a, o)
     sim.bond(o, a, BOND["gift"])
     sim.bond(a, o, BOND["gave"])
     msg = act["message"]
@@ -282,7 +322,7 @@ def tend(sim, a, act, tick):
                 "Go and do something else meanwhile")
     x, y = todo[0]
     growth, partners, _ = w.tend(x, y, a.name, tick)
-    extra = (1 if a.has_tool("farm") else 0) + (0.5 if a.abilities.wits >= 7 else 0)
+    extra = (1 if a.has_tool("farm") else 0) + (0.5 if a.abilities.wits >= 7 else 0) + 0.15 * needs.skill(a, "farming")
     if extra and w.tiles[y][x] == "sprout":
         growth = w.boost(x, y, extra)
     ripe = growth >= GROW_NEEDED
@@ -336,6 +376,9 @@ def build(sim, a, act, tick):
     title = (act["title"] or "structure")[:40]
     new = sim.blueprint_key(title) not in sim.blueprints
     bp = sim.blueprint(title, act.get("blueprint"), a.name, tick)
+    if bp.get("function") == "fire" and not sim.has("fire"):
+        return (f"nobody knows how to make fire yet, so a {title} would be useless. Try to discover fire "
+                "(attempt: e.g. strike flint stones together over dry grass).")
     cost = {} if sim.tech("building") >= 1 else bp["cost"]
     need = ", ".join(f"{v} {k}" for k, v in cost.items())
     what = f"It will: {bp['description']}." if bp.get("description") else ""
@@ -356,6 +399,7 @@ def build(sim, a, act, tick):
     x, y, size = b["x"], b["y"], f"{b['w']}x{b['h']}"
     hours = work_hours(bp)
     b["work"], b["done"] = hours, False
+    b["group"] = a.group                                  # buildings belong to the builder's group: its land
     a.task = {"type": "build", "id": b["id"]}
     sim.event(tick, a, f'started building a {title} ({size}) at ({x}, {y}) - {hours} hours of work{_quote(act["message"])}', "build")
     for o in sim.agents.values():
@@ -384,8 +428,9 @@ def work(sim, a, act, tick):
         a.task = None
         return "nothing under construction next to you"
     helpers = [n for n, t in site["workers"].items() if n != a.name and tick - t <= 1]
-    gain = (1 + (0.5 if a.abilities.strength >= 7 else 0) + (0.5 if a.traits.driven >= 0.7 else 0)
-            + (0.5 if helpers else 0))
+    gain = ((1 + (0.5 if a.abilities.strength >= 7 else 0) + (0.5 if a.traits.driven >= 0.7 else 0)
+             + (0.5 if helpers else 0) + 0.1 * needs.skill(a, "building"))
+            * (1.5 if sim.has("masonry") else 1) * needs.tired_factor(a))
     site["progress"] = min(site["work"], site["progress"] + gain)
     site["workers"][a.name] = tick
     a.task = {"type": "build", "id": site["id"]}
@@ -415,7 +460,8 @@ def craft(sim, a, act, tick):
     title = act["title"][:30]
     if not title:
         return "name the object you want to craft (title)"
-    cost = 0 if sim.tech("building") >= 1 or sim.world.function_near(a.x, a.y, "workshop", 2) else CRAFT_COST
+    cost = 0 if (sim.tech("building") >= 1 or sim.world.function_near(a.x, a.y, "workshop", 2)
+                 or sim.rng.random() < needs.skill(a, "crafting") * 0.08) else CRAFT_COST
     if a.materials() < cost:
         return f"need {cost} wood/stone to craft (you have {a.wood} wood, {a.stone} stone)"
     if len(a.items) >= MAX_ITEMS:
@@ -536,3 +582,209 @@ def procreate(sim, a, act, tick):
     name = re.sub(r"[^A-Za-z]", "", act["baby_name"])[:12].capitalize()
     sim.conceive(mother, a if mother is b else b, name, tick)
     return f"{mother.name} is now pregnant - the baby will be born in about 10 days"
+
+
+# ================================================================ body
+@action("rest")
+def rest(sim, a, act, tick):
+    home = sim.world.function_near(a.x, a.y, "home", 1)
+    needs.nudge(a, "rest", -20 if home else -12)
+    a.health = min(100.0, a.health + (2 if home else 1))
+    return "rested" + (" in the shelter of the " + home[1]["kind"] if home else "") + f" (tiredness now {int(a.needs['rest'])})"
+
+
+# ================================================================ animals
+def _prey(sim, a, act, reach):
+    kind = (act.get("target") or act.get("title") or "").lower()
+    kind = next((k for k in ANIMALS if k in kind), None)
+    near = sim.eco.near(a.x, a.y, reach, kind, wild=True)
+    return near[0] if near else None
+
+
+@action("hunt")
+def hunt(sim, a, act, tick):
+    armed = sim.has("weapons") or any(w in i["name"].lower() for i in a.items for w in ("spear", "bow", "sling", "javelin"))
+    b = _prey(sim, a, act, 3 if armed else 1)
+    if not b:
+        seen = sim.eco.near(a.x, a.y, a.abilities.view(), wild=True)
+        return ("no animal within reach" + (f" - the nearest is a {seen[0]['kind']} at ({seen[0]['x']}, {seen[0]['y']}): "
+                                            "go there first (go target animal)" if seen else " - none in sight"))
+    a.animation = [tick, "hunt", b["x"] - a.x, b["y"] - a.y]
+    info = ANIMALS[b["kind"]]
+    chance = 0.3 + 0.06 * needs.skill(a, "hunting") + (0.3 if armed else 0) + (0.05 if a.abilities.speed >= 7 else 0)
+    if sim.rng.random() < chance * needs.tired_factor(a):
+        sim.eco.remove(b["id"])
+        n = info["food"] + needs.skill(a, "hunting") // 3
+        a.food += n
+        a.remember(tick, f"I hunted a {b['kind']} (+{n} food).")
+        sim.event(tick, a, f"hunted a {b['kind']} (+{n} food)", "food")
+        return f"hunted a {b['kind']}: +{n} food"
+    hurt = info["fights"] and sim.rng.random() < 0.5
+    if hurt:
+        a.health = max(1.0, a.health - 15)
+        a.remember(tick, f"A {b['kind']} fought back and hurt me.")
+    for _ in range(2):
+        sim.eco._step_animal(b, {a.name: a})                       # it runs off
+    return f"the {b['kind']} got away" + (" - and it gored you (-15 health)" if hurt else "")
+
+
+@action("tame")
+def tame(sim, a, act, tick):
+    b = _prey(sim, a, act, 1)
+    if not b:
+        return "no animal next to you to tame (go target goat / sheep / animal first)"
+    if a.food <= 0:
+        return "you need some food to coax it"
+    a.food -= 1
+    a.animation = [tick, "tame", b["x"] - a.x, b["y"] - a.y]
+    info = ANIMALS[b["kind"]]
+    chance = (0.5 if sim.has("husbandry") else 0.12) + 0.04 * needs.skill(a, "hunting")
+    if not info["tame"]:
+        chance /= 4
+    if sim.rng.random() < chance:
+        b["owner"] = a.name
+        a.remember(tick, f"I tamed a {b['kind']}. It follows me now." + (" It will give me food every day." if info["milk"] else ""))
+        sim.event(tick, a, f"tamed a {b['kind']}", "food")
+        return f"tamed the {b['kind']}! It follows you" + (" and gives food every day" if info["milk"] else "")
+    return f"the {b['kind']} ate your food but wouldn't be tamed" + ("" if info["tame"] else f" (a {b['kind']} is hard to tame)")
+
+
+# ================================================================ teaching
+@action("teach")
+def teach(sim, a, act, tick):
+    o = sim.agents.get(act["to"])
+    if not o or o is a or a.dist(o) > 1:
+        return "nobody next to you to teach"
+    sk = next((k for k in needs.SKILLS if k in (act["title"] or act["message"] or "").lower()), None)
+    sk = sk or max(needs.SKILLS, key=lambda k: needs.skill(a, k))
+    mine, theirs = needs.skill(a, sk), needs.skill(o, sk)
+    if mine < theirs + 2:
+        return f"you can't teach {o.name} much about {sk} (you {mine}, them {theirs})"
+    if not culture.understands(o, a):
+        culture.exchange(a, o)
+        return f"{o.name} doesn't understand your language well enough to learn yet"
+    note = needs.practise(o, sk, tick, 4 + 1.5 * mine)
+    sim.bond(o, a, BOND["teamwork"] * 2)
+    o.remember(tick, f"{a.name} taught me {sk}." + (f" My {note}." if note else ""))
+    a.remember(tick, f"I taught {o.name} {sk}.")
+    if note:
+        sim.event(tick, a, f"taught {o.name} {sk} ({o.name}'s {note})", "craft")
+    return f"taught {o.name} {sk}" + (f" - their {note}" if note else "")
+
+
+# ================================================================ trade & promises
+def _other(sim, a, act, reach=8):
+    o = sim.agents.get(act["to"])
+    return o if o and o is not a and a.dist(o) <= reach else None
+
+
+@action("offer")
+def offer(sim, a, act, tick):
+    o = _other(sim, a, act)
+    if not o:
+        return "nobody by that name within earshot to trade with"
+    return social.offer(sim, a, o, social.bundle(act.get("give")), social.bundle(act.get("want")), act.get("within") or 0, tick)
+
+
+@action("accept")
+def accept(sim, a, act, tick):
+    d = social.find_offer(sim, a, act.get("target") or act["to"], tick)
+    return social.accept(sim, a, d, tick) if d else "there is no open offer to accept"
+
+
+@action("decline")
+def decline(sim, a, act, tick):
+    d = social.find_offer(sim, a, act.get("target") or act["to"], tick)
+    return social.decline(sim, a, d, tick) if d else "there is no open offer to decline"
+
+
+@action("promise")
+def promise(sim, a, act, tick):
+    o = _other(sim, a, act)
+    what = social.bundle(act.get("give") or act.get("title") or "")
+    if not o or not what:
+        return 'promise needs "to" (someone within earshot) and "give" (e.g. "3 wood")'
+    p = social.promise(sim, a, o, what, act.get("within") or social.DEFAULT_DUE, tick)
+    return f"promised {o.name} {social.text(what)} by {clock.short(p['due'])} - keep it, or they won't trust you"
+
+
+@action("steal")
+def steal(sim, a, act, tick):
+    o = _other(sim, a, act, 1)
+    if not o:
+        return "nobody next to you to steal from"
+    res = next((r for r in GOODS if r in (act["title"] or "food").lower()), "food")
+    n = min(2, getattr(o, res))
+    if not n:
+        return f"{o.name} has no {res}"
+    setattr(o, res, getattr(o, res) - n)
+    setattr(a, res, getattr(a, res) + n)
+    if not o.is_baby(tick):
+        o.bonds[a.name] = max(-100.0, o.bonds.get(a.name, 0) - 30)
+        o.anger = max(o.anger, 24)
+        o.heard.append(f"{a.name} STOLE {n} {res} from you!")
+        o.remember(tick, f"{a.name} stole {n} {res} from me.")
+    a.remember(tick, f"I stole {n} {res} from {o.name}.")
+    sim.event(tick, a, f"stole {n} {res} from {o.name}", "law")
+    return f"stole {n} {res} from {o.name}"
+
+
+# ================================================================ groups & laws
+@action("found")
+def found(sim, a, act, tick):
+    return social.found(sim, a, act["title"], act["message"], tick)
+
+
+@action("join")
+def join(sim, a, act, tick):
+    return social.join(sim, a, act["title"] or act.get("target") or "", tick)
+
+
+@action("leave")
+def leave(sim, a, act, tick):
+    return social.leave(sim, a, tick)
+
+
+@action("vote")
+def vote(sim, a, act, tick):
+    who = act["to"] if act["to"] not in ("all", "") else (act.get("target") or "")
+    return social.vote(sim, a, who if who in sim.agents else a.name if who.lower() in ("me", "myself") else who, tick)
+
+
+@action("propose")
+def propose(sim, a, act, tick):
+    return social.propose(sim, a, act["title"] or act["message"], tick)
+
+
+@action("support")
+def support(sim, a, act, tick):
+    return social.support(sim, a, act.get("target") or act["title"], tick)
+
+
+@action("punish")
+def punish(sim, a, act, tick):
+    o = _other(sim, a, act, 3)
+    return social.punish(sim, a, o, act["message"], tick) if o else "nobody by that name close enough"
+
+
+@action("forgive")
+def forgive(sim, a, act, tick):
+    o = _other(sim, a, act)
+    return social.forgive(sim, a, o, tick) if o else "nobody by that name within earshot"
+
+
+@action("exile")
+def exile(sim, a, act, tick):
+    o = sim.agents.get(act["to"])
+    return social.exile(sim, a, o, tick) if o and o is not a else "exile whom?"
+
+
+# ================================================================ culture
+@action("name")
+def name(sim, a, act, tick):
+    return culture.name_place(sim, a, act["title"] or act["message"], tick)
+
+
+@action("tell")
+def tell(sim, a, act, tick):
+    return culture.tell(sim, a, act["title"], act["message"], act["to"], tick)

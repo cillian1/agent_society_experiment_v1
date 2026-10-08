@@ -9,11 +9,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import actions, clock, gm, mind, sol
+from . import actions, clock, culture, gm, history, memory, mind, needs, social, sol
+from . import tech as techtree
+from .ecology import ANIMALS, Ecology
 from .clock import DAY
 from .config import (ADVICE_MEMORY, SOL_HOUR, SOL_EVERY, HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, DREAM_CHANCE, THINK_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
                      DEFAULT_MAX_AGENTS, EAT_RELIEF, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
-                     MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS, KEEP_RECENT, COMPACT_AFTER)
+                     MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS, KEEP_RECENT, COMPACT_AFTER, FRIEND_BOND)
 from .models import Abilities, Agent, Traits
 from .world import World
 
@@ -25,13 +27,13 @@ BABY_NAMES = ["Nova", "Pip", "Juno", "Kit", "Rue", "Sol", "Tove", "Wren", "Zed",
 def default_agents() -> list[Agent]:
     """Six settlers (three women, three men) with nothing but a personality: no roles, no goals beyond surviving,
     no family. Everyone starts on the free local model; upgrade anyone from the hub."""
-    return [
-        Agent("Ada", Traits(curious=0.6, social=0.9, kind=0.6, driven=0.8), sex="female", model=LOCAL),
-        Agent("Brix", Traits(curious=0.4, social=0.4, kind=0.5, driven=0.9), sex="male", model=LOCAL),
-        Agent("Cleo", Traits(curious=0.95, social=0.7, kind=0.6, driven=0.3), sex="female", model=LOCAL),
-        Agent("Dov", Traits(curious=0.5, social=0.7, kind=0.2, driven=0.6), sex="male", model=LOCAL),
-        Agent("Eli", Traits(curious=0.7, social=0.3, kind=0.3, driven=0.7), sex="male", model=LOCAL),
-        Agent("Fenn", Traits(curious=0.85, social=0.5, kind=0.9, driven=0.7), sex="female", model=LOCAL),
+    return [   # two peoples, starting far apart: the Riverfolk and the Hillfolk
+        Agent("Ada", Traits(curious=0.6, social=0.9, kind=0.6, driven=0.8), sex="female", model=LOCAL, people="Riverfolk"),
+        Agent("Brix", Traits(curious=0.4, social=0.4, kind=0.5, driven=0.9), sex="male", model=LOCAL, people="Riverfolk"),
+        Agent("Cleo", Traits(curious=0.95, social=0.7, kind=0.6, driven=0.3), sex="female", model=LOCAL, people="Riverfolk"),
+        Agent("Dov", Traits(curious=0.5, social=0.7, kind=0.2, driven=0.6), sex="male", model=LOCAL, people="Hillfolk"),
+        Agent("Eli", Traits(curious=0.7, social=0.3, kind=0.3, driven=0.7), sex="male", model=LOCAL, people="Hillfolk"),
+        Agent("Fenn", Traits(curious=0.85, social=0.5, kind=0.9, driven=0.7), sex="female", model=LOCAL, people="Hillfolk"),
     ]
 
 
@@ -83,17 +85,38 @@ class Society:
         self.sol_log: list[dict] = []
         self.sol_last, self.sol_due = -SOL_EVERY, False
         self.sol_next = 1                         # Sol's first review: the first morning (Sol then picks the next)
+        # the living world and the society's institutions
+        self.eco = Ecology(self.world, seed)
+        self.world.eco = self.eco
+        self.techs: list[str] = []                # breakthroughs on the hidden tech tree (tech.py)
+        self.tech_tries: dict[str, int] = {}      # honest failed attempts at each
+        self.groups: dict[int, dict] = {}
+        self.deals: list[dict] = []
+        self.promises: list[dict] = []
+        self.stories: list[dict] = []
+        self.story_seeds: list[dict] = []
+        self.places: list[dict] = []
+        self.contacts: list[str] = []
+        self.chronicle: list[dict] = []
+        self.snapshots: list[dict] = []
+        self.ids: dict[str, int] = {}
+        self._territory: dict = {}
+        self.focus = None                         # where the Human is looking (far-away agents think less often)
         if spawn:
             self._spawn()
             self._record_stats()
 
     # ================================================================ setup
     def _spawn(self):
-        cx, cy = self.world.width // 2, self.world.height // 2
-        spots = sorted(((x, y) for y in range(self.world.height) for x in range(self.world.width)
-                        if self.world.walkable(x, y)),
-                       key=lambda p: abs(p[0] - cx) + abs(p[1] - cy) + self.rng.random() * 14)
-        for i, (a, (x, y)) in enumerate(zip(self.agents.values(), spots)):
+        peoples = sorted({a.people for a in self.agents.values()})
+        homes = {p: (self.world.width * (i + 1) // (len(peoples) + 1), self.world.height // 2) for i, p in enumerate(peoples)}
+        taken = set()
+        for i, a in enumerate(self.agents.values()):
+            cx, cy = homes[a.people]
+            x, y = min(((x, y) for y in range(self.world.height) for x in range(self.world.width)
+                        if self.world.walkable(x, y) and (x, y) not in taken),
+                       key=lambda p: abs(p[0] - cx) + abs(p[1] - cy) + self.rng.random() * 10)
+            taken.add((x, y))
             a.x, a.y = x, y
             if a.color == "#ffffff":
                 a.color = PALETTE[i % len(PALETTE)]
@@ -120,7 +143,15 @@ class Society:
         """Advance the clock: the world grows, everyone gets hungrier and older (some may die)."""
         with self.lock:
             self.tick += 1
-            self.world.update(self.tick, self.tech('growth'))
+            season = clock.season(self.tick)
+            self.world.update(self.tick, self.tech('growth'), season, self.eco.soil)
+            self.eco.update(self.tick, self.agents, lambda pos, text, kind: self.world_event(self.tick, text, kind, pos))
+            culture.contact(self, self.tick)
+            social.check_promises(self, self.tick)
+            culture.fireside(self, self.tick)
+            history.snapshot(self)
+            if clock.when(self.tick)["hour"] == 6:
+                self._daily(season)
             if self.tick >= self.sol_next and clock.when(self.tick)["hour"] == SOL_HOUR and self.agents:
                 self.sol_last, self.sol_due = self.tick, True       # Sol's review (a morning address)
                 self.sol_next = self.tick + SOL_EVERY                # unless Sol decides otherwise
@@ -158,7 +189,7 @@ class Society:
                 return None
             agents = list(self.agents.values())
             job = {"prompt": mind.observation(a, self.world, agents, self.tick, self._ideas(), self._discoveries(),
-                                              self._blueprints(), self._mentor_for(a)),
+                                              self._blueprints(), self._mentor_for(a), sim=self),
                    "others": [o.name for o in agents if o is not a], "heard": a.heard}
             a.heard = []
             a.last_think = self.tick
@@ -199,7 +230,10 @@ class Society:
     def _routine(self, a: Agent, last: str) -> dict | None:
         """Between thoughts (see think_every) an agent carries on with an obvious routine instead of asking its brain.
         Anything that needs real thinking - being spoken to, a failure, hunger without food, a baby - asks the brain."""
-        if self.tick - a.last_think >= self.think_every or mind.failed(last):
+        every = self.think_every
+        if self.focus and max(abs(a.x - self.focus[0]), abs(a.y - self.focus[1])) > 30:
+            every = max(every * 3, 6)                     # far from where the Human is looking: think less often
+        if self.tick - a.last_think >= every or mind.failed(last):
             return None
         if any(k in h for h in a.heard for k in ("The Human", " to you", "courting you", "gave you", "child", "birth", "died")):
             return None
@@ -238,6 +272,8 @@ class Society:
             if r["idea"]:
                 a.remember(tick, f"I woke up with an idea: {r['idea']}")
                 self.event(tick, a, f"dreamt up an idea: {r['idea']}", "dream")
+            for b in r.get("beliefs") or []:
+                memory.believe(a, b, tick, "dream")
             if upto and r["summary"]:
                 a.summary, a.sum_upto = r["summary"], upto
 
@@ -304,11 +340,42 @@ class Society:
             self.sol_due = False
             sol.run_review(self)
 
+    def _daily(self, season: str):
+        """Each morning: food rots without pots, tame goats and sheep give milk."""
+        tick = self.tick
+        for a in self.agents.values():
+            if a.food > 6 and not self.has("no_spoil") and season != "winter" and self.rng.random() < 0.5:
+                a.food -= 1
+                a.remember(tick, "Some of the food I was carrying went bad (pots would keep it).")
+        for b in self.eco.animals.values():
+            owner = self.agents.get(b["owner"]) if b["owner"] else None
+            if owner and ANIMALS[b["kind"]]["milk"] and max(abs(owner.x - b["x"]), abs(owner.y - b["y"])) <= 3:
+                owner.food += ANIMALS[b["kind"]]["milk"]
+
     def _live_a_day(self, a: Agent, tick: int) -> bool:
-        """Hunger, health, fading feelings, old age. False if the agent died."""
+        """Hunger, health, feelings, needs, cold, old age. False if the agent died."""
         baby, asleep = a.is_baby(tick), clock.is_night(tick)
+        winter = clock.season(tick) == "winter"
         a.hunger = min(100.0, a.hunger + (BABY_HUNGER_PER_DAY if baby else HUNGER_PER_DAY * a.abilities.hunger_factor()
-                                                  * (1 - self.tech('hunger') / 100)) * (0.5 if asleep else 1))
+                                                  * (1 - self.tech('hunger') / 100)) * (0.5 if asleep else 1)
+                       * (1.25 if winter else 1))
+        w = self.world
+        sheltered = bool(w.function_near(a.x, a.y, "home", 1))
+        fire = bool(w.function_near(a.x, a.y, "fire", 3))
+        warm = self.has("warm") or any(k in i["name"].lower() for i in a.items for k in ("cloak", "coat", "fur", "blanket", "cloth"))
+        if winter and asleep and not (sheltered or fire):            # a freezing night outside
+            a.health -= 0.6 if warm else 1.5
+            if clock.when(tick)["hour"] == 23:
+                a.remember(tick, "I'm freezing out here in the winter night. I need a shelter or a fire.")
+        if any(max(abs(x - a.x), abs(y - a.y)) <= 1 for x, y in self.eco.burning):
+            a.health -= 8
+            a.heard.append("The woods next to you are ON FIRE - get away!")
+        if not baby:
+            needs.hourly(a, tick, asleep=asleep, sheltered=sheltered, warm=warm, winter=winter, fire_near=fire,
+                         friends_near=sum(1 for o in self.agents.values() if o is not a and a.dist(o) <= 2
+                                          and a.bonds.get(o.name, 0) >= FRIEND_BOND),
+                         in_group=bool(a.group), hungry=a.hunger >= HUNGER_WARNING, has_food=a.food > 0,
+                         home_exists=any(b.get("function") == "home" and b.get("done", True) for b in w.buildings.values()))
         if not baby and a.food > 0 and a.hunger >= INSTINCT_EAT_AT:   # survival instinct: eat without thinking
             a.food -= 1
             a.hunger = max(0.0, a.hunger - EAT_RELIEF)
@@ -317,13 +384,13 @@ class Society:
             a.food -= 1
             a.hunger = max(0.0, a.hunger - EAT_RELIEF)
         for k in list(a.bonds):
-            a.bonds[k] *= BOND_DECAY
-            if a.bonds[k] < 1:
+            a.bonds[k] *= BOND_DECAY                     # feelings - and grudges - fade slowly
+            if abs(a.bonds[k]) < 1:
                 del a.bonds[k]
         if a.hunger >= 100:
             a.health -= BABY_STARVE_DAMAGE if baby else STARVE_DAMAGE
         elif a.hunger < 60:
-            rest = HOME_HEAL if self.world.function_near(a.x, a.y, "home", 1) else 0
+            rest = HOME_HEAL if sheltered else 0
             a.health = min(100.0, a.health + (1 if asleep else 0.5) + self.tech("health") / 2 + rest)
         if a.health <= 0:
             self.die(a, tick, "neglect - nobody fed them" if baby else "starvation")
@@ -334,7 +401,29 @@ class Society:
         return True
 
     def _act(self, a: Agent, act: dict, tick: int, heard: list[str]):
+        a.animation = []
         result = actions.apply(self, a, act, tick)
+        name = act["action"]
+        ok = not mind.failed(result)
+        if name in ("attempt", "invent"):
+            result += self._breakthrough(a, act, result, tick)
+        if ok:
+            needs.after_action(a, name)
+            if "finished the" in result:
+                needs.after_action(a, "finished")
+            skill = needs.SKILL_OF.get(name) or ("gathering" if name == "gather" else None)
+            if skill:
+                lv = needs.practise(a, skill, tick)
+                if lv:
+                    a.remember(tick, f"I'm getting better: my {lv}.")
+                    result += f" (your {lv})"
+            social.check_laws(self, a, name, result, tick)
+            if not a.animation:
+                a.animation = self._animation(a, name, result, tick)
+        if act.get("believe"):
+            memory.believe(a, act["believe"], tick, "own")
+        if act.get("group_plan"):
+            social.set_plan(self, a, act["group_plan"], tick)
         if act.get("next"):                       # a fresh decision may line up a whole project
             a.queue = [dict(n) for n in act["next"]]
         if act["role"] and act["role"][:40] != a.role:
@@ -348,6 +437,22 @@ class Society:
             a.remember(tick, "(note to self) " + act["remember"][:200])
         a.history.append({"tick": tick, "x": a.x, "y": a.y, "hunger": int(a.hunger), "thought": act["thought"],
                           "action": act["action"], "result": result, "heard": heard})
+
+    def _animation(self, a: Agent, name: str, result: str, tick: int) -> list:
+        """What the hub should show this agent doing this hour, and in which direction."""
+        m = re.search(r"at \((\d+), (\d+)\)", result)
+        dx, dy = ((int(m.group(1)) - a.x, int(m.group(2)) - a.y) if m else (0, 0))
+        kind = {"work": "hammer", "build": "hammer", "tend": "hoe", "plant": "hoe", "eat": "eat", "say": "talk",
+                "craft": "craft", "give": "give", "care": "care", "rest": "rest", "tell": "talk", "teach": "talk",
+                "offer": "talk", "court": "love"}.get(name)
+        if name == "gather":
+            kind = ("chop" if "tree" in result else "mine" if "rock" in result else "fish" if "fish" in result
+                    else "pick")
+            if kind == "fish":
+                water = next(((x - a.x, y - a.y) for x, y in ((a.x + 1, a.y), (a.x - 1, a.y), (a.x, a.y + 1), (a.x, a.y - 1))
+                              if self.world.in_bounds(x, y) and self.world.tiles[y][x] == "water"), (1, 0))
+                dx, dy = water
+        return [tick, kind, max(-1, min(1, dx)), max(-1, min(1, dy))] if kind else []
 
     def run(self, days: int):
         """Headless: print every agent's day."""
@@ -412,8 +517,63 @@ class Society:
         return bp
 
     def tech(self, effect: str) -> float:
-        """Total bonus the society's discoveries give for one effect (capped)."""
-        return min(EFFECTS[effect][2], sum(d["amount"] for d in self.discoveries if d["effect"] == effect))
+        """Total bonus for one effect: Sol's discoveries (capped) plus breakthroughs on the tech tree."""
+        return (min(EFFECTS[effect][2], sum(d["amount"] for d in self.discoveries if d["effect"] == effect))
+                + techtree.effect(self.techs, effect))
+
+    def has(self, flag: str) -> bool:
+        """Is something switched on by the tech tree? (a tech id like "fire", or a flag like "warm")"""
+        return flag in self.techs or techtree.flag(self.techs, flag)
+
+    def next_id(self, kind: str) -> int:
+        self.ids[kind] = self.ids.get(kind, 0) + 1
+        return self.ids[kind]
+
+    def seed_story(self, tick: int, text: str, about: list[str]):
+        """Something worth a story: Sol turns these into tales at the next review."""
+        self.story_seeds.append({"tick": tick, "text": text[:200], "about": about})
+        del self.story_seeds[:-12]
+
+    def world_event(self, tick: int, text: str, kind: str = "nature", pos=None):
+        self.events.append({"tick": tick, "agent": "", "text": text, "color": "#9fb3c8", "kind": kind})
+        del self.events[:-MAX_EVENTS]
+        for a in self.agents.values():
+            if pos is None or max(abs(a.x - pos[0]), abs(a.y - pos[1])) <= 12:
+                a.heard.append(text[0].upper() + text[1:] + ".")
+                a.remember(tick, text[0].upper() + text[1:] + ".")
+        if pos is not None:
+            self.seed_story(tick, text, [a.name for a in self.agents.values() if max(abs(a.x - pos[0]), abs(a.y - pos[1])) <= 8][:3])
+
+    def unlock(self, tid: str, a: Agent, tick: int, how: str):
+        if tid in self.techs:
+            return ""
+        before = techtree.age(self.techs)
+        self.techs.append(tid)
+        desc = techtree.describe(tid)
+        self.event(tick, a, f"made a BREAKTHROUGH: {desc}", "discovery")
+        for o in self.agents.values():
+            o.heard.append(f"{a.name} {how}: {desc}.")
+            o.remember(tick, f"{a.name} discovered {techtree.name(tid)}." if o is not a else f"I discovered {techtree.name(tid)}!")
+        needs.after_action(a, "discovery")
+        self.seed_story(tick, f"{a.name} discovered {techtree.name(tid)}", [a.name])
+        after = techtree.age(self.techs)
+        if after != before:
+            self.world_event(tick, f"a new age has begun: the {after}", "discovery")
+        return f" BREAKTHROUGH: {desc}"
+
+    def _breakthrough(self, a: Agent, act: dict, result: str, tick: int) -> str:
+        """Did this attempt or invention move the society along the tech tree?"""
+        text = " ".join(str(act.get(k) or "") for k in ("what", "title", "message"))
+        named = str((act.get("gm") or {}).get("breakthrough") or "").strip().lower()
+        tid = named if named in techtree.within_reach(self.techs) else techtree.match(text, self.techs)
+        if not tid:
+            return ""
+        if result.startswith("Success") or named == tid:
+            return self.unlock(tid, a, tick, "made a breakthrough")
+        self.tech_tries[tid] = self.tech_tries.get(tid, 0) + 1   # failing honestly teaches something too
+        if self.tech_tries[tid] >= techtree.FAILS_TO_LEARN:
+            return self.unlock(tid, a, tick, "finally worked it out after many tries")
+        return " (You feel you're getting closer to something.)"
 
     def occupied(self, x: int, y: int, ignore: Agent | None = None) -> bool:
         return any(o is not ignore and (o.x, o.y) == (x, y) for o in self.agents.values())
@@ -493,6 +653,10 @@ class Society:
                      parents=[mother.name, father_name], bonds={mother.name: 60.0, father_name: 60.0},
                      authority=self.human_authority)
         baby.symbol = self._symbol_for(name)
+        baby.people = mother.people
+        if father.people and father.people != mother.people:          # children of two peoples speak both
+            baby.fluency[father.people] = 99
+        baby.met = sorted({mother.people, father.people} - {""})
         baby.remember(tick, f"I was born to {mother.name} and {father_name}.")
         self.agents[name] = baby
         for p in (mother, father):
@@ -516,6 +680,10 @@ class Society:
         a.history.append({"tick": tick, "x": a.x, "y": a.y, "hunger": int(a.hunger), "thought": "(died)",
                           "action": "died", "result": cause, "heard": []})
         self.event(tick, a, f"died of {cause} at age {a.age(tick)}", "death")
+        for o in self.agents.values():
+            if o.bonds.get(a.name, 0) >= FRIEND_BOND or a.name in o.children or a.name in o.parents:
+                o.grief = max(o.grief, int(24 + o.bonds.get(a.name, 0)))
+        self.seed_story(tick, f"{a.name} died of {cause}", [a.name])
         for o in self.agents.values():
             o.heard.append(f"{a.name} has died ({cause}).")
             o.remember(tick, f"{a.name} died of {cause}" + (" - my own child." if a.name in o.children else "."))
@@ -555,6 +723,8 @@ class Society:
             "objects": sum(len(a.items) for a in alive), "ideas": len(self.inventions),
             "discoveries": len(self.discoveries),
             "farms": sum(t in ("sprout", "crop") for row in self.world.tiles for t in row),
+            "animals": sum(1 for b in self.eco.animals.values() if not b["owner"]),
+            "groups": len(self.groups), "techs": len(self.techs),
         })
         if len(self.stats) > MAX_STATS_POINTS:             # keep history bounded: halve resolution of the old half
             half = len(self.stats) // 2
@@ -690,7 +860,11 @@ class Society:
                 "dead": [{"agent": d["agent"].to_dict(), "tick": d["tick"], "cause": d["cause"]} for d in self.dead.values()],
                 "events": self.events, "inventions": self.inventions, "discoveries": self.discoveries,
                 "blueprints": self.blueprints, "sol_log": self.sol_log, "sol_last": self.sol_last, "sol_next": self.sol_next,
-                "sol_model": self.sol_model, "think_every": self.think_every, "talk": self.talk, "stats": self.stats,
+                "sol_model": self.sol_model, "think_every": self.think_every,
+                "eco": self.eco.to_dict(), "techs": self.techs, "tech_tries": self.tech_tries, "groups": list(self.groups.values()),
+                "deals": self.deals, "promises": self.promises, "stories": self.stories, "story_seeds": self.story_seeds,
+                "places": self.places, "contacts": self.contacts, "chronicle": self.chronicle, "snapshots": self.snapshots,
+                "ids": self.ids, "talk": self.talk, "stats": self.stats,
                 "chat": [c for c in self.chat if not c.get("pending")],
             }
 
@@ -710,4 +884,10 @@ class Society:
         s.sol_log, s.sol_last = d.get("sol_log", []), d.get("sol_last", s.tick)
         s.sol_next = d.get("sol_next", s.tick + 1)
         s.think_every = d.get("think_every", THINK_EVERY)
+        s.eco = Ecology.from_dict(s.world, d.get("eco"), d.get("seed"))
+        s.world.eco = s.eco
+        s.groups = {g["id"]: g for g in d.get("groups", [])}
+        for k in ("techs", "deals", "promises", "stories", "story_seeds", "places", "contacts", "chronicle", "snapshots"):
+            setattr(s, k, d.get(k, []))
+        s.tech_tries, s.ids = d.get("tech_tries", {}), d.get("ids", {})
         return s

@@ -145,6 +145,23 @@ class Agent:
     last_say: str = ""
     last_say_to: str = "all"
     last_say_tick: int = -99
+    # feelings, skills & beliefs (needs.py, memory.py)
+    needs: dict = field(default_factory=lambda: {"rest": 10, "belonging": 25, "safety": 20, "status": 30, "curiosity": 35})
+    grief: int = 0                     # hours of mourning left
+    anger: int = 0                     # hours of anger left (betrayed, punished)
+    skills: dict = field(default_factory=dict)               # skill -> experience
+    beliefs: list[dict] = field(default_factory=list)        # {"text", "t", "src"} - may be wrong
+    # society (social.py, culture.py)
+    people: str = ""                   # which people they were born into (their mother tongue)
+    fluency: dict = field(default_factory=dict)              # other people -> exchanges with them
+    met: list[str] = field(default_factory=list)             # peoples they've met
+    group: int | None = None
+    vote: str = ""
+    kept: int = 0                      # promises kept / broken (reputation)
+    broken: int = 0
+    offenses: list[dict] = field(default_factory=list)       # laws broken: {law, group, tick, seen, dealt?}
+    stories: list[int] = field(default_factory=list)         # stories they know
+    animation: list = field(default_factory=list)            # [tick, kind, dx, dy] what the hub animates this hour
 
     # ---- life ----
     def age(self, tick: int) -> int:

@@ -8,7 +8,7 @@ LOCAL = "local"                       # whatever local model the server was star
 TIERS = {"local": LOCAL, "haiku": HAIKU, "sonnet": SONNET, "opus": OPUS}
 
 # ---- world ----
-WORLD_W, WORLD_H = 64, 40
+WORLD_W, WORLD_H = 88, 56                # room for two peoples to grow before they meet
 FOOD_REGROW_DAYS = 100                # hours until a picked bush regrows (~4 days)
 TREE_REGROW_DAYS = 300                # hours
 GROW_NEEDED = 8.0                     # growth points for a planted sprout to ripen

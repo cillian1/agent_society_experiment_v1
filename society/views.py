@@ -3,6 +3,8 @@ from . import clock
 from .config import ADULT_AGE, EFFECTS, FUNCTIONS, LOVE_BOND, OLD_AGE
 from .engine import Society, tier_of
 from .models import ABILITY_INFO, TRAIT_INFO, Agent
+from . import culture, history, needs, social
+from . import tech as techtree
 
 
 def _task(sim: Society, a: Agent):
@@ -26,6 +28,8 @@ def _brief(sim: Society, a: Agent) -> dict:
         "doing": f"{latest['action']} → {latest['result']}" if latest else "",
         "inside": (sim.world.building_at(a.x, a.y) or {}).get("kind", ""),
         "task": _task(sim, a),
+        "mood": needs.mood(a, t), "mood_icon": needs.MOOD_ICON.get(needs.mood(a, t), ""), "people": a.people,
+        "group": a.group, "anim": a.animation if a.animation and t - a.animation[0] <= 1 else [],
     }
 
 
@@ -50,7 +54,20 @@ def state(sim: Society, since_event: int = 0) -> dict:
             "sol": {"model": sim.sol_model, "last": sim.sol_last, "next_in": max(0, sim.sol_next - sim.tick),
                     "next_at": clock.stamp(sim.sol_next) if sim.sol_next >= sim.tick else "soon",
                     "log": sim.sol_log[-5:]},
-            "structures": [{"x": b["x"], "y": b["y"], "w": b["w"], "h": b["h"], "kind": b["kind"], "text": b["text"],
+            "season": clock.season(sim.tick), "age_name": techtree.age(sim.techs),
+            "techs": [{"id": x, "name": techtree.name(x), "what": techtree.TECHS[x][3]} for x in sim.techs],
+            "tech_total": len(techtree.TECHS),
+            "animals": [[b["id"], b["kind"], b["x"], b["y"], b["owner"] or ""] for b in sim.eco.animals.values()],
+            "burning": [[x, y] for x, y in sim.eco.burning],
+            "floods": [f for f in sim.eco.floods if sim.tick - f["tick"] <= 12],
+            "groups": [{**{k: g[k] for k in ("id", "name", "color", "leader", "members", "plan", "purpose", "laws", "proposals", "notes", "banned")}}
+                       for g in sim.groups.values()],
+            "territory": {str(gid): sorted(social.territory(sim, gid)) for gid in sim.groups},
+            "places": sim.places,
+            "deals": sim.deals[-12:], "promises": [p for p in sim.promises if p["status"] in ("open", "broken", "kept")][-15:],
+            "stories": [{k: x[k] for k in ("id", "title", "text", "version", "about", "tick")} for x in sim.stories[-20:]],
+            "contacts": sim.contacts, "peoples": culture.PEOPLES,
+            "structures": [{"group": b.get("group"), "x": b["x"], "y": b["y"], "w": b["w"], "h": b["h"], "kind": b["kind"], "text": b["text"],
                             "by": b["by"], "walkable": b["walkable"], "func": b.get("function") or "",
                             "function": FUNCTIONS[b["function"]][1] if b.get("function") else "", "stock": b.get("stock"),
                             "done": b.get("done", True), "progress": round(b.get("progress", 0), 1), "work": b.get("work", 0)}
@@ -88,4 +105,18 @@ def agent_detail(sim: Society, name: str) -> dict | None:
             "died": dead["tick"] if dead else None, "cause": dead["cause"] if dead else None,
             "age": a.age(dead["tick"] if dead else t), "age_text": clock.age_text(a.age(dead["tick"] if dead else t)),
             "lifespan_text": clock.age_text(a.abilities.lifespan() * 24),
+            "needs": {k: int(v) for k, v in a.needs.items()}, "need_info": needs.NEEDS,
+            "skills": {k: needs.skill(a, k) for k in needs.SKILLS}, "skill_info": needs.SKILLS,
+            "beliefs": a.beliefs, "fluency": a.fluency, "met": a.met, "kept": a.kept, "broken": a.broken,
+            "reputation": social.reputation(a), "offenses": a.offenses[-4:], "grief": a.grief, "anger": a.anger,
+            "group_name": (sim.groups.get(a.group) or {}).get("name", "") if a.group else "",
+            "known_stories": [culture.story(sim, i)["title"] for i in a.stories if culture.story(sim, i)],
+            "promises": [p for p in sim.promises if p["status"] == "open" and a.name in (p["from"], p["to"])],
         }
+
+
+def history_view(sim: Society) -> dict:
+    """The History tab: Sol's chronicle, everyone who ever lived, and snapshots for the replay."""
+    with sim.lock:
+        return {"chronicle": sim.chronicle, "family": history.family(sim), "snapshots": sim.snapshots,
+                "stories": sim.stories, "tick": sim.tick}

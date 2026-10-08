@@ -271,8 +271,9 @@ class BuildingTests(unittest.TestCase):
         from society.actions import apply
         sim = make()
         a, w = sim.agents["Ada"], sim.world
-        x, y = next((x, y) for y in range(2, w.height - 2) for x in range(2, w.width - 2)
-                    if all(w.tiles[y + dy][x + dx] == "grass" for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+        sim.techs.append("fire")                                 # hearths need fire to have been discovered
+        x, y = next((x, y) for y in range(4, w.height - 4) for x in range(4, w.width - 4)
+                    if all(w.tiles[y + dy][x + dx] == "grass" for dx in range(-3, 4) for dy in range(-3, 4))
                     and not any(max(abs(o.x - x), abs(o.y - y)) <= 2 for o in sim.agents.values()))
         a.x, a.y, a.wood, a.stone, a.food, a.hunger = x, y, 1, 0, 6, 10
         a.traits.driven, a.abilities.strength = 0.5, 5          # no work bonuses: one hour of work per turn

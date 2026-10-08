@@ -31,6 +31,12 @@ class MockLLM(UsageMixin):
                                    "next": [{"action": "go", "target": "wood"}, {"action": "gather"}]}} if who else {})
             if "SOL_CHAT" in prompt:
                 d["message"] = "[MOCK] I'll pass that on to everyone."
+            seed = re.search(r"STORYTELLER: these happened recently:\n- [^\n]*?\d\d:\d\d: (.+)", prompt)
+            if seed:
+                d["story"] = {"title": "The Tale of " + seed.group(1)[:30], "text": f"Long ago, {seed.group(1)}. The elders still speak of it.",
+                              "about": re.findall(r"\b([A-Z][a-z]+)\b", seed.group(1))[:2]}
+            if "CHRONICLE:" in prompt:
+                d["chapter"] = {"title": "A month of toil", "text": "The people gathered, built and argued, and the world turned."}
             return json.dumps(d)
         if "GAME_MASTER_BLUEPRINT" in prompt:
             return json.dumps(dict(cost={"wood": rng.randint(1, 4), "stone": rng.randint(0, 3)},
@@ -48,6 +54,7 @@ class MockLLM(UsageMixin):
             goal = rng.choice(["build a village by the lake", "become the best farmer around", "map the whole world",
                                "raise a big family", "make tools for everyone"])
             d = dict(insight="I have survived so far, but I want more.", ambition=goal, plan=f"start working toward: {goal}",
+                     beliefs=[rng.choice(["the east has the most berries", "the river floods in spring", "strangers can't be trusted"])],
                      dream=rng.choice(["I flew over the lake.", "The forest was singing.", "I was lost in fog, then found a path."]),
                      idea=rng.choice(["", "", "a raft to cross the water"]))
             if "FOLD_MEMORIES" in prompt:
@@ -81,6 +88,9 @@ class MockLLM(UsageMixin):
         if partner or asked:
             return json.dumps(dict(thought="We love each other; let's have a child.", action="procreate",
                                    to=(partner or asked).group(1), baby_name=rng.choice(["Tiko", "Mara", "Bo", "Lio"])))
+        social_move = self._society(prompt, rng, hunger, carried)
+        if social_move:
+            return json.dumps(social_move)
         baby = re.search(r"baby (\w+) is at dx=(-?\d+) dy=(-?\d+): hunger (\d+)", prompt)
         if baby and int(baby.group(4)) >= 40 and carried and not (hunger > 70):
             dx, dy = int(baby.group(2)), int(baby.group(3))
@@ -123,7 +133,10 @@ class MockLLM(UsageMixin):
             d = dict(thought="I can sense food nearby, heading for it.", action="go", to="food")
         elif rng.random() < 0.06:
             d = dict(thought="Let me try something new.", action="attempt",
-                     what=rng.choice(["dig a well", "smoke fish to keep it longer", "build a raft", "hold a feast"]))
+                     what=rng.choice(["dig a well", "smoke fish to keep it longer", "build a raft", "hold a feast",
+                                      "strike flint stones together to make fire", "knap sharp stone tools",
+                                      "weave plant fibre into cloth", "shape clay pots and fire them", "plow and sow a field",
+                                      "make a spear for hunting", "herd and tame goats"]))
         elif rng.random() < 0.05:
             d = dict(thought="An idea!", action="invent", title="Shared Harvest",
                      message="Everyone brings extra food to the middle of the map.")
@@ -132,3 +145,43 @@ class MockLLM(UsageMixin):
         else:
             d = dict(thought="Nothing in sight, wandering.", action="move", direction=rng.choice(["north", "south", "east", "west"]))
         return json.dumps(d)
+
+    def _society(self, prompt, rng, hunger, carried):
+        """The mock's take on the newer systems, so offline runs and tests exercise them."""
+        offer = re.search(r"Offer from (\w+) \(deal (\d+)\)", prompt)
+        if offer:
+            return dict(thought="A fair trade.", action=rng.choice(["accept", "accept", "decline"]), target=offer.group(2))
+        owe = re.search(r"You promised (\w+) (\d+) (food|wood|stone|seeds)", prompt)
+        if owe and rng.random() < 0.5:
+            return dict(thought="I keep my word.", action="give", to=owe.group(1), title=owe.group(3), amount=int(owe.group(2)))
+        if "You feel exhausted" in prompt and rng.random() < 0.7:
+            return dict(thought="I need a rest.", action="rest")
+        beast = re.search(r"Animals nearby: (deer|rabbit|boar|goat|sheep) dx=(-?\d+) dy=(-?\d+)", prompt)
+        if beast and hunger > 30 and rng.random() < 0.5:
+            near = max(abs(int(beast.group(2))), abs(int(beast.group(3)))) <= 1
+            if near:
+                kind = beast.group(1)
+                return dict(thought=f"A {kind}!", action="tame" if kind in ("goat", "sheep") and carried and rng.random() < 0.4 else "hunt", target=kind)
+            return dict(thought="Game nearby - let's hunt.", action="go", target=beast.group(1))
+        friend = re.search(r"Agents in view: (\w+) \[", prompt)
+        roll = rng.random()
+        if "Your group:" not in prompt and roll < 0.04:
+            grp = re.search(r'Groups: "([^"]+)"', prompt)
+            if grp and friend:
+                return dict(thought="I'll join them.", action="join", title=grp.group(1))
+            return dict(thought="We should band together.", action="found", title=rng.choice(["The Hearth", "Stone Circle", "The Free Folk"]),
+                        message="look after each other")
+        if "You lead it" in prompt and roll < 0.03:
+            return dict(thought="We need rules.", action="propose", title=rng.choice(["No stealing", "No taking from the granary at night",
+                                                                                     "No hunting in spring"]))
+        if "Proposed law (id" in prompt and roll < 0.3:
+            return dict(thought="Good law.", action="support", target=re.search(r"Proposed law \(id (\d+)\)", prompt).group(1))
+        if friend and roll < 0.03 and carried >= 2:
+            return dict(thought="Let's trade.", action="offer", to=friend.group(1), give="1 food", want="1 wood", within=12)
+        if roll < 0.01:
+            return dict(thought="This place needs a name.", action="name", title=rng.choice(["Mossy Hollow", "Lake Mira", "Windy Ridge", "Elder Rock"]))
+        if "Stories you know:" in prompt and friend and roll < 0.03:
+            return dict(thought="Let me tell a story.", action="tell", to="all", title=re.search(r'Stories you know: "([^"]+)"', prompt).group(1))
+        if friend and roll < 0.005:
+            return dict(thought="I want what they have.", action="steal", to=friend.group(1), title="food")
+        return None

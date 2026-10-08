@@ -9,6 +9,8 @@ from .clock import age_text, stamp
 from .clock import DAY
 from .config import FUNCTIONS, MAX_QUEUE, SOL_MAX_DAYS, SOL_MIN_DAYS
 from .mind import ACTIONS, _json, failed, parse_action
+from . import clock, culture, history, social
+from . import tech as techtree
 
 NAME = "Sol"
 COLOR = "#ffd93d"
@@ -29,7 +31,14 @@ def overview(sim) -> str:
             + (f"; latest: {recent[-1]['action']} -> {recent[-1]['result'][:90]}" if recent else ""))
     funcs = collections.Counter(s.get("function") or "decorative" for s in sim.world.buildings.values())
     stock = [f"{s['kind']} holds {s['stock']['food']} food" for s in sim.world.buildings.values() if s.get("stock")]
-    return (f"{stamp(t)}. {len(sim.agents)} alive, {len(sim.dead)} dead. Explored {sim.world.explored_pct()}% of the world.\n"
+    groups = "; ".join(f'"{g["name"]}" (leader {g["leader"]}, {len(g["members"])} members, {len(g["laws"])} laws)'
+                       for g in sim.groups.values()) or "none"
+    broken = sum(p["status"] == "broken" for p in sim.promises)
+    return (f"{stamp(t)}, {clock.season(t)}. {len(sim.agents)} alive, {len(sim.dead)} dead. Explored {sim.world.explored_pct()}% of the world.\n"
+            f"Age: {techtree.age(sim.techs)}; breakthroughs: {', '.join(techtree.name(x) for x in sim.techs) or 'none'}. "
+            f"Wild animals: {sum(1 for b in sim.eco.animals.values() if not b['owner'])}. Groups: {groups}. "
+            f"Deals made: {sum(d['status'] == 'accepted' for d in sim.deals)}, promises broken: {broken}. "
+            f"Peoples met: {', '.join(sim.contacts) or 'not yet'}.\n"
             f"Buildings: {', '.join(f'{v} {k}' for k, v in funcs.items()) or 'none'}. {'; '.join(stock)}\n"
             f"Discoveries: {', '.join(d['name'] for d in sim.discoveries) or 'none'}. "
             f"Known blueprints: {', '.join(b['kind'] for b in sim.blueprints.values()) or 'none'}.\n"
@@ -55,8 +64,20 @@ FORMAT = (
 
 
 def review(sim) -> dict:
+    seeds = "\n".join(f"- {clock.short(x['tick'])}: {x['text']}" for x in sim.story_seeds[-6:])
+    old = sim.stories[-1]["title"] if sim.stories and sim.rng.random() < 0.3 else ""
+    extra = ""
+    if seeds:
+        extra += ("\nSTORYTELLER: these happened recently:\n" + seeds + "\nTurn the most memorable into a short story the people "
+                  'will tell around the fire (myth-like, 2-4 sentences; it may exaggerate): add "story": {"title": "...", '
+                  '"text": "...", "about": ["<names>"]}.')
+        if old:
+            extra += f' Also retell the old story "{old}" a little differently, as tales change: "retold": {{"title": "{old}", "text": "..."}}.'
+    if history.chapter_due(sim):
+        extra += ('\nCHRONICLE: write this month\'s chapter of the society\'s history book (60-120 words, vivid, past tense): '
+                  '"chapter": {"title": "...", "text": "..."}.')
     prompt = (f"SOL_REVIEW\n{overview(sim)}\n\nThis is your morning address to the society. Your last words to them: "
-              f"{sim.sol_log[-1]['speech'] if sim.sol_log else '(this is your first review)'}\n\n{FORMAT}")
+              f"{sim.sol_log[-1]['speech'] if sim.sol_log else '(this is your first review)'}\n\n{FORMAT}{extra}")
     return _json(sim.llm.complete(INSTRUCTIONS, prompt, model=sim.sol_model))
 
 
@@ -106,6 +127,15 @@ def apply(sim, data: dict, source: str):
     if days:                                   # Sol decides when to look again
         days = max(SOL_MIN_DAYS, min(SOL_MAX_DAYS, days))
         sim.sol_next = sim.sol_last + days * DAY
+    st = data.get("story") if isinstance(data.get("story"), dict) else None
+    if st and culture.add_story(sim, st.get("title"), st.get("text"), st.get("about") or [], t):
+        sim.story_seeds.clear()
+        sim.events.append({"tick": t, "agent": NAME, "text": f'a new story is told: "{str(st.get("title"))[:60]}"', "color": COLOR, "kind": "story"})
+    rt = data.get("retold") if isinstance(data.get("retold"), dict) else None
+    if rt:
+        culture.add_story(sim, rt.get("title"), rt.get("text"), [], t)
+    if data.get("chapter"):
+        history.add_chapter(sim, data["chapter"])
     sim.sol_log.append({"tick": t, "source": source, "speech": speech, "advice": given, "next_days": days or None,
                         "note": str(data.get("note_to_human") or "").strip()[:400]})
     del sim.sol_log[:-30]
