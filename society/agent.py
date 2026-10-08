@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass, field
 
 DIRS = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
-ACTIONS = ("move", "gather", "eat", "say", "give", "plant", "tend", "build", "court", "procreate", "invent", "wait")
+ACTIONS = ("move", "gather", "eat", "say", "give", "plant", "tend", "build", "craft", "court", "procreate", "invent", "wait")
 VIEW_RADIUS = 6
 SMELL_RADIUS = 10   # how far an agent can sense the nearest food
 HEARING_RADIUS = 8
@@ -13,7 +13,10 @@ LOVE_BOND = 50          # mutual bond needed to have a child
 FRIEND_BOND = 25
 CHILD_FOOD_COST = 2     # each parent pays this much food
 CHILD_COOLDOWN = 50
-BUILD_COST = 2          # wood/stone needed per structure
+BUILD_COST = 1          # wood/stone needed per structure
+CRAFT_COST = 1          # wood/stone needed per object
+MAX_STEPS = 3           # tiles an agent can move in one turn
+MAX_ITEMS = 8
 KEEP_RECENT = 25        # memory lines shown verbatim; older ones are folded into the summary
 COMPACT_AFTER = 20      # unsummarised old lines that trigger a summarisation
 HUMAN_NOTES = {
@@ -28,6 +31,17 @@ HUMAN_NOTES = {
 ORDER_MEMORY_DAYS = 30
 DEFAULT_GOAL = ("Survive, make friends, and build a life and a society together with the others. "
                 "Nobody assigns you a role - decide for yourselves what matters.")
+
+
+def _compass(dx: int, dy: int) -> str:
+    ns = "north" if dy < 0 else "south" if dy > 0 else ""
+    ew = "west" if dx < 0 else "east" if dx > 0 else ""
+    return "-".join(p for p in (ns, ew) if p) or "here"
+
+
+def _is_fishing(name: str) -> bool:
+    n = name.lower()
+    return any(w in n for w in ("rod", "fish", "net", "spear", "harpoon", "trap"))
 
 
 @dataclass
@@ -80,6 +94,10 @@ class Agent:
     last_say_tick: int = -99
     chat: list[tuple[str, str]] = field(default_factory=list)  # (speaker, text) conversation with the Human
     authority: str = "leader"                                  # how this agent treats the Human (see HUMAN_NOTES)
+    items: list[dict] = field(default_factory=list)     # crafted objects: {name, text, by, tick}
+    discoveries: int = 0                                 # map tiles this agent was first to see
+    unreported: dict = field(default_factory=dict)       # newly seen terrain not yet turned into a memory
+    last_fish_tick: int = -99
     orders: list[tuple[int, str]] = field(default_factory=list)  # (day, text) things the Human asked it to do
 
     # ---- family / age ----
@@ -122,11 +140,14 @@ class Agent:
             "World: g grass, . sand, ~ water (impassable), # rock (impassable), ^ tree (impassable), f wild food bush "
             "(slow to regrow), , young plant, * ripe crop, & a structure someone built. North is up (y decreases), "
             "east is right. Uppercase letters are agents (you are @). "
+            "Most of the world is unexplored: you only see a small area around you, and exploring finds new food, water, "
+            "forests and rocks that your whole community can use. Be curious. Building and crafting make life better. "
             "Hunger rises every turn; at 100 you take damage and can starve. Eating food lowers hunger. "
             "Life lasts roughly 500-700 days; one turn is one day.\n"
             "Each turn pick ONE action:\n"
-            '  move    - {"direction": "north|south|east|west"}\n'
-            "  gather  - take from an adjacent/own-tile food bush or ripe crop (food, sometimes seeds), tree (wood) or rock (stone)\n"
+            f'  move    - {{"direction": "north|south|east|west", "steps": 1-{MAX_STEPS}}} walk several tiles at once (stops at obstacles)\n'
+            "  gather  - take from an adjacent/own-tile food bush or ripe crop (food, sometimes seeds), tree (wood) or rock (stone); "
+            "next to water with a fishing tool you catch fish (food)\n"
             "  eat     - eat one carried food (hunger -40)\n"
             '  say     - {"to": "<name or all>", "message": "..."} heard within 8 tiles; talk to people!\n'
             '  give    - {"to": "<name>"} hand one carried food to an adjacent agent\n'
@@ -134,6 +155,10 @@ class Agent:
             "  tend    - work on a young plant within reach to help it grow (faster with a helper)\n"
             f'  build   - {{"direction": "...", "title": "<what you build: house, wall, bridge, sign, anything>", "message": "<description or sign text>"}} '
             f"costs {BUILD_COST} wood/stone; bridges/paths/floors can be walked on, everything else blocks. Water only takes bridges/docks.\n"
+            f'  craft   - {{"title": "<an object you make: axe, pickaxe, hoe, fishing rod, basket, anything>", "message": "what it is for"}} '
+            f"costs {CRAFT_COST} wood/stone; you carry it (max {MAX_ITEMS}) and can give it away with give + title. Objects matter: "
+            "an axe/hatchet gets extra wood from trees, a pickaxe/hammer extra stone, a hoe/shovel/rake speeds up tending plants, "
+            "a fishing rod/net/spear lets you catch fish from water - a whole new food source.\n"
             '  court   - {"to": "<name>", "message": "..."} show affection to an agent within 3 tiles\n'
             f'  procreate - {{"to": "<name>", "baby_name": "..."}} both partners must choose it (needs mutual love >= {LOVE_BOND}, '
             f"adults, nearby, each pays {CHILD_FOOD_COST} food)\n"
@@ -161,7 +186,7 @@ class Agent:
         if self.hunger >= 55:
             lines.insert(1, f"!!! YOU ARE HUNGRY ({int(self.hunger)}/100) - at 100 you start losing health and die. "
                          + ("EAT NOW: choose the eat action (you carry food)." if self.food else
-                            "Find food first: gather from a bush/crop, or ask someone to give you some. Everything else can wait."))
+                            "Find food first: gather from a bush/crop, fish if you can, or ask someone to give you some. Everything else can wait."))
         lines.append("Agents in view: " + ("; ".join(near) or "none"))
         built = [f"{s['kind']} at dx={dx} dy={dy}" + (f' ("{s["text"]}")' if s["text"] else "") + f" built by {s['by']}"
                  for dx, dy, s in world.structures_near(self.x, self.y, VIEW_RADIUS)][:6]
@@ -176,6 +201,18 @@ class Agent:
             lines.append(f"Nearest food: dx={dx} dy={dy} ({where or 'right here'})")
         else:
             lines.append("Nearest food: none sensed")
+        un = world.nearest_unexplored(self.x, self.y)
+        if un:
+            dx, dy = un
+            lines.append(f"Your community has explored {world.explored_pct()}% of the world. Nearest unexplored area: "
+                         f"dx={dx} dy={dy} ({_compass(dx, dy)}, ~{max(abs(dx), abs(dy))} tiles away)")
+        if self.items:
+            lines.append("Objects you carry: " + "; ".join(f"{i['name']}" + (f" ({i['text']})" if i['text'] else "") for i in self.items))
+        if self.wood + self.stone >= CRAFT_COST:
+            lines.append(f"You have {self.wood} wood and {self.stone} stone: you could build a structure or craft a useful object.")
+        if world.water_near(self.x, self.y):
+            lines.append("You are next to water" + ("" if any(_is_fishing(i["name"]) for i in self.items)
+                                                     else " (a fishing rod/net would let you catch fish here)") + ".")
         lines.append(f"Food within reach to gather: {'yes' if world.food_near(self.x, self.y, 1) else 'no'}")
         mats = [o for o in world.gather_options(self.x, self.y) if world.tile(*o) in ("tree", "rock")]
         lines.append(f"Materials (trees/rocks) within reach: {len(mats)}")
@@ -265,4 +302,5 @@ class Agent:
         s = lambda k: str(data.get(k) or "").strip()
         return {"thought": s("thought") or raw[:200].strip(), "action": action,
                 "direction": data.get("direction"), "to": to, "message": s("message"), "title": s("title"),
-                "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role")}
+                "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"),
+                "steps": data.get("steps") if isinstance(data.get("steps"), int) else 1}

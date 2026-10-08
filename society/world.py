@@ -21,6 +21,7 @@ class World:
         self.regrow: dict[tuple[int, int], tuple[int, str]] = {}  # (x, y) -> (tick it returns, tile type)
         self.plants: dict[tuple[int, int], dict] = {}  # (x, y) -> {"growth": float, "tended": {name: tick}}
         self.structures: dict[tuple[int, int], dict] = {}  # (x, y) -> {kind, text, by, tick, walkable, under}
+        self.explored: set[tuple[int, int]] = set()    # tiles any agent has seen (the community's shared map)
         self.irrigated = {(x, y) for y in range(self.height) for x in range(self.width)
                           if any(self.in_bounds(x + dx, y + dy) and self.tiles[y + dy][x + dx] == WATER
                                  for dx in (-2, -1, 0, 1, 2) for dy in (-2, -1, 0, 1, 2))}
@@ -155,6 +156,47 @@ class World:
     def structures_near(self, x: int, y: int, radius: int):
         return [(sx - x, sy - y, s) for (sx, sy), s in self.structures.items()
                 if max(abs(sx - x), abs(sy - y)) <= radius]
+
+    # ---- exploration ----
+    def reveal(self, x: int, y: int, radius: int) -> dict:
+        """Mark tiles around (x, y) as explored; returns counts of what was newly revealed."""
+        new = {"tiles": 0, "water": 0, "tree": 0, "food": 0, "rock": 0}
+        for yy in range(max(0, y - radius), min(self.height, y + radius + 1)):
+            for xx in range(max(0, x - radius), min(self.width, x + radius + 1)):
+                if (xx, yy) not in self.explored:
+                    self.explored.add((xx, yy))
+                    new["tiles"] += 1
+                    t = self.tiles[yy][xx]
+                    if t in new:
+                        new[t] += 1
+                    elif t == CROP:
+                        new["food"] += 1
+        return new
+
+    def explored_pct(self) -> int:
+        return round(100 * len(self.explored) / (self.width * self.height))
+
+    def nearest_unexplored(self, x: int, y: int, cell: int = 6):
+        """(dx, dy) to the middle of the closest mostly-unexplored area, or None when it's all known."""
+        best = None
+        for sy in range(0, self.height, cell):
+            for sx in range(0, self.width, cell):
+                cx, cy = min(sx + cell // 2, self.width - 1), min(sy + cell // 2, self.height - 1)
+                total = (min(sx + cell, self.width) - sx) * (min(sy + cell, self.height) - sy)
+                seen = sum((xx, yy) in self.explored for yy in range(sy, min(sy + cell, self.height))
+                           for xx in range(sx, min(sx + cell, self.width)))
+                if seen / total < 0.5:
+                    d = max(abs(cx - x), abs(cy - y))
+                    if best is None or d < best[0]:
+                        best = (d, cx - x, cy - y)
+        return best[1:] if best else None
+
+    def explored_rows(self) -> list[str]:
+        return ["".join("1" if (x, y) in self.explored else "0" for x in range(self.width)) for y in range(self.height)]
+
+    def water_near(self, x: int, y: int) -> bool:
+        return any(self.in_bounds(x + dx, y + dy) and self.tiles[y + dy][x + dx] == WATER
+                   for dx in (-1, 0, 1) for dy in (-1, 0, 1))
 
     # ---- time ----
     def update(self, tick: int):

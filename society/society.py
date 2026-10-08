@@ -7,8 +7,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from .agent import (ADULT_AGE, BUILD_COST, CHILD_COOLDOWN, CHILD_FOOD_COST, DIRS, HEARING_RADIUS, LOVE_BOND,
-                    OLD_AGE, Agent, Traits)
+from .agent import (ADULT_AGE, BUILD_COST, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, DIRS, HEARING_RADIUS, LOVE_BOND,
+                    MAX_ITEMS, MAX_STEPS, OLD_AGE, VIEW_RADIUS, Agent, Traits, _compass, _is_fishing)
 from .world import GRASS, GROW_NEEDED, World
 
 PALETTE = ["#ff6b6b", "#ffd93d", "#6bcB77", "#4d96ff", "#c77dff", "#ff9f45", "#2ec4b6", "#f15bb5"]
@@ -84,6 +84,7 @@ class Society:
             agent.symbol = self._symbol_for(agent.name)
             if agent.born == -999:                      # original settlers start as adults of varied age
                 agent.born = -self.rng.randint(60, 140)
+            self.world.reveal(agent.x, agent.y, VIEW_RADIUS)
 
     def _symbol_for(self, name: str) -> str:
         used = {a.symbol for a in self.agents.values()} | {d["agent"].symbol for d in self.dead.values()}
@@ -195,6 +196,23 @@ class Society:
         """a's feeling toward b."""
         a.bonds[b.name] = min(100.0, a.bonds.get(b.name, 0) + amount)
 
+    def _explore(self, a: Agent, tick: int):
+        """Reveal the map around an agent; enough new land becomes a memory and a feed event."""
+        new = self.world.reveal(a.x, a.y, VIEW_RADIUS)
+        a.discoveries += new["tiles"]
+        for k, v in new.items():
+            a.unreported[k] = a.unreported.get(k, 0) + v
+        if a.unreported.get("tiles", 0) >= 45:
+            u, a.unreported = a.unreported, {}
+            found = ", ".join(f"{u[k]} {k}" for k in ("water", "tree", "food", "rock") if u.get(k, 0) >= 3) or "open grassland"
+            self._note(a, tick, f"I explored new land around ({a.x}, {a.y}): {found}. The community has now explored "
+                                f"{self.world.explored_pct()}% of the world.")
+            self._event(tick, a, f"explored new land near ({a.x}, {a.y}) - {self.world.explored_pct()}% of the world known", explore=True)
+
+    @staticmethod
+    def _has_tool(a: Agent, words) -> bool:
+        return any(w in i["name"].lower() for i in a.items for w in words)
+
     def _occupied(self, x, y, ignore=None):
         return any(o is not ignore and (o.x, o.y) == (x, y) for o in self.agents.values())
 
@@ -202,27 +220,50 @@ class Society:
         w, kind = self.world, act["action"]
         if kind == "move":
             dx, dy = DIRS.get(act["direction"], (0, 0))
-            nx, ny = a.x + dx, a.y + dy
             if (dx, dy) == (0, 0):
                 return "invalid direction"
-            if not w.in_bounds(nx, ny):
-                return "blocked: edge of the world"
-            if not w.walkable(nx, ny):
-                return f"blocked: {w.tile(nx, ny)}"
-            if self._occupied(nx, ny, a):
-                return "blocked: another agent"
-            a.x, a.y = nx, ny
-            return f"moved {act['direction']} to ({nx}, {ny})"
+            moved, why = 0, ""
+            for _ in range(max(1, min(MAX_STEPS, act.get("steps") or 1))):
+                nx, ny = a.x + dx, a.y + dy
+                if not w.in_bounds(nx, ny):
+                    why = "edge of the world"
+                elif not w.walkable(nx, ny):
+                    why = w.tile(nx, ny)
+                elif self._occupied(nx, ny, a):
+                    why = "another agent"
+                else:
+                    a.x, a.y = nx, ny
+                    moved += 1
+                    self._explore(a, tick)
+                    continue
+                break
+            if not moved:
+                return f"blocked: {why}"
+            return f"moved {act['direction']} {moved} tile{'s' if moved > 1 else ''} to ({a.x}, {a.y})" + (f" (then blocked by {why})" if why else "")
         if kind == "gather":
             for fx, fy in w.gather_options(a.x, a.y):
                 got = w.harvest(fx, fy, tick)
                 if got:
+                    bonus = ""
+                    if got["wood"] and self._has_tool(a, ("axe", "hatchet", "saw")):
+                        got["wood"] += 1; bonus = " (axe bonus)"
+                    if got["stone"] and self._has_tool(a, ("pick", "hammer", "chisel")):
+                        got["stone"] += 1; bonus = " (pickaxe bonus)"
                     a.food += got["food"]; a.seeds += got["seeds"]; a.wood += got["wood"]; a.stone += got["stone"]
                     gains = ", ".join(f"+{got[k]} {k}" for k in ("food", "seeds", "wood", "stone") if got[k])
-                    msg = f"took from {got['what']} at ({fx}, {fy}): {gains}"
+                    msg = f"took from {got['what']} at ({fx}, {fy}): {gains}{bonus}"
                     if got["food"]:
                         self._event(tick, a, msg)
                     return msg
+            if w.water_near(a.x, a.y):
+                if not any(_is_fishing(i["name"]) for i in a.items):
+                    return "water here, but you need a fishing tool (craft a fishing rod or net) to catch fish"
+                if tick - a.last_fish_tick < 3:
+                    return "the fish aren't biting yet - try again in a moment"
+                a.last_fish_tick = tick
+                a.food += 1
+                self._event(tick, a, "caught a fish")
+                return "caught a fish: +1 food"
             return "nothing to gather within reach"
         if kind == "eat":
             if a.food <= 0:
@@ -254,6 +295,19 @@ class Society:
             o = self.agents.get(act["to"])
             if not o or o is a or max(abs(o.x - a.x), abs(o.y - a.y)) > 1:
                 return "no adjacent agent to give to"
+            item = next((i for i in a.items if act["title"] and i["name"].lower() == act["title"].lower()), None)
+            if item:
+                if len(o.items) >= MAX_ITEMS:
+                    return f"{o.name}'s hands are full"
+                a.items.remove(item)
+                o.items.append(item)
+                self._bond(o, a, 10)
+                self._bond(a, o, 3)
+                o.heard.append(f"{a.name} gave you a {item['name']}.")
+                self._note(a, tick, f"I gave my {item['name']} to {o.name}.")
+                self._note(o, tick, f"{a.name} gave me a {item['name']}.")
+                self._event(tick, a, f"gave a {item['name']} to {o.name}")
+                return f"gave a {item['name']} to {o.name}"
             if a.food <= 0:
                 return "no food to give"
             a.food -= 1
@@ -283,6 +337,11 @@ class Society:
                 return "no young plants within reach"
             x, y = near[0]
             growth, partners = w.tend(x, y, a.name, tick)
+            if self._has_tool(a, ("hoe", "shovel", "rake", "spade", "plow", "trowel")) and (x, y) in w.plants:
+                w.plants[(x, y)]["growth"] += 1
+                growth = w.plants[(x, y)]["growth"]
+                if growth >= GROW_NEEDED:
+                    w.tiles[y][x] = "crop"
             ripe = growth >= GROW_NEEDED
             if partners:
                 for n in partners:
@@ -319,6 +378,23 @@ class Society:
                     self._note(a, tick, f'I built a "{title}" at ({x}, {y}).')
                     return f'built a {title} at ({x}, {y})'
             return f"couldn't build: {why}"
+        if kind == "craft":
+            title = act["title"][:30]
+            if not title:
+                return "name the object you want to craft (title)"
+            if a.wood + a.stone < CRAFT_COST:
+                return f"need {CRAFT_COST} wood/stone to craft (you have {a.wood} wood, {a.stone} stone)"
+            if len(a.items) >= MAX_ITEMS:
+                return f"your hands are full ({MAX_ITEMS} objects)"
+            if any(i["name"].lower() == title.lower() for i in a.items):
+                return f"you already have a {title}"
+            use_w = min(a.wood, CRAFT_COST)
+            a.wood -= use_w
+            a.stone -= CRAFT_COST - use_w
+            a.items.append({"name": title, "text": act["message"][:120], "by": a.name, "tick": tick})
+            self._event(tick, a, f'crafted "{title}"' + (f": {act['message']}" if act["message"] else ""), craft=True)
+            self._note(a, tick, f'I crafted a {title}' + (f" ({act['message']})." if act["message"] else "."))
+            return f"crafted a {title}"
         if kind == "court":
             o = self.agents.get(act["to"])
             if not o or o is a or max(abs(o.x - a.x), abs(o.y - a.y)) > 3:
@@ -516,6 +592,7 @@ class Society:
             "model": a.model, "tier": self._tier(a.model), "x": a.x, "y": a.y, "hunger": int(a.hunger),
             "health": int(a.health), "food": a.food, "seeds": a.seeds, "skills": a.skills,
             "traits": vars(a.traits), "age": a.age(t), "adult": a.adult(t), "wood": a.wood, "stone": a.stone,
+            "items": a.items, "discoveries": a.discoveries,
             "parents": a.parents, "children": a.children, "log": a.log[-25:], "log_total": len(a.log),
             "summary": a.summary, "say_to": a.last_say_to,
             "bonds": {k: int(v) for k, v in sorted(a.bonds.items(), key=lambda kv: -kv[1]) if v >= 1},
@@ -539,6 +616,7 @@ class Society:
                 "inventions": self.inventions[-30:],
                 "usage": self.llm.usage(),
                 "authority": self.human_authority,
+                "explored": self.world.explored_pct(),
                 "backends": self.llm.info() if hasattr(self.llm, "info") else {},
                 "errors": self.errors[-5:], "tick_seconds": self.tick_seconds,
                 "limits": {"max_agents": self.max_agents, "adult_age": ADULT_AGE, "love": LOVE_BOND, "old_age": OLD_AGE},
@@ -546,6 +624,10 @@ class Society:
 
     def world_data(self) -> dict:
         return {"width": self.world.width, "height": self.world.height, "tiles": self.world.tiles}
+
+    def fog(self) -> list[str]:
+        with self.lock:
+            return self.world.explored_rows()
 
     def tiles_now(self) -> list[list[str]]:
         with self.lock:

@@ -52,6 +52,14 @@ Watch agents move on the map, with speech bubbles and a world feed. Click an age
 to see its current thought and action, stats, and its full history of thoughts and actions. Pause/speed controls
 are in the header. `serve.py --host 0.0.0.0 --port 8000` exposes it beyond localhost.
 
+## Exploring and making things
+- **Fog of war:** the map starts dark; whatever agents see becomes the community's shared map (toggle the fog in the hub).
+  Each agent is told how much is explored and which direction the nearest unexplored area is; `move` can take up to 3 steps.
+  Big discoveries become memories ("I explored land with a lake and 6 food bushes") and feed events.
+- **Crafting:** `craft` makes any named object for 1 wood/stone. Objects matter: axe/hatchet = extra wood, pickaxe/hammer =
+  extra stone, hoe/shovel/rake = faster plant growth, fishing rod/net/spear = catch fish from water (a new food source).
+  Objects can be given to others. `build` now costs 1 wood/stone.
+
 ## Survival, farming, love and children
 - **Scarce food:** wild bushes take 150 turns to regrow. At hunger 100 an agent loses health and can starve to death (🪦).
 - **Farming (discovered, not taught):** picking a bush sometimes yields a seed. `plant` it on grass, then `tend` it. A second agent

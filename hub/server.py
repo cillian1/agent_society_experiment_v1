@@ -51,7 +51,7 @@ def serve(society, host: str, port: int, interval: float):
                 self._json(society.world_data())
             elif url.path == "/api/state":
                 s = society.snapshot()
-                s.update(paused=ctl["paused"], interval=ctl["interval"], tiles=society.tiles_now())
+                s.update(paused=ctl["paused"], interval=ctl["interval"], tiles=society.tiles_now(), fog=society.fog())
                 self._json(s)
             elif url.path == "/api/history":
                 self._json(society.history(parse_qs(url.query).get("name", [""])[0]))

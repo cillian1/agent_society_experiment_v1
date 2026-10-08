@@ -166,6 +166,7 @@ class MockLLM(UsageMixin):
         mats = int(re.search(r"within reach: (\d+)", prompt).group(1))
         mat_have = sum(int(x) for x in re.findall(r"(?:Wood|Stone): (\d+)", prompt))
         friend = re.search(r"Agents in view: (\w+) \[", prompt)
+        unexp = re.search(r"Nearest unexplored area: dx=(-?\d+) dy=(-?\d+)", prompt)
         tendable = int(re.search(r"to tend: (\d+)", prompt).group(1))
         m = re.search(r"Nearest food: dx=(-?\d+) dy=(-?\d+)", prompt)
         partner = re.search(r"have a child right now with: (\w+)", prompt)
@@ -183,6 +184,9 @@ class MockLLM(UsageMixin):
                      direction=rng.choice(["north", "south", "east", "west"]),
                      title=rng.choice(["shelter", "sign", "storage hut", "bridge"]),
                      message=rng.choice(["Meet here to share news.", "A safe place to rest.", "Free food storage."]))
+        elif mat_have >= 1 and rng.random() < 0.2:
+            d = dict(thought="A tool would help me; I'll craft one.", action="craft",
+                     title=rng.choice(["axe", "pickaxe", "hoe", "fishing rod", "basket"]), message="a useful tool")
         elif mats and mat_have < 4 and rng.random() < 0.5:
             d = dict(thought="Gathering wood and stone for building.", action="gather")
         elif friend and rng.random() < 0.3:
@@ -196,6 +200,10 @@ class MockLLM(UsageMixin):
         elif near and rng.random() < 0.5:
             d = dict(thought=f"I like {near.group(1)}; let me show it.", action="court", to=near.group(1),
                      message="You make this world brighter.")
+        elif unexp and rng.random() < 0.45:
+            dx, dy = int(unexp.group(1)), int(unexp.group(2))
+            dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
+            d = dict(thought="Time to explore somewhere new.", action="move", direction=dirn, steps=3)
         elif m and rng.random() < 0.9:
             dx, dy = int(m.group(1)), int(m.group(2))
             dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")

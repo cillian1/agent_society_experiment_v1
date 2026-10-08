@@ -46,7 +46,7 @@ textarea{width:100%;resize:vertical;min-height:58px}
 <label class="dim">speed <select id="speed"><option value="2">slow</option><option value="1" selected>normal</option><option value="0.3">fast</option></select></label></header>
 <div id="banner"></div>
 <main>
-<div id="left"><div class="zoom"><span class="dim">Map</span><button id="zout">−</button><button id="zin">+</button><button id="zfit">Fit</button><span class="dim" id="zlabel"></span><label class="dim" style="margin-left:auto"><input type="checkbox" id="follow"> follow selected agent</label></div><div id="mapwrap"><canvas id="c"></canvas></div><div id="hover">Hover over the map for details · click an agent to inspect it</div>
+<div id="left"><div class="zoom"><span class="dim">Map</span><button id="zout">−</button><button id="zin">+</button><button id="zfit">Fit</button><span class="dim" id="zlabel"></span><label class="dim" style="margin-left:auto"><input type="checkbox" id="fogon" checked> fog of war</label><label class="dim"><input type="checkbox" id="follow"> follow selected</label></div><div id="mapwrap"><canvas id="c"></canvas></div><div id="hover">Hover over the map for details · click an agent to inspect it</div>
 <div class="legend"><span><i style="background:#4e9a47"></i>grass</span><span><i style="background:#2f6fb5"></i>water (impassable)</span><span><i style="background:#d9c88a"></i>sand</span><span><i style="background:#7b7f86"></i>rock (impassable)</span><span><i style="background:#2f7d32;box-shadow:inset 0 0 0 3px #d62f4b"></i>food bush (slow regrow)</span><span><i style="background:#245c2a"></i>tree (wood)</span><span>🏠 built by agents</span><span><i style="background:#4e9a47;box-shadow:inset 0 -6px 0 #6b4a2b"></i>young plant</span><span><i style="background:#e8c547"></i>ripe crop</span><span>🪦 dead · ❤️ in love · small = child</span></div></div>
 <div id="right">
 <div class="panel"><h2>🗣 Talk to the agents</h2><div id="chat"><div class="dim">Pick who to talk to, then say something - they answer here.</div></div><div class="chips" id="to"></div>
@@ -63,7 +63,7 @@ textarea{width:100%;resize:vertical;min-height:58px}
 <script>
 const T=28,$=id=>document.getElementById(id);
 const cv=$('c'),ctx=cv.getContext('2d'),bg=document.createElement('canvas'),bctx=bg.getContext('2d');
-let detailKey='',structures=[],talk=[],zoom=1,dead=[],ideas=[],W=0,H=0,tiles=[],drawn=[],agents=[],disp={},sel=null,state={},toSet=new Set(['*']),detailFor=null,histKey='';
+let fog=[],detailKey='',structures=[],talk=[],zoom=1,dead=[],ideas=[],W=0,H=0,tiles=[],drawn=[],agents=[],disp={},sel=null,state={},toSet=new Set(['*']),detailFor=null,histKey='';
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const rnd=(x,y,k=0)=>{let h=(x*374761393+y*668265263+k*2147483647)>>>0;h=((h^(h>>>13))*1274126177)>>>0;return ((h^(h>>>16))>>>0)/4294967296};
 async function j(u,o){return (await fetch(u,o)).json()}
@@ -120,6 +120,7 @@ function syncTiles(next){
 function frame(){
   ctx.drawImage(bg,0,0);
   for(const g of dead){ctx.font='18px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.globalAlpha=.85;ctx.fillText('🪦',g.x*T+T/2,g.y*T+T/2);ctx.globalAlpha=1}
+  if($('fogon').checked&&fog.length){ctx.fillStyle='rgba(6,8,12,.62)';for(let y=0;y<H;y++){let x=0;while(x<W){if(fog[y][x]==='0'){let x2=x;while(x2<W&&fog[y][x2]==='0')x2++;ctx.fillRect(x*T,y*T,(x2-x)*T,T);x=x2}else x++}}}
   for(const st of structures){ctx.font=(st.walkable?'17px':'22px')+' system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(iconFor(st.kind),st.x*T+T/2,st.y*T+T/2+1)}
   for(const a of agents){
     const d=disp[a.name]||(disp[a.name]={x:a.x,y:a.y});d.x+=(a.x-d.x)*.18;d.y+=(a.y-d.y)*.18;
@@ -207,7 +208,7 @@ function renderDetail(){
   const hc=a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77',l=a.latest;
   $('d-title').innerHTML=`<span class="dot" style="background:${a.color}"></span>${esc(a.name)}${a.role?' · '+esc(a.role):''}`;
   $('d-stats').innerHTML=`<div class="kv"><span class="dim">Goal</span><span>${esc(a.goal)}</span><span class="dim">Model</span><span>${esc(a.model||'default')}</span>
-    <span class="dim">Position</span><span>(${a.x}, ${a.y})</span><span class="dim">Age</span><span>🎂 ${a.age} days · ${a.adult?(a.age>=state.limits.old_age?'elder':'adult'):'child'}</span><span class="dim">Role</span><span>${a.role?esc(a.role):'<i class="dim">none yet - they can invent one</i>'}</span><span class="dim">Carrying</span><span>${a.food} food, ${a.seeds} seeds, ${a.wood} wood, ${a.stone} stone</span><span class="dim">Health</span><span>${a.health}/100</span>    <span class="dim">Hunger</span><span>${a.hunger}/100<div class="bar" style="margin-top:3px"><div style="width:${a.hunger}%;background:${hc}"></div></div></span></div>`;
+    <span class="dim">Position</span><span>(${a.x}, ${a.y})</span><span class="dim">Age</span><span>🎂 ${a.age} days · ${a.adult?(a.age>=state.limits.old_age?'elder':'adult'):'child'}</span><span class="dim">Role</span><span>${a.role?esc(a.role):'<i class="dim">none yet - they can invent one</i>'}</span><span class="dim">Carrying</span><span>${a.food} food, ${a.seeds} seeds, ${a.wood} wood, ${a.stone} stone</span><span class="dim">Objects</span><span>${(a.items||[]).map(i=>`<span title="${esc(i.text)}">🔧 ${esc(i.name)}</span>`).join(' · ')||'<span class="dim">none</span>'}</span><span class="dim">Explored</span><span>${a.discoveries} tiles first seen by ${esc(a.name)}</span><span class="dim">Health</span><span>${a.health}/100</span>    <span class="dim">Hunger</span><span>${a.hunger}/100<div class="bar" style="margin-top:3px"><div style="width:${a.hunger}%;background:${hc}"></div></div></span></div>`;
   $('d-now').innerHTML=l?`${l.heard&&l.heard.length?`<div class="heard">👂 heard: ${l.heard.map(esc).join(' · ')}</div>`:''}
     <div class="thought">💭 ${esc(l.thought)}</div><div class="act">▶ <b>${esc(l.action)}</b> <span class="dim">→ ${esc(l.result)}</span></div>`:'<div class="dim">No turn taken yet.</div>';
   const B=state.backends||{},canLocal=B.local||B.mock,canClaude=B.claude||B.mock,key=a.name+a.model+canLocal+canClaude+a.alive;
@@ -238,7 +239,7 @@ function renderUsage(u){if(!u)return;
   $('usage').title=Object.entries(u.models).map(([m,x])=>`${m}: ${x.calls} calls, ${x.input} in, ${x.output} out`+(x.cost!=null?`, ~$${x.cost.toFixed(4)}`:'')).join('\n')||'no calls yet'}
 async function poll1(){
   try{const s=await j('/api/state'),first=!agents.length;state=s;agents=s.agents;dead=s.dead;syncTiles(s.tiles);
-    $('pop').textContent=`👥 ${agents.length} alive`+(dead.length?` · 🪦 ${dead.length}`:'')+` (max ${s.limits.max_agents})`;
+    $('pop').textContent=`🧭 ${s.explored}% explored · 👥 ${agents.length} alive`+(dead.length?` · 🪦 ${dead.length}`:'')+` (max ${s.limits.max_agents})`;
     $('ideas').innerHTML=s.inventions.slice().reverse().map(i=>`<div class="feedrow"><span class="tag">turn ${i.tick}</span> <span class="dot" style="background:${i.color}"></span><b>${esc(i.title)}</b> <span class="dim">by ${esc(i.by)}</span><div>${esc(i.text)}</div></div>`).join('')||'<div class="dim">nothing invented yet</div>';
     $('tick').textContent='day '+s.tick+(s.tick_seconds?` · ${s.tick_seconds}s/day`:'');
     const B=s.backends||{};$('backend').textContent=B.mock?'🎭 MOCK':'🧠 '+[B.claude?'Claude':'',B.local?'Local: '+B.local_model:''].filter(Boolean).join(' + ');
@@ -246,7 +247,7 @@ async function poll1(){
       +(!B.mock&&(B.notes||[]).some(n=>/unavailable|not reachable|isn't installed/.test(n))?'<div class="warn">'+esc((B.notes||[]).filter(n=>/unavailable|not reachable|isn.t installed/.test(n)).join(' · '))+'</div>':'')
       +(s.errors&&s.errors.length&&s.tick-s.errors[s.errors.length-1].tick<10?'<div class="bad">Brain error · '+esc(s.errors[s.errors.length-1].agent)+' ('+esc(s.errors[s.errors.length-1].model)+'): '+esc(s.errors[s.errors.length-1].error)+'</div>':'');
 $('pause').textContent=s.paused?'▶ Resume':'⏸ Pause';
-    structures=s.structures;if(document.activeElement!==$('auth'))$('auth').value=s.authority;renderChat(s.chat);renderUsage(s.usage);
+    structures=s.structures;fog=s.fog||[];if(document.activeElement!==$('auth'))$('auth').value=s.authority;renderChat(s.chat);renderUsage(s.usage);
     $('talk').innerHTML=s.talk.slice().reverse().map(m=>`<div class="feedrow"><span class="tag">day ${m.tick}</span> <b style="color:${m.color}">${esc(m.from)}</b> <span class="dim">→ ${m.to==='all'?'everyone':esc(m.to)}</span><div>${esc(m.text)}</div></div>`).join('')||'<div class="dim">no one has spoken yet…</div>';renderCards();if(first||$('to').children.length!==agents.length+1)renderTo();if(sel)renderDetail();
     $('feed').innerHTML=s.events.slice().reverse().map(e=>`<div class="feedrow ${e.human?'you':''}"><span class="tag">turn ${e.tick}</span> <span class="dot" style="background:${e.color}"></span><b>${esc(e.agent)}</b> ${esc(e.text)}</div>`).join('')||'<div class="dim">quiet so far…</div>'}catch(e){console.error(e)}}
 function poll(){poll1().finally(()=>setTimeout(poll,600))}
