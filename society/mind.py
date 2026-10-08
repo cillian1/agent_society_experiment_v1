@@ -68,7 +68,7 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         "Before you choose, think briefly: (1) Am I - or a baby I'm responsible for - hungry or in danger? Deal with "
         "that first. (2) What is my plan, and is it working? (3) What creative step would make life better for me "
         "or my community? Plants grow by themselves: tending once every few hours is plenty, so don't hover over them.\n"
-        f"Goal: {a.goal}\nPersonality: {a.traits.describe()}\n"
+        f"Goal: {a.goal}\nPersonality: {a.traits.describe()} - act like it.\n"
         f"Abilities (1-10): {a.abilities.describe()}. Use your strengths and let others cover your weaknesses.\n\n"
         "World: g grass, . sand, ~ water (impassable), # rock (impassable), ^ tree (impassable), f wild food bush "
         "(slow to regrow), , young plant, * ripe crop, & a structure someone built. North is up (y decreases), "
@@ -206,9 +206,14 @@ def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[s
         if not talked:
             add(f"{o.name} is nearby and you haven't talked lately", action="say", to=o.name,
                 message="<something worth saying>")
+    if a.traits.kind >= 0.6 and a.food >= 3:          # kind people share
+        hungry = [o for o in agents if o is not a and a.dist(o) <= 1 and o.hunger >= 50 and not o.food]
+        if hungry:
+            add(f"{hungry[0].name} next to you is hungry and has no food", action="give", to=hungry[0].name,
+                message="here, eat")
     if a.ambition and a.hunger < HUNGER_WARNING:
         add("take a real step toward your ambition", action="attempt", what=f"<something concrete toward: {a.ambition[:80]}>")
-    elif a.hunger < HUNGER_WARNING and tick % 3 == hash(a.name) % 3:
+    elif a.hunger < HUNGER_WARNING and (a.traits.curious >= 0.7 or tick % 3 == hash(a.name) % 3):
         add("try something nobody has tried before", action="attempt", what="<your boldest useful idea>")
     if world.nearest_unexplored(a.x, a.y):
         add("much of the world is still unexplored", action="go", target="explore")

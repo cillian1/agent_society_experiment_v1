@@ -26,12 +26,12 @@ def default_agents() -> list[Agent]:
     """Six settlers (three women, three men) with nothing but a personality: no roles, no goals beyond surviving,
     no family. Everyone starts on the free local model; upgrade anyone from the hub."""
     return [
-        Agent("Ada", Traits(0.6, 0.8, 0.9, 0.6, 0.2), sex="female", model=LOCAL),
-        Agent("Brix", Traits(0.4, 0.9, 0.4, 0.5, 0.3), sex="male", model=LOCAL),
-        Agent("Cleo", Traits(0.95, 0.3, 0.7, 0.6, 0.4), sex="female", model=LOCAL),
-        Agent("Dov", Traits(0.5, 0.6, 0.7, 0.2, 0.5), sex="male", model=LOCAL),
-        Agent("Eli", Traits(0.7, 0.7, 0.3, 0.2, 0.7), sex="male", model=LOCAL),
-        Agent("Fenn", Traits(0.85, 0.7, 0.5, 0.9, 0.2), sex="female", model=LOCAL),
+        Agent("Ada", Traits(curious=0.6, social=0.9, kind=0.6, driven=0.8), sex="female", model=LOCAL),
+        Agent("Brix", Traits(curious=0.4, social=0.4, kind=0.5, driven=0.9), sex="male", model=LOCAL),
+        Agent("Cleo", Traits(curious=0.95, social=0.7, kind=0.6, driven=0.3), sex="female", model=LOCAL),
+        Agent("Dov", Traits(curious=0.5, social=0.7, kind=0.2, driven=0.6), sex="male", model=LOCAL),
+        Agent("Eli", Traits(curious=0.7, social=0.3, kind=0.3, driven=0.7), sex="male", model=LOCAL),
+        Agent("Fenn", Traits(curious=0.85, social=0.5, kind=0.9, driven=0.7), sex="female", model=LOCAL),
     ]
 
 
@@ -135,8 +135,8 @@ class Society:
                 for b in alive[i + 1:]:
                     if a.dist(b) <= 2 and not a.is_baby(self.tick) and not b.is_baby(self.tick):
                         warm = 2 if self.world.function_near(a.x, a.y, "fire", 3) else 1   # around a fire
-                        self.bond(a, b, BOND["together"] * warm)
-                        self.bond(b, a, BOND["together"] * warm)
+                        self.bond(a, b, BOND["together"] * warm * (0.5 + a.traits.social))
+                        self.bond(b, a, BOND["together"] * warm * (0.5 + b.traits.social))
             for a in list(self.agents.values()):
                 if a.pregnancy and self.tick >= a.pregnancy["due"]:
                     self._give_birth(a, self.tick)
@@ -176,8 +176,9 @@ class Society:
             nxt = a.queue[0]
             hungry = a.hunger >= HUNGER_WARNING and nxt["action"] not in ("eat", "gather") and nxt.get("target") != "food"
             baby = any(a.name in b.parents and b.is_baby(self.tick) and b.hunger >= 50 for b in self.agents.values())
-            personal = [h for h in a.heard if any(k in h for k in (" to you", "The Human", "gave you", "courting you",
-                                                                    "wants to have a child", "birth", "died", "gift"))]
+            keys = ("The Human", "gave you", "wants to have a child", "birth", "died")          # driven people stay focused
+            keys += () if a.traits.driven >= 0.7 else (" to you", "courting you", "gift")
+            personal = [h for h in a.heard if any(k in h for k in keys)]
             why = ("someone spoke to me" if personal else "I got hungry" if hungry else "a baby needs me" if baby
                    else "my last step failed" if mind.failed(last) else "")
             if why:
@@ -326,7 +327,7 @@ class Society:
     def bond(self, a: Agent, b: Agent, amount: float):
         """Raise a's feeling toward b (charming people are liked faster)."""
         a.bonds[b.name] = min(100.0, a.bonds.get(b.name, 0)
-                              + amount * b.abilities.charm() * (1 + self.tech("friendship") / 100))
+                              + amount * b.charm() * (1 + self.tech("friendship") / 100))
 
     @staticmethod
     def blueprint_key(kind: str) -> str:

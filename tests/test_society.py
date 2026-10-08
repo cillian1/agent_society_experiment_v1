@@ -234,6 +234,7 @@ class BuildingTests(unittest.TestCase):
                     if all(w.tiles[y + dy][x + dx] == "grass" for dx in (-1, 0, 1) for dy in (-1, 0, 1))
                     and not any(max(abs(o.x - x), abs(o.y - y)) <= 2 for o in sim.agents.values()))
         a.x, a.y, a.wood, a.stone, a.food, a.hunger = x, y, 1, 0, 6, 10
+        a.traits.driven, a.abilities.strength = 0.5, 5          # no work bonuses: one hour of work per turn
         do = lambda j: apply(sim, a, parse_action(j, []), 1)
         self.assertIn("still missing 3 wood, 1 stone", do('{"action": "build", "direction": "east", "title": "Granary"}'))
         self.assertIn("granary", sim.blueprints)              # the plan is now shared knowledge

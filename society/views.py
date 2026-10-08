@@ -2,7 +2,7 @@
 from . import clock
 from .config import ADULT_AGE, EFFECTS, FUNCTIONS, LOVE_BOND, OLD_AGE
 from .engine import Society, tier_of
-from .models import ABILITY_INFO, Agent
+from .models import ABILITY_INFO, TRAIT_INFO, Agent
 
 
 def _task(sim: Society, a: Agent):
@@ -76,7 +76,7 @@ def agent_detail(sim: Society, name: str) -> dict | None:
         a = a or dead["agent"]
         t = sim.tick
         return {
-            **_brief(sim, a), "alive": not dead, "goal": a.goal, "traits": vars(a.traits),
+            **_brief(sim, a), "alive": not dead, "goal": a.goal, "traits": vars(a.traits), "trait_info": TRAIT_INFO,
             "seeds": a.seeds, "wood": a.wood, "stone": a.stone, "items": a.items, "discoveries": a.discoveries,
             "parents": a.parents, "children": a.children, "pregnancy": a.pregnancy, "plan": a.plan, "ambition": a.ambition, "queue": a.queue,
             "advice": [x for x in a.advice if t - x[0] <= 20][-3:],

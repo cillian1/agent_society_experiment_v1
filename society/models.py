@@ -8,42 +8,47 @@ DEFAULT_GOAL = ("Survive, make friends, and build a life and a society together 
                 "Nobody assigns you a role - decide for yourselves what matters.")
 
 
-@dataclass
-class Traits:
-    """Big-Five personality, each 0.0 - 1.0."""
-    openness: float = 0.5
-    conscientiousness: float = 0.5
-    extraversion: float = 0.5
-    agreeableness: float = 0.5
-    neuroticism: float = 0.5
-
-    def describe(self) -> str:
-        def lvl(v):
-            return "very high" if v >= .8 else "high" if v >= .6 else "moderate" if v > .4 else "low" if v > .2 else "very low"
-        return ", ".join(f"{k} {lvl(v)}" for k, v in vars(self).items())
-
-
-ABILITY_INFO = {   # what each ability does - shown to the agents and in the hub
-    "strength": "extra wood & stone when gathering",
+TRAIT_INFO = {     # personality, 0.0-1.0: shapes behaviour, and each one also has a real effect
+    "curious": "explores and tries bold new things",
+    "social": "others warm to them faster; time together bonds more",
+    "kind": "easier to win over; shares, feeds and cares for others",
+    "driven": "works faster on construction and sticks to plans",
+}
+ABILITY_INFO = {   # body and mind, 1-10
+    "strength": "extra wood & stone, faster building",
     "speed": "tiles per move",
-    "endurance": "gets hungry more slowly",
-    "perception": "sees and smells further",
-    "intelligence": "better farmer, remembers more",
-    "charisma": "others warm to them faster",
-    "longevity": "lives longer",
+    "endurance": "gets hungry more slowly, lives longer",
+    "wits": "sees and senses further, better farmer, remembers more",
 }
 
 
 @dataclass
+class Traits:
+    """Personality, each 0.0 - 1.0."""
+    curious: float = 0.5
+    social: float = 0.5
+    kind: float = 0.5
+    driven: float = 0.5
+
+    def describe(self) -> str:
+        def lvl(v):
+            return "very" if v >= .8 else "quite" if v >= .6 else "somewhat" if v > .4 else "not very" if v > .2 else "not at all"
+        return ", ".join(f"{lvl(v)} {k}" for k, v in vars(self).items())
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Traits":
+        old = {"openness": "curious", "extraversion": "social", "agreeableness": "kind", "conscientiousness": "driven"}
+        d = {old.get(k, k): v for k, v in (d or {}).items()}
+        return cls(**{k: v for k, v in d.items() if k in TRAIT_INFO})
+
+
+@dataclass
 class Abilities:
-    """Body and mind, each 1-10. Unlike personality these change what an agent can actually do."""
+    """Body and mind, each 1-10. Unlike personality these change what an agent can physically do."""
     strength: int = 5
     speed: int = 5
     endurance: int = 5
-    perception: int = 5
-    intelligence: int = 5
-    charisma: int = 5
-    longevity: int = 5
+    wits: int = 5
 
     @classmethod
     def random(cls, rng) -> "Abilities":
@@ -54,27 +59,31 @@ class Abilities:
         return cls(**{k: max(1, min(10, round((getattr(mum, k) + getattr(dad, k)) / 2 + rng.choice([-1, 0, 0, 1]))))
                       for k in ABILITY_INFO})
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "Abilities":
+        d = dict(d or {})
+        if "wits" not in d and ("intelligence" in d or "perception" in d):          # older saves
+            d["wits"] = round((d.get("intelligence", 5) + d.get("perception", 5)) / 2)
+        return cls(**{k: v for k, v in d.items() if k in ABILITY_INFO})
+
     # ---- effects ----
     def steps(self) -> int:
         return 2 + self.speed // 4                       # 2-4 tiles per move
 
     def view(self) -> int:
-        return 4 + (self.perception + 1) // 3            # 4-7 tiles
+        return 4 + (self.wits + 1) // 3                  # 4-7 tiles
 
     def smell(self) -> int:
-        return 6 + self.perception                       # 7-16 tiles
+        return 6 + self.wits                             # 7-16 tiles
 
     def hunger_factor(self) -> float:
         return 1.25 - self.endurance * 0.05              # 1.2x (1) .. 0.75x (10)
 
-    def charm(self) -> float:
-        return 0.6 + self.charisma * 0.08                # 0.68x .. 1.4x bond gains
-
     def memory(self) -> int:
-        return 15 + 2 * self.intelligence                # memories recalled word for word
+        return 15 + 2 * self.wits                        # memories recalled word for word
 
     def lifespan(self) -> int:
-        return 600 + 80 * self.longevity                 # 680 .. 1400 days
+        return 600 + 80 * self.endurance                 # 680 .. 1400 days
 
     def describe(self) -> str:
         return ", ".join(f"{k} {getattr(self, k)} ({ABILITY_INFO[k]})" for k in ABILITY_INFO)
@@ -173,6 +182,10 @@ class Agent:
         return max(abs(o.x - self.x), abs(o.y - self.y))
 
     # ---- things ----
+    def charm(self) -> float:
+        """How quickly others warm to this agent (social people are liked faster)."""
+        return 0.7 + 0.8 * self.traits.social             # 0.7x .. 1.5x
+
     def has_tool(self, use: str) -> bool:
         return any(i.get("use") == use or any(w in i["name"].lower() for w in TOOLS[use]) for i in self.items)
 
@@ -200,6 +213,6 @@ class Agent:
     def from_dict(cls, d: dict) -> "Agent":
         known = {f.name for f in fields(cls)}
         d = {k: v for k, v in d.items() if k in known}
-        d["traits"] = Traits(**d.get("traits", {}))
-        d["abilities"] = Abilities(**d.get("abilities", {}))
+        d["traits"] = Traits.from_dict(d.get("traits", {}))
+        d["abilities"] = Abilities.from_dict(d.get("abilities", {}))
         return cls(**d)

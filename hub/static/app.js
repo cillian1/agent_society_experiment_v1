@@ -401,9 +401,10 @@ function overview(a) {
     ${a.plan ? `<div class="card" style="border-left:3px solid var(--accent)">🗺️ <b>Plan:</b> ${esc(a.plan)}</div>` : ''}
     ${a.queue.length ? `<div class="card">⏭️ <b>Next up</b> (runs automatically): ${a.queue.map(q => esc(q.action + (q.target ? ' → ' + q.target : q.title ? ' ' + q.title : q.to && q.to !== 'all' ? ' → ' + q.to : ''))).join(' · ')}</div>` : ''}
     <h3>Abilities</h3>${Object.entries(a.abilities).map(([k, v]) => `<div title="${esc(a.ability_info[k])}">${meter(k[0].toUpperCase() + k.slice(1), v * 10, v >= 7 ? 'var(--good)' : v <= 3 ? 'var(--warn)' : 'var(--accent)').replace(`<span>${v * 10}</span></div>`, `<span>${v}/10</span></div>`)}</div>`).join('')}
-    <p class="muted small">Hover an ability to see what it does. Expected lifespan: about ${a.lifespan} days.</p>
+    <p class="muted small">Expected lifespan: about ${esc(a.lifespan_text || a.lifespan + ' days')}.</p>
     ${a.orders.length ? `<h3>You asked</h3>${a.orders.map(o => `<div class="card">“${esc(o[1])}” <span class="tag">${ts(o[0])}</span></div>`).join('')}` : ''}
-    <h3>Personality</h3>${Object.entries(a.traits).map(([k, v]) => meter({ openness: 'Openness', conscientiousness: 'Diligence', extraversion: 'Outgoing', agreeableness: 'Kindness', neuroticism: 'Anxiety' }[k] || k, Math.round(v * 100), 'var(--accent)')).join('')}`;
+    <h3>Personality</h3>${Object.entries(a.traits).map(([k, v]) => `<div title="${esc(a.trait_info?.[k] || '')}">${meter(k[0].toUpperCase() + k.slice(1), Math.round(v * 100), 'var(--gold)')}</div>`).join('')}
+    <p class="muted small">Hover a trait or ability to see what it does.</p>`;
 }
 
 function timeline(a) {

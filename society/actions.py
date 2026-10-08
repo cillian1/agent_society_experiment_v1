@@ -282,7 +282,7 @@ def tend(sim, a, act, tick):
                 "Go and do something else meanwhile")
     x, y = todo[0]
     growth, partners, _ = w.tend(x, y, a.name, tick)
-    extra = (1 if a.has_tool("farm") else 0) + (0.5 if a.abilities.intelligence >= 7 else 0)
+    extra = (1 if a.has_tool("farm") else 0) + (0.5 if a.abilities.wits >= 7 else 0)
     if extra and w.tiles[y][x] == "sprout":
         growth = w.boost(x, y, extra)
     ripe = growth >= GROW_NEEDED
@@ -384,7 +384,8 @@ def work(sim, a, act, tick):
         a.task = None
         return "nothing under construction next to you"
     helpers = [n for n, t in site["workers"].items() if n != a.name and tick - t <= 1]
-    gain = 1 + (0.5 if a.abilities.strength >= 7 else 0) + (0.5 if helpers else 0)
+    gain = (1 + (0.5 if a.abilities.strength >= 7 else 0) + (0.5 if a.traits.driven >= 0.7 else 0)
+            + (0.5 if helpers else 0))
     site["progress"] = min(site["work"], site["progress"] + gain)
     site["workers"][a.name] = tick
     a.task = {"type": "build", "id": site["id"]}
@@ -433,7 +434,7 @@ def court(sim, a, act, tick):
     o = sim.agents.get(act["to"])
     if not o or o is a or a.dist(o) > 3:
         return "nobody by that name close enough to court"
-    sim.bond(o, a, BOND["court"] * (0.5 + o.traits.agreeableness))
+    sim.bond(o, a, BOND["court"] * (0.5 + o.traits.kind))
     sim.bond(a, o, BOND["courted"])
     a.heart_tick = o.heart_tick = tick
     o.heard.append(f"{a.name} is courting you{_quote(act['message']) or '.'}")
