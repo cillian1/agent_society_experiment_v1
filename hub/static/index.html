@@ -1,265 +1,144 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Agent Society Hub</title>
-<style>
-:root{--bg:#12151a;--panel:#1b2027;--panel2:#232a33;--line:#2e3641;--text:#e8ebf0;--dim:#8d97a5;--accent:#ffd93d;--you:#7dd3fc}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,sans-serif}
-header{display:flex;gap:14px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-header h1{font-size:16px;margin:0;margin-right:auto}
-button,select,textarea{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 11px;font:inherit}
-button{cursor:pointer}button:hover{border-color:#4a5666}button.primary{background:#2b6cb0;border-color:#2b6cb0;font-weight:600}button.primary:hover{background:#3182ce}
-main{display:flex;gap:16px;padding:16px;flex-wrap:wrap;align-items:flex-start}
-#left{flex:1 1 680px;min-width:0}#right{flex:0 1 440px;min-width:300px;width:100%;max-width:540px}
-#mapwrap{border:1px solid var(--line);border-radius:8px;overflow:auto;max-height:78vh;background:#0c0e11}
-canvas{display:block;cursor:pointer}
-.zoom{display:flex;gap:6px;align-items:center;margin-bottom:8px}.zoom button{padding:3px 11px}
-#hover{margin-top:8px;color:var(--dim);font-size:13px;min-height:20px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:12px}
-.panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:0 0 8px}
-.dim{color:var(--dim)}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
-.bar{height:7px;background:#2a313a;border-radius:4px;overflow:hidden}.bar>div{height:100%;transition:width .4s}
-.cards{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.card{background:var(--panel2);border:2px solid transparent;border-radius:8px;padding:7px 9px;cursor:pointer;min-width:0}
-.card.sel{border-color:var(--accent)}.card .top{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
-.card .now{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
-#chat{max-height:260px;overflow:auto;margin-bottom:10px;display:flex;flex-direction:column;gap:6px}
-.bub{max-width:88%;padding:6px 10px;border-radius:10px;background:var(--panel2);font-size:13px}
-.bub.me{align-self:flex-end;background:#16384d}.bub b{display:block;font-size:11px;margin-bottom:1px}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
-.chip{padding:3px 10px;border-radius:99px;border:2px solid var(--line);background:var(--panel2);cursor:pointer;user-select:none}
-.chip.on{border-color:var(--you);background:#16384d}
-textarea{width:100%;resize:vertical;min-height:58px}
-.row{display:flex;gap:8px;align-items:center;margin-top:8px}.row .msg{margin-right:auto;font-size:12px}
-.section{margin-top:12px}.kv{display:grid;grid-template-columns:90px 1fr;gap:3px 10px}
-.trait{display:grid;grid-template-columns:110px 1fr 30px;gap:8px;align-items:center;font-size:12px;margin:2px 0}
-.thought{background:#252c35;border-left:3px solid var(--accent);padding:8px 10px;border-radius:4px;margin:6px 0}
-.scroll{max-height:330px;overflow:auto}.hist{padding:8px 0;border-top:1px solid var(--line)}.hist:first-child{border-top:0}
-.tag{font-size:12px;color:var(--dim)}.heard{color:#9bd0e8;font-size:13px}.act{font-size:13px}
-.feedrow{padding:6px 0;border-top:1px solid var(--line)}.feedrow:first-child{border-top:0}.feedrow.you{background:rgba(125,211,252,.08)}
-#banner>div{padding:8px 16px;font-size:13px}#banner .bad{background:#5a1d24;color:#ffd5d9}#banner .warn{background:#4d3a12;color:#ffe9b0}
-.legend{display:flex;gap:14px;margin-top:8px;color:var(--dim);font-size:12px;flex-wrap:wrap}
-.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-2px}
-</style></head><body>
-<header><h1>Agent Society Hub</h1><span id="backend" class="dim"></span>
-<span id="usage" class="dim" style="cursor:help">usage: –</span><span id="pop" class="dim">👥 –</span><span id="tick" class="dim">tick 0</span>
-<button id="pause">Pause</button>
-<label class="dim">speed <select id="speed"><option value="2">slow</option><option value="1" selected>normal</option><option value="0.3">fast</option></select></label></header>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Society</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🌱 Agent Society</div>
+  <div class="pills">
+    <span class="pill strong" id="p-day" title="Simulation day">Day –</span>
+    <span class="pill" id="p-brain" title="Which brains are available">🧠 –</span>
+    <span class="pill" id="p-pop" title="Agents alive / population cap">👥 –</span>
+    <span class="pill" id="p-explored" title="How much of the world has been explored">🧭 –</span>
+    <span class="pill" id="p-speed" title="How long the last day took to think">⏱ –</span>
+    <span class="pill" id="p-usage" title="Model usage">💬 –</span>
+  </div>
+  <div class="transport">
+    <button id="b-pause" class="btn primary" title="Pause / resume (Space)">⏸ Pause</button>
+    <button id="b-step" class="btn" title="Advance one day while paused (N)">⏭ Day</button>
+    <div class="seg" id="speed" title="Simulation speed">
+      <button data-v="3">Slow</button><button data-v="1" class="on">Normal</button><button data-v="0.2">Fast</button>
+    </div>
+    <button id="b-help" class="btn icon" title="Help &amp; shortcuts (?)">?</button>
+  </div>
+</header>
 <div id="banner"></div>
-<main>
-<div id="left"><div class="zoom"><span class="dim">Map</span><button id="zout">−</button><button id="zin">+</button><button id="zfit">Fit</button><span class="dim" id="zlabel"></span><label class="dim" style="margin-left:auto"><input type="checkbox" id="fogon" checked> fog of war</label><label class="dim"><input type="checkbox" id="follow"> follow selected</label></div><div id="mapwrap"><canvas id="c"></canvas></div><div id="hover">Hover over the map for details · click an agent to inspect it</div>
-<div class="legend"><span><i style="background:#4e9a47"></i>grass</span><span><i style="background:#2f6fb5"></i>water (impassable)</span><span><i style="background:#d9c88a"></i>sand</span><span><i style="background:#7b7f86"></i>rock (impassable)</span><span><i style="background:#2f7d32;box-shadow:inset 0 0 0 3px #d62f4b"></i>food bush (slow regrow)</span><span><i style="background:#245c2a"></i>tree (wood)</span><span>🏠 built by agents</span><span><i style="background:#4e9a47;box-shadow:inset 0 -6px 0 #6b4a2b"></i>young plant</span><span><i style="background:#e8c547"></i>ripe crop</span><span>🪦 dead · ❤️ in love · small = child</span></div></div>
-<div id="right">
-<div class="panel"><h2>🗣 Talk to the agents</h2><div id="chat"><div class="dim">Pick who to talk to, then say something - they answer here.</div></div><div class="chips" id="to"></div>
-<textarea id="msg" placeholder="Type a message… (Enter to send, Shift+Enter for a new line)"></textarea>
-<div class="row"><span class="msg dim" id="sent"></span><button class="primary" id="send">Speak</button></div>
-<div class="row"><label class="dim">How they treat you <select id="auth"><option value="leader">Leader - they obey</option><option value="advisor">Advisor - they usually follow</option><option value="observer">Observer - they ignore you</option></select></label></div>
-<div class="tag" style="margin-top:6px">Each agent you address answers right away, in character (one extra API call each). They also remember it in their next turn.</div></div>
-<div class="panel"><h2>Agents</h2><div class="cards" id="cards"></div></div>
-<div class="panel" id="detail"><h2>Inspector</h2><div class="dim">Click an agent on the map or in the list to see what it is thinking and what it has done.</div></div>
-<div class="panel"><h2>💬 Conversations among the agents</h2><div class="scroll" id="talk"><div class="dim">no one has spoken yet…</div></div></div>
-<div class="panel"><h2>💡 Ideas &amp; inventions <span class="tag">(shared culture)</span></h2><div class="scroll" id="ideas"><div class="dim">nothing invented yet</div></div></div>
-<div class="panel"><h2>World feed</h2><div class="scroll" id="feed"></div></div>
-</div></main>
-<script>
-const T=28,$=id=>document.getElementById(id);
-const cv=$('c'),ctx=cv.getContext('2d'),bg=document.createElement('canvas'),bctx=bg.getContext('2d');
-let fog=[],detailKey='',structures=[],talk=[],zoom=1,dead=[],ideas=[],W=0,H=0,tiles=[],drawn=[],agents=[],disp={},sel=null,state={},toSet=new Set(['*']),detailFor=null,histKey='';
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const rnd=(x,y,k=0)=>{let h=(x*374761393+y*668265263+k*2147483647)>>>0;h=((h^(h>>>13))*1274126177)>>>0;return ((h^(h>>>16))>>>0)/4294967296};
-async function j(u,o){return (await fetch(u,o)).json()}
-const post=(u,b)=>j(u,{method:'POST',body:JSON.stringify(b)});
 
-/* ---------- map rendering ---------- */
-function paintTile(x,y){
-  const t=tiles[y][x],px=x*T,py=y*T,c=bctx,v=rnd(x,y);
-  const base={grass:[78,154,71],food:[78,154,71],sprout:[78,154,71],crop:[78,154,71],water:[47,111,181],sand:[217,200,138],rock:[123,127,134],tree:[78,154,71],structure:[150,118,78]}[t];
-  const k=(v-.5)*14;c.fillStyle=`rgb(${base.map(n=>Math.round(n+k)).join(',')})`;c.fillRect(px,py,T,T);
-  if(t==='grass'||t==='food'){
-    c.strokeStyle='rgba(30,90,35,.55)';c.lineWidth=1.4;
-    for(let i=0;i<4;i++){const a=px+3+rnd(x,y,i+1)*(T-6),b=py+6+rnd(x,y,i+9)*(T-9);c.beginPath();c.moveTo(a,b);c.lineTo(a-2,b-4);c.moveTo(a,b);c.lineTo(a+2,b-4);c.stroke()}
-    if(t==='grass'&&rnd(x,y,20)>.9){c.fillStyle=rnd(x,y,21)>.5?'#fff3a0':'#f8c8e0';c.beginPath();c.arc(px+6+rnd(x,y,22)*(T-12),py+6+rnd(x,y,23)*(T-12),2.2,0,7);c.fill()}
-  }
-  if(t==='food'){
-    c.fillStyle='#2b6a2f';c.beginPath();c.arc(px+T/2,py+T/2+2,T*.36,0,7);c.fill();
-    c.fillStyle='#37803b';c.beginPath();c.arc(px+T/2-3,py+T/2-1,T*.22,0,7);c.fill();
-    c.fillStyle='#e0334e';[[-6,3],[5,0],[0,8],[-1,-3],[7,7]].forEach(([a,b])=>{c.beginPath();c.arc(px+T/2+a,py+T/2+b,2.6,0,7);c.fill()});
-    c.fillStyle='rgba(255,255,255,.7)';[[-6,3],[5,0]].forEach(([a,b])=>c.fillRect(px+T/2+a-1,py+T/2+b-1.5,1.3,1.3));
-  }
-  if(t==='tree'){
-    c.fillStyle='rgba(0,0,0,.25)';c.beginPath();c.ellipse(px+T/2,py+T-4,T*.38,T*.13,0,0,7);c.fill();
-    c.fillStyle='#5b3d22';c.fillRect(px+T/2-2.5,py+T-12,5,9);
-    [['#245c2a',T/2,T/2-1,T*.38],['#2e7a35',T/2-3,T/2-4,T*.27],['#3c9744',T/2+3,T/2-5,T*.2]].forEach(([col,a,b,r])=>{c.fillStyle=col;c.beginPath();c.arc(px+a,py+b,r,0,7);c.fill()});
-  }
-  if(t==='structure'){c.fillStyle='rgba(0,0,0,.12)';for(let i=0;i<4;i++)c.fillRect(px,py+i*7,T,1)}
-  if(t==='sprout'||t==='crop'){
-    c.fillStyle='#6b4a2b';c.fillRect(px+3,py+T-9,T-6,6);c.fillStyle='#4f3820';for(let i=0;i<4;i++)c.fillRect(px+5+i*5,py+T-8,2,1.5);
-    if(t==='sprout'){c.strokeStyle='#8fe36b';c.lineWidth=2;[[-5,0],[0,-3],[5,0]].forEach(([a,b])=>{c.beginPath();c.moveTo(px+T/2,py+T-9);c.quadraticCurveTo(px+T/2+a,py+T-14+b,px+T/2+a*1.4,py+T-17+b);c.stroke()});
-      c.fillStyle='#b6f09a';c.beginPath();c.arc(px+T/2,py+T-12,2,0,7);c.fill()}
-    else{for(let i=0;i<5;i++){const a=px+5+i*4.5;c.strokeStyle='#d8b640';c.lineWidth=2;c.beginPath();c.moveTo(a,py+T-9);c.lineTo(a-1,py+7);c.stroke();
-      c.fillStyle='#f3d35a';c.beginPath();c.ellipse(a-1,py+8,2,4,0,0,7);c.fill()}}
-  }
-  if(t==='water'){
-    c.strokeStyle='rgba(255,255,255,.22)';c.lineWidth=1.5;
-    for(let i=0;i<2;i++){const a=px+4+rnd(x,y,i+3)*(T-14),b=py+7+i*11+rnd(x,y,i+5)*4;c.beginPath();c.moveTo(a,b);c.quadraticCurveTo(a+4,b-3,a+8,b);c.quadraticCurveTo(a+12,b+3,a+16,b);c.stroke()}
-    c.fillStyle='rgba(255,255,255,.3)';
-    [[0,-1,px,py,T,2],[0,1,px,py+T-2,T,2],[-1,0,px,py,2,T],[1,0,px+T-2,py,2,T]].forEach(([dx,dy,a,b,w,h])=>{
-      const n=tiles[y+dy]?.[x+dx];if(n&&n!=='water')c.fillRect(a,b,w,h)})
-  }
-  if(t==='sand'){c.fillStyle='rgba(120,95,40,.35)';for(let i=0;i<6;i++)c.fillRect(px+rnd(x,y,i+30)*(T-2),py+rnd(x,y,i+40)*(T-2),1.6,1.6)}
-  if(t==='rock'){
-    c.fillStyle='rgba(0,0,0,.28)';c.beginPath();c.ellipse(px+T/2,py+T-5,T*.42,T*.14,0,0,7);c.fill();
-    c.fillStyle='#8f949c';c.beginPath();c.moveTo(px+4,py+T-6);c.lineTo(px+7,py+9);c.lineTo(px+15,py+4);c.lineTo(px+23,py+9);c.lineTo(px+T-3,py+T-6);c.closePath();c.fill();
-    c.fillStyle='#a9aeb6';c.beginPath();c.moveTo(px+7,py+9);c.lineTo(px+15,py+4);c.lineTo(px+17,py+13);c.lineTo(px+9,py+16);c.closePath();c.fill();
-    c.strokeStyle='rgba(0,0,0,.35)';c.lineWidth=1;c.beginPath();c.moveTo(px+17,py+13);c.lineTo(px+20,py+T-7);c.stroke();
-  }
-}
-function syncTiles(next){
-  tiles=next;
-  next.forEach((row,y)=>row.forEach((t,x)=>{if(!drawn[y]||drawn[y][x]!==t){(drawn[y]=drawn[y]||[])[x]=t;paintTile(x,y)}}));
-}
-function frame(){
-  ctx.drawImage(bg,0,0);
-  for(const g of dead){ctx.font='18px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.globalAlpha=.85;ctx.fillText('🪦',g.x*T+T/2,g.y*T+T/2);ctx.globalAlpha=1}
-  if($('fogon').checked&&fog.length){ctx.fillStyle='rgba(6,8,12,.62)';for(let y=0;y<H;y++){let x=0;while(x<W){if(fog[y][x]==='0'){let x2=x;while(x2<W&&fog[y][x2]==='0')x2++;ctx.fillRect(x*T,y*T,(x2-x)*T,T);x=x2}else x++}}}
-  for(const st of structures){ctx.font=(st.walkable?'17px':'22px')+' system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(iconFor(st.kind),st.x*T+T/2,st.y*T+T/2+1)}
-  for(const a of agents){
-    const d=disp[a.name]||(disp[a.name]={x:a.x,y:a.y});d.x+=(a.x-d.x)*.18;d.y+=(a.y-d.y)*.18;
-    const px=d.x*T+T/2,py=d.y*T+T/2,r=(T/2-3)*(a.adult?1:.72);
-    ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(px,py+r+1,r*.9,r*.35,0,0,7);ctx.fill();
-    if(sel===a.name){ctx.strokeStyle='#ffd93d';ctx.lineWidth=3;ctx.beginPath();ctx.arc(px,py,r+5,0,7);ctx.stroke()}
-    ctx.fillStyle=a.color;ctx.strokeStyle='#111';ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(px,py,r,0,7);ctx.fill();ctx.stroke();
-    ctx.fillStyle='#111';ctx.font='bold 13px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(a.name[0],px,py+.5);
-    const hc=a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77';   // hunger bar over head
-    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(px-11,py-r-9,22,5);ctx.fillStyle=hc;ctx.fillRect(px-10,py-r-8,20*(1-a.hunger/100),3);
-    if(a.food>0){ctx.fillStyle='#d62f4b';ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(px+r,py-r+2,5.5,0,7);ctx.fill();ctx.stroke();
-      ctx.fillStyle='#fff';ctx.font='bold 8px system-ui';ctx.fillText(a.food>9?'9+':a.food,px+r,py-r+2.5)}
-    if(a.heart){ctx.font='15px system-ui';ctx.textAlign='center';ctx.fillText('❤️',px+r+2,py-r-12)}
-    ctx.font='bold 11px system-ui';const tag=a.name+' · '+a.age;const nw=ctx.measureText(tag).width+10;
-    ctx.fillStyle='rgba(10,12,16,.75)';ctx.beginPath();ctx.roundRect(px-nw/2,py+r+4,nw,15,6);ctx.fill();
-    ctx.fillStyle='#fff';ctx.fillText(tag,px,py+r+11.5);
-  }
-  for(const a of agents){   // speech: connecting line + bubble on top of everything
-    if(!a.say)continue;
-    const d=disp[a.name],px=d.x*T+T/2,py=d.y*T+T/2,r=(T/2-3)*(a.adult?1:.72);
-    const tg=a.say_to&&a.say_to!=='all'&&a.say_to!=='Human'?disp[a.say_to]:null;
-    if(tg){ctx.strokeStyle=a.color;ctx.lineWidth=2;ctx.setLineDash([5,4]);ctx.globalAlpha=.8;ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(tg.x*T+T/2,tg.y*T+T/2);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1}
-    const label=a.say_to==='all'?'to everyone':'to '+a.say_to,txt=a.say.length>70?a.say.slice(0,68)+'…':a.say;
-    ctx.font='12px system-ui';const words=txt.split(' '),lines=[];let cur='';
-    for(const w of words){if(ctx.measureText(cur+' '+w).width>190&&cur){lines.push(cur);cur=w}else cur=cur?cur+' '+w:w}lines.push(cur);
-    const w=Math.max(...lines.map(l=>ctx.measureText(l).width),ctx.measureText(label).width)+16,h=lines.length*15+22,
-      bx=Math.min(Math.max(px-w/2,3),cv.width-w-3),by=Math.max(3,py-r-h-14);
-    ctx.fillStyle='#fff';ctx.strokeStyle=a.color;ctx.lineWidth=2.5;ctx.beginPath();ctx.roundRect(bx,by,w,h,8);ctx.fill();ctx.stroke();
-    ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(px-6,by+h-1);ctx.lineTo(px,by+h+8);ctx.lineTo(px+6,by+h-1);ctx.fill();
-    ctx.textAlign='left';ctx.textBaseline='top';ctx.fillStyle='#667';ctx.font='10px system-ui';ctx.fillText(a.name+' '+label,bx+8,by+4);
-    ctx.fillStyle='#111';ctx.font='12px system-ui';lines.forEach((l,k)=>ctx.fillText(l,bx+8,by+17+k*15));ctx.textBaseline='middle';ctx.textAlign='center'}
-  requestAnimationFrame(frame)
-}
-const ICON=[['bridge','🌉'],['dock','⚓'],['house','🏠'],['hut','🛖'],['shelter','🏕️'],['home','🏠'],['wall','🧱'],['fence','🧱'],['sign','🪧'],['fire','🔥'],['storage','📦'],['store','📦'],['barn','🏚️'],['farm','🌾'],['garden','🌷'],['well','⛲'],['temple','⛩️'],['school','🏫'],['market','🏪'],['tower','🗼'],['bed','🛏️'],['path','🟫'],['road','🟫'],['floor','🟫'],['bench','🪑'],['monument','🗿'],['statue','🗿'],['gate','⛩️'],['door','🚪']];
-const iconFor=k=>{k=k.toLowerCase();for(const[w,i]of ICON)if(k.includes(w))return i;return '🏗️'};
-const tileAt=e=>{const r=cv.getBoundingClientRect();return{fx:(e.clientX-r.left)*cv.width/r.width/T,fy:(e.clientY-r.top)*cv.height/r.height/T}};
-const nearest=(fx,fy,lim)=>{let best=null,bd=lim;for(const a of agents){const d=disp[a.name]||a,k=Math.hypot(d.x+.5-fx,d.y+.5-fy);if(k<bd){bd=k;best=a}}return best};
-cv.addEventListener('click',e=>{const{fx,fy}=tileAt(e),a=nearest(fx,fy,1.1);if(a)select(a.name)});
-cv.addEventListener('mousemove',e=>{const{fx,fy}=tileAt(e),x=Math.floor(fx),y=Math.floor(fy);if(!tiles[y]||!tiles[y][x])return;
-  const a=nearest(fx,fy,.8),st=structures.find(q=>q.x===x&&q.y===y),names={grass:'grass (walkable)',water:'water (impassable)',sand:'sand (walkable)',rock:'rock (impassable)',tree:'tree (gather for wood)',structure:'structure',food:'wild food bush (slow to regrow)',sprout:'young plant (tend it to grow)',crop:'ripe crop (gather: 3 food + seed)'};
-  $('hover').innerHTML=`(${x}, ${y}) · ${names[tiles[y][x]]}`+(a?` · <b style="color:${a.color}">${esc(a.name)}</b> ${a.role?'the '+esc(a.role):''}, ${a.age} days old — hunger ${a.hunger}/100, carrying ${a.food} food`:'')+(st?` · ${iconFor(st.kind)} <b>${esc(st.kind)}</b>${st.text?' — “'+esc(st.text)+'”':''} (built by ${esc(st.by)})`:'')});
+<main class="layout">
+  <section class="mapcol">
+    <div class="mapbox" id="mapbox">
+      <div class="maptools">
+        <button class="btn icon" id="z-out" title="Zoom out (-)">−</button>
+        <button class="btn icon" id="z-in" title="Zoom in (+)">+</button>
+        <button class="btn" id="z-fit" title="Fit the whole world (0)">Fit</button>
+        <label class="toggle" title="Darken land nobody has seen yet"><input type="checkbox" id="fog" checked> Fog</label>
+        <label class="toggle" title="Keep the selected agent centred (F)"><input type="checkbox" id="follow"> Follow</label>
+      </div>
+      <div class="mapscroll" id="mapscroll"><canvas id="map"></canvas></div>
+      <details class="legend" open>
+        <summary>Legend</summary>
+        <div class="legend-grid">
+          <span><i style="background:#4e9a47"></i>Grass</span><span><i style="background:#2f6fb5"></i>Water</span>
+          <span><i style="background:#d9c88a"></i>Sand</span><span><i style="background:#8f949c"></i>Rock (stone)</span>
+          <span><i style="background:#245c2a"></i>Tree (wood)</span><span><i style="background:#2b6a2f;box-shadow:inset 0 0 0 3px #e0334e"></i>Berry bush</span>
+          <span><i style="background:#6b4a2b;box-shadow:inset 0 -5px 0 #8fe36b"></i>Young plant</span><span><i style="background:#f3d35a"></i>Ripe crop</span>
+          <span>🏠 Built by agents</span><span>🪦 Grave</span><span>❤️ In love</span><span>Small = child</span>
+        </div>
+      </details>
+    </div>
+    <div class="hint">Scroll to zoom · drag to pan · click an agent to open their profile · double-click to follow</div>
+  </section>
 
-/* ---------- agents list, speak panel ---------- */
-const TIER={local:'🖥️',haiku:'🌱',sonnet:'⭐',opus:'👑',custom:'🔧'};
-function renderCards(){
-  $('cards').innerHTML=agents.map(a=>{const l=a.latest,hc=a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77';
-    return `<div class="card ${sel===a.name?'sel':''}" onclick="select('${a.name}')"><div class="top"><b><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</b><span class="tag">${TIER[a.tier]} 🎂${a.age}d${a.adult?'':' 👶'}</span></div>
-    <div class="tag" style="margin-top:2px">${a.role?esc(a.role):'<i>no role yet</i>'}</div>
-    <div class="bar" style="margin-top:5px"><div style="width:${a.hunger}%;background:${hc}"></div></div>
-    <div class="now">${l?esc(l.action)+' → '+esc(l.result):'waiting…'}</div></div>`}).join('')
-   +dead.map(a=>`<div class="card ${sel===a.name?'sel':''}" style="opacity:.55" onclick="select('${a.name}')"><div class="top"><b>🪦 ${esc(a.name)}</b><span class="tag">died at ${a.age}d</span></div><div class="now">${esc(a.cause)}</div></div>`).join('')}
-function renderTo(){
-  const all=toSet.has('*');
-  $('to').innerHTML=`<span class="chip ${all?'on':''}" onclick="toggleTo('*')">Everyone</span>`+agents.map(a=>`<span class="chip ${!all&&toSet.has(a.name)?'on':''}" onclick="toggleTo('${a.name}')"><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</span>`).join('')}
-function toggleTo(n){
-  if(n==='*'){toSet=new Set(['*'])}
-  else{if(toSet.has('*'))toSet=new Set();toSet.has(n)?toSet.delete(n):toSet.add(n);if(!toSet.size)toSet=new Set(['*'])}
-  renderTo()}
-async function speak(){
-  const m=$('msg').value.trim();if(!m)return;
-  const to=toSet.has('*')?'all':[...toSet],r=await post('/api/speak',{to,message:m});
-  $('sent').textContent=r.delivered.length?`Sent to ${r.delivered.length===agents.length?'everyone':r.delivered.join(', ')}.`:'Nobody received that.';
-  $('msg').value='';setTimeout(()=>$('sent').textContent='',6000)}
-$('send').onclick=speak;
-$('msg').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();speak()}});
+  <aside class="side">
+    <nav class="tabs" id="tabs">
+      <button data-tab="people" class="on">👥 People</button>
+      <button data-tab="talk">💬 Talk</button>
+      <button data-tab="world">🌍 World</button>
+      <button data-tab="stats">📈 Stats</button>
+      <button data-tab="settings">⚙️ Settings</button>
+    </nav>
 
-function renderChat(c){
-  const el=$('chat'),stick=el.scrollTop+el.clientHeight>=el.scrollHeight-30,key=JSON.stringify(c);if(el.dataset.k===key)return;el.dataset.k=key;
-  if(!c.length)return;
-  el.innerHTML=c.map(m=>m.from==='You'?`<div class="bub me"><b style="color:var(--you)">You → ${esc(m.to)}</b>${esc(m.text)}</div>`
-    :`<div class="bub"><b style="color:${m.color}">${esc(m.from)}</b>${m.pending?'<span class="dim">thinking…</span>':esc(m.text)}</div>`).join('');
-  if(stick)el.scrollTop=el.scrollHeight}
-/* ---------- inspector ---------- */
-async function tier(name,m){const r=await post('/api/tier',{name,model:m});if(!r.model)alert('That model id is not valid.');detailKey='';poll1()}
-function select(n){sel=n;const sa=agents.find(x=>x.name===n);if(sa&&zoom>.6)centerOn(sa);toSet=new Set([n]);renderTo();renderCards();detailFor=null;histKey='';renderDetail();loadHistory()}
-function renderDetail(){
-  const a=agents.find(x=>x.name===sel)||dead.find(x=>x.name===sel),el=$('detail');if(!a)return;
-  if(detailFor!==sel){detailFor=sel;el.innerHTML=`<h2 id="d-title"></h2><div id="d-stats"></div>
-    <div class="section" id="d-tier"></div>
-    <div class="section"><h2>Right now</h2><div id="d-now"></div></div>
-    <div class="section"><h2>Feelings &amp; family</h2><div id="d-rel"></div></div>
-    <div class="section"><h2>Memory <span class="tag">(it remembers everything)</span></h2><div id="d-mem"></div></div>
-    <div class="section"><h2>Personality</h2><div id="d-traits"></div></div>
-    <div class="section"><h2>Everything it has thought &amp; done <span class="tag">(newest first)</span></h2><div class="scroll" id="hist"><div class="dim">loading…</div></div></div>`}
-  const hc=a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77',l=a.latest;
-  $('d-title').innerHTML=`<span class="dot" style="background:${a.color}"></span>${esc(a.name)}${a.role?' · '+esc(a.role):''}`;
-  $('d-stats').innerHTML=`<div class="kv"><span class="dim">Goal</span><span>${esc(a.goal)}</span><span class="dim">Model</span><span>${esc(a.model||'default')}</span>
-    <span class="dim">Position</span><span>(${a.x}, ${a.y})</span><span class="dim">Age</span><span>🎂 ${a.age} days · ${a.adult?(a.age>=state.limits.old_age?'elder':'adult'):'child'}</span><span class="dim">Role</span><span>${a.role?esc(a.role):'<i class="dim">none yet - they can invent one</i>'}</span><span class="dim">Carrying</span><span>${a.food} food, ${a.seeds} seeds, ${a.wood} wood, ${a.stone} stone</span><span class="dim">Objects</span><span>${(a.items||[]).map(i=>`<span title="${esc(i.text)}">🔧 ${esc(i.name)}</span>`).join(' · ')||'<span class="dim">none</span>'}</span><span class="dim">Explored</span><span>${a.discoveries} tiles first seen by ${esc(a.name)}</span><span class="dim">Health</span><span>${a.health}/100</span>    <span class="dim">Hunger</span><span>${a.hunger}/100<div class="bar" style="margin-top:3px"><div style="width:${a.hunger}%;background:${hc}"></div></div></span></div>`;
-  $('d-now').innerHTML=l?`${l.heard&&l.heard.length?`<div class="heard">👂 heard: ${l.heard.map(esc).join(' · ')}</div>`:''}
-    <div class="thought">💭 ${esc(l.thought)}</div><div class="act">▶ <b>${esc(l.action)}</b> <span class="dim">→ ${esc(l.result)}</span></div>`:'<div class="dim">No turn taken yet.</div>';
-  const B=state.backends||{},canLocal=B.local||B.mock,canClaude=B.claude||B.mock,key=a.name+a.model+canLocal+canClaude+a.alive;
-  if(detailKey!==key){detailKey=key;
-  const btn=(t,label,ok,hint)=>`<button ${a.tier===t||!ok?'disabled':''} ${ok?'':`title="${hint}"`} onclick="tier('${a.name}','${t}')">${label}</button>`;
-  $('d-tier').innerHTML=a.alive?`<span class="tag">Brain: <b>${TIER[a.tier]} ${a.tier}</b> · <code>${esc(a.model==='local'?'local ('+(B.local_model||'?')+')':a.model||'default')}</code></span><div class="row" style="margin-top:6px;flex-wrap:wrap">
-    ${btn('local','🖥️ Local (free)',canLocal,'no local model server found')}${btn('haiku','🌱 Haiku',canClaude,'set ANTHROPIC_API_KEY to use Claude')}
-    ${btn('sonnet','⭐ Sonnet',canClaude,'set ANTHROPIC_API_KEY to use Claude')}${btn('opus','👑 Enlighten (Opus)',canClaude,'set ANTHROPIC_API_KEY to use Claude')}</div>
-    <div class="row"><input id="custom" placeholder="any model id, e.g. claude-sonnet-5-5 or local:llama3.2:3b" style="flex:1;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit"><button onclick="tier('${a.name}',$('custom').value)">Set</button></div>
-    <div class="tag" style="margin-top:4px">Only one agent can be enlightened (Opus) at a time; enlightening another drops the current one to Sonnet.</div>`:`<b>${esc(a.name)} died of ${esc(a.cause)} on day ${a.died}.</b>`}
-  const bonds=Object.entries(a.bonds||{});
-  $('d-rel').innerHTML=(bonds.length?bonds.map(([n,v])=>`<div class="trait"><span>${v>=state.limits.love?'💖 ':''}${esc(n)}</span><div class="bar"><div style="width:${v}%;background:${v>=state.limits.love?'#f15bb5':'#b08ad8'}"></div></div><span>${v}</span></div>`).join(''):'<div class="dim">no strong feelings yet</div>')
-    +`<div class="tag" style="margin-top:6px">Parents: ${a.parents.map(esc).join(' & ')||'none'} · Children: ${a.children.map(esc).join(', ')||'none'}</div>`;
-  $('d-mem').innerHTML=(a.summary?`<div class="thought" style="border-color:#b08ad8"><b>Summary of earlier life:</b> ${esc(a.summary)}</div>`:'')
-    +`<div class="tag">${a.log_total} memories in total · latest ${Math.min(25,a.log_total)}:</div><div class="scroll" style="max-height:200px">`+(a.log||[]).slice().reverse().map(m=>`<div class="tag" style="color:var(--text)">• ${esc(m)}</div>`).join('')+'</div>';
-  $('d-traits').innerHTML=Object.entries(a.traits).map(([k,v])=>`<div class="trait"><span class="dim">${k}</span><div class="bar"><div style="width:${v*100}%;background:#7aa2f7"></div></div><span>${Math.round(v*100)}</span></div>`).join('')}
-async function loadHistory(){
-  if(!sel)return;const h=await j('/api/history?name='+encodeURIComponent(sel)),el=$('hist');if(!el)return;
-  const key=sel+':'+h.length;if(key===histKey)return;histKey=key;
-  el.innerHTML=h.slice().reverse().map(e=>`<div class="hist"><div class="tag">turn ${e.tick} · at (${e.x}, ${e.y}) · hunger ${e.hunger}</div>
-    ${e.heard&&e.heard.length?`<div class="heard">👂 ${e.heard.map(esc).join('<br>👂 ')}</div>`:''}
-    <div>💭 ${esc(e.thought)}</div><div class="act">▶ <b>${esc(e.action)}</b> <span class="dim">→ ${esc(e.result)}</span></div></div>`).join('')||'<div class="dim">none yet</div>'}
+    <section class="tab" id="tab-people">
+      <div id="people-list">
+        <input class="search" id="search" placeholder="Search by name or role…">
+        <div id="list"></div>
+        <div class="graves" id="graves"></div>
+      </div>
+      <div id="profile" hidden></div>
+    </section>
 
-/* ---------- polling ---------- */
-const fmt=n=>n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':n;
-function renderUsage(u){if(!u)return;
-  $('usage').textContent=`${u.calls} calls · ${fmt(u.input)} in / ${fmt(u.output)} out tokens`+(u.cost!=null?` · ~$${u.cost.toFixed(3)}`:'');
-  $('usage').title=Object.entries(u.models).map(([m,x])=>`${m}: ${x.calls} calls, ${x.input} in, ${x.output} out`+(x.cost!=null?`, ~$${x.cost.toFixed(4)}`:'')).join('\n')||'no calls yet'}
-async function poll1(){
-  try{const s=await j('/api/state'),first=!agents.length;state=s;agents=s.agents;dead=s.dead;syncTiles(s.tiles);
-    $('pop').textContent=`🧭 ${s.explored}% explored · 👥 ${agents.length} alive`+(dead.length?` · 🪦 ${dead.length}`:'')+` (max ${s.limits.max_agents})`;
-    $('ideas').innerHTML=s.inventions.slice().reverse().map(i=>`<div class="feedrow"><span class="tag">turn ${i.tick}</span> <span class="dot" style="background:${i.color}"></span><b>${esc(i.title)}</b> <span class="dim">by ${esc(i.by)}</span><div>${esc(i.text)}</div></div>`).join('')||'<div class="dim">nothing invented yet</div>';
-    $('tick').textContent='day '+s.tick+(s.tick_seconds?` · ${s.tick_seconds}s/day`:'');
-    const B=s.backends||{};$('backend').textContent=B.mock?'🎭 MOCK':'🧠 '+[B.claude?'Claude':'',B.local?'Local: '+B.local_model:''].filter(Boolean).join(' + ');
-    $('banner').innerHTML=(B.mock?'<div class="bad">⚠ MOCK MODE - these agents are scripted and cannot really think or reply. Start Ollama (local, free) or set ANTHROPIC_API_KEY, then restart. '+esc((B.notes||[]).filter(n=>!n.startsWith('--mock')).join(' · '))+'</div>':'')
-      +(!B.mock&&(B.notes||[]).some(n=>/unavailable|not reachable|isn't installed/.test(n))?'<div class="warn">'+esc((B.notes||[]).filter(n=>/unavailable|not reachable|isn.t installed/.test(n)).join(' · '))+'</div>':'')
-      +(s.errors&&s.errors.length&&s.tick-s.errors[s.errors.length-1].tick<10?'<div class="bad">Brain error · '+esc(s.errors[s.errors.length-1].agent)+' ('+esc(s.errors[s.errors.length-1].model)+'): '+esc(s.errors[s.errors.length-1].error)+'</div>':'');
-$('pause').textContent=s.paused?'▶ Resume':'⏸ Pause';
-    structures=s.structures;fog=s.fog||[];if(document.activeElement!==$('auth'))$('auth').value=s.authority;renderChat(s.chat);renderUsage(s.usage);
-    $('talk').innerHTML=s.talk.slice().reverse().map(m=>`<div class="feedrow"><span class="tag">day ${m.tick}</span> <b style="color:${m.color}">${esc(m.from)}</b> <span class="dim">→ ${m.to==='all'?'everyone':esc(m.to)}</span><div>${esc(m.text)}</div></div>`).join('')||'<div class="dim">no one has spoken yet…</div>';renderCards();if(first||$('to').children.length!==agents.length+1)renderTo();if(sel)renderDetail();
-    $('feed').innerHTML=s.events.slice().reverse().map(e=>`<div class="feedrow ${e.human?'you':''}"><span class="tag">turn ${e.tick}</span> <span class="dot" style="background:${e.color}"></span><b>${esc(e.agent)}</b> ${esc(e.text)}</div>`).join('')||'<div class="dim">quiet so far…</div>'}catch(e){console.error(e)}}
-function poll(){poll1().finally(()=>setTimeout(poll,600))}
-async function histLoop(){try{await loadHistory()}catch(e){}setTimeout(histLoop,1200)}
-$('auth').onchange=e=>post('/api/control',{authority:e.target.value});
-$('pause').onclick=()=>post('/api/control',{paused:!state.paused});
-$('speed').onchange=e=>post('/api/control',{interval:+e.target.value});
-function setZoom(z){zoom=Math.min(1.6,Math.max(.3,z));cv.style.width=Math.round(W*T*zoom)+'px';cv.style.height=Math.round(H*T*zoom)+'px';$('zlabel').textContent=Math.round(zoom*100)+'%'}
-const fit=()=>setZoom(($('mapwrap').clientWidth-2)/(W*T));
-const startZoom=()=>setZoom(Math.max(.8,($('mapwrap').clientWidth-2)/(W*T)));
-$('zin').onclick=()=>setZoom(zoom*1.25);$('zout').onclick=()=>setZoom(zoom/1.25);$('zfit').onclick=fit;
-function centerOn(a){const wp=$('mapwrap'),d=disp[a.name]||a;wp.scrollTo({left:(d.x+.5)*T*zoom-wp.clientWidth/2,top:(d.y+.5)*T*zoom-wp.clientHeight/2,behavior:'smooth'})}
-setInterval(()=>{if($('follow').checked&&sel){const a=agents.find(x=>x.name===sel);if(a)centerOn(a)}},1500);
-(async()=>{const w=await j('/api/world');W=w.width;H=w.height;cv.width=bg.width=W*T;cv.height=bg.height=H*T;syncTiles(w.tiles);startZoom();frame();poll();histLoop()})();
-</script></body></html>
+    <section class="tab" id="tab-talk" hidden>
+      <div class="chat" id="chat"></div>
+      <div class="field-label">Talking to</div>
+      <div class="chips" id="to"></div>
+      <div class="composer">
+        <textarea id="msg" rows="2" placeholder="Say something… (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button class="btn primary" id="send">Send</button>
+      </div>
+      <div class="row">
+        <label class="field-label" for="auth">They treat you as</label>
+        <select id="auth">
+          <option value="leader">👑 Their leader (they obey)</option>
+          <option value="advisor">🧭 An advisor (they usually follow)</option>
+          <option value="observer">👁 An observer (they're free)</option>
+        </select>
+      </div>
+      <p class="muted small">Every agent you address answers right away, in character, with its own brain (one extra model call each). Your request stays on their mind for 30 days.</p>
+    </section>
+
+    <section class="tab" id="tab-world" hidden>
+      <div class="chips" id="filters"></div>
+      <div class="feed" id="feed"></div>
+    </section>
+
+    <section class="tab" id="tab-stats" hidden>
+      <div class="readout" id="readout">Hover over a chart to read every measure for that day.</div>
+      <div class="charts" id="charts"></div>
+      <div class="row"><label class="toggle"><input type="checkbox" id="stats-table"> Show as a table</label></div>
+      <div id="table"></div>
+    </section>
+
+    <section class="tab" id="tab-settings" hidden>
+      <h3>Save &amp; load</h3>
+      <div class="composer"><input id="save-name" placeholder="Save name (optional)"><button class="btn primary" id="save">💾 Save</button></div>
+      <p class="muted small">The world also autosaves every 25 days as “autosave”. Start the hub with <code>--resume</code> to continue from it.</p>
+      <div id="saves"></div>
+      <h3>New world</h3>
+      <div class="composer"><input id="seed" placeholder="Seed (optional — same seed, same map)"><button class="btn danger" id="new">🌍 New world</button></div>
+      <h3>Brains &amp; usage</h3>
+      <div id="usage"></div>
+      <h3>Keyboard shortcuts</h3>
+      <div class="keys">
+        <kbd>Space</kbd> pause / resume · <kbd>N</kbd> next day · <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>0</kbd> fit map ·
+        <kbd>F</kbd> follow selected · <kbd>/</kbd> talk · <kbd>Esc</kbd> close · <kbd>1</kbd>–<kbd>5</kbd> tabs · <kbd>?</kbd> help
+      </div>
+    </section>
+  </aside>
+</main>
+
+<div class="tip" id="tip" hidden></div>
+<div id="toasts"></div>
+
+<div class="modal" id="help" hidden>
+  <div class="modal-card">
+    <h2>Welcome to Agent Society 🌱</h2>
+    <p>A handful of AI agents live in this world with nothing but a personality. They explore, talk, farm, build, craft tools, invent customs, fall in love, have children and grow old. <b>Nobody tells them who to be</b> — except you, if you want to.</p>
+    <ul>
+      <li><b>Watch:</b> speech bubbles show who is talking to whom, and the fog lifts as they explore.</li>
+      <li><b>Get to know them:</b> click an agent (or open 👥 People) to see their thoughts, memories, friendships and family.</li>
+      <li><b>Talk:</b> open 💬 Talk, pick who to talk to and type. From a profile you can also send gifts.</li>
+      <li><b>Brains:</b> each agent thinks with a model — free <i>Local</i>, or Claude <i>Haiku / Sonnet</i>. <i>Enlighten</i> gives one agent Opus. Change it in their profile → Brain.</li>
+      <li><b>Keep it:</b> ⚙️ Settings saves and loads worlds; it also autosaves.</li>
+    </ul>
+    <p class="muted small">Shortcuts: Space pause · N next day · +/− zoom · F follow · / talk · Esc close · ? this help</p>
+    <button class="btn primary" id="help-close">Let's go</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,83 +1,82 @@
-# agent_society_experiment_v1
-Agents building a society
+# Agent Society 🌱
 
-## Quick start
+A small world of AI agents that start with nothing but a personality. They explore, talk, make friends, farm,
+build, craft tools, invent customs, fall in love, have children and grow old — and you can watch, talk to them,
+lead them, and save their world to continue later.
+
+## Quick start (Windows)
 ```
-py -m pip install -r requirements.txt      # (python -m pip ... on Mac/Linux)
-py serve.py                                # visual hub at http://127.0.0.1:8000
-py run.py --ticks 10                       # headless: prints each agent's thoughts/actions
+py -m pip install -r requirements.txt
+py serve.py                         # then open http://127.0.0.1:8000
 ```
-**Where do the agents' brains come from?** `serve.py` auto-detects what is available and shows it in the hub header:
-- **Local model (free)** via [Ollama](https://ollama.com) - see below.
-- **Claude** (Haiku / Sonnet / Opus) if the `ANTHROPIC_API_KEY` environment variable is set.
-- If neither is found it falls back to a **scripted MOCK** (red banner in the hub): those agents cannot really think or reply.
-  `--mock` forces this.
+Useful options: `--resume` (continue from the last autosave), `--load NAME`, `--seed 42`, `--max-agents 20`,
+`--local-concurrency 20`, `--interval 2` (minimum seconds per day). `py serve.py --help` lists everything.
+On Mac/Linux use `python` instead of `py`.
 
-Default setup: **Ada and Fenn on Haiku, everyone else (and all babies) on the local model.** If you have no API key, everyone
-uses the local model; if you have no local server, everyone uses Haiku. You can switch any agent to any model in the hub
-(Local / Haiku / Sonnet / Enlighten=Opus, or type any model id; `local:<name>` for another local model). The memory summaries
-use Haiku if there is a key, else the local model.
+### Where the agents' brains come from
+The hub auto-detects what is available and shows it in the top bar:
+- **Local model (free)** through [Ollama](https://ollama.com) — see below.
+- **Claude** (Haiku / Sonnet / Opus) when the `ANTHROPIC_API_KEY` environment variable is set.
+- Neither? It falls back to a **scripted mock** (red banner): those agents can't really think or reply.
 
-## Running local models (RTX 5070 Ti 16 GB, Windows)
-1. Install Ollama, then `ollama pull qwen2.5:7b-instruct` (a good small instruction model; any Ollama model works via `--local-model`).
-2. For many simultaneous agents set these environment variables, then restart Ollama (right-click tray icon > Quit, start again):
-   - `OLLAMA_NUM_PARALLEL=20` - how many requests it serves at once (memory use = context size x this number).
-   - `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0` - halves the memory used by each conversation.
-3. Start the hub with matching settings: `py serve.py --local-concurrency 20 --local-ctx 4096`
-   (prompts are ~2-3k tokens, so 4096 is enough; `--local-ctx` is the per-request window).
-4. Check `ollama ps` / Task Manager: the model should be 100% on GPU. If it spills to CPU, lower `OLLAMA_NUM_PARALLEL`
-   (try 8-10), or use a smaller model (`qwen2.5:3b-instruct`). A day's speed is shown in the hub header (`Ns/day`).
-Rough guide: a 7B 4-bit model is ~5 GB; each parallel conversation adds roughly 0.2-0.4 GB at 4k context, so ~20 in parallel
-should fit in 16 GB - but this is an estimate, not a guarantee. LM Studio / llama.cpp / vLLM work too (`--local-api openai`).
-Small local models are noticeably weaker at following the JSON format and at being creative; expect some wasted turns.
+By default **Ada and Fenn use Haiku, everyone else and every baby uses the local model.** Without an API key everyone
+uses the local model; without a local server everyone uses Haiku. Change any agent's brain in their profile → *Brain*
+(Local / Haiku / Sonnet / **Enlighten** = Opus, one agent at a time, or any model id; `local:<name>` for another local model).
 
-## The world
-A procedurally generated 64x40 tile map (`society/world.py`): grass, sand, water, rock and forest (the last three impassable; trees give wood, rocks stone),
-plus berry-bush **food** tiles that regrow 40 turns after being picked. Pass `--seed N` for a repeatable map.
+### Local models (RTX 5070 Ti, 16 GB)
+1. Install Ollama, then `ollama pull qwen2.5:7b-instruct`.
+2. For many agents at once: `setx OLLAMA_NUM_PARALLEL 20`, `setx OLLAMA_FLASH_ATTENTION 1`, `setx OLLAMA_KV_CACHE_TYPE q8_0`,
+   then quit and restart Ollama.
+3. `py serve.py --local-concurrency 20`. Check `ollama ps` shows `100% GPU`; if not, lower `OLLAMA_NUM_PARALLEL`
+   or use `qwen2.5:3b-instruct`. LM Studio / llama.cpp / vLLM work too (`--local-api openai --local-url ...`).
 
-## The agents
-Six settlers (Ada, Brix, Cleo, Dov, Eli, Fenn) start with **nothing but a personality** (Big-Five traits), a random adult age,
-and no roles, no goals beyond "survive and build a society", and no family. They invent their own roles (any agent can add
-`"role": "..."` to a reply), talk, make friends, farm, build, invent customs and have children.
-Each turn an agent sees a 13x13 ASCII window of the map, its stats, nearby agents, structures, feelings, ideas and its memory,
-then returns a private *thought* plus one action: `move`, `gather` (food/wood/stone), `eat`, `say`, `give`, `plant`, `tend`,
-`build` (anything: houses, signs, bridges... costs 2 wood/stone), `court`, `procreate`, `invent` or `wait`.
-**They remember everything:** every notable event goes into a lifelong log; the newest ~25-45 lines are shown verbatim and older
-ones are folded into a running summary by a cheap Haiku call, so nothing is lost but prompts stay small.
-Ages are in days (1 turn = 1 day): adult at 40, elders may die of old age after 500.
-Pass `--agents my.json` to define your own agents (name, traits, optional goal/role/model).
+## Using the hub
+| Where | What you can do |
+|---|---|
+| **Top bar** | Day, brains, population, % explored, seconds per day, model usage. Pause / step one day / speed. `?` = help. |
+| **Map** | Scroll to zoom, drag to pan, click an agent to open their profile, double-click to follow. Fog of war lifts as they explore. Speech bubbles show who talks to whom. |
+| **👥 People** | Everyone at a glance (hunger, food, age, what they're doing). A **profile** has Overview, Thoughts (every decision), Memory, Relations (feelings & family) and Brain tabs, plus buttons to talk, find, follow or send a gift. |
+| **💬 Talk** | Message everyone, one agent or any group; each answers right away in character. Choose whether they treat you as their **leader** (they obey), an advisor, or an observer. |
+| **🌍 World** | A filterable feed of conversations, births and deaths, building, ideas, exploration and food. |
+| **📈 Stats** | Population, hunger, food, exploration, structures, farms, objects and ideas over time (hover to read a day; table view available). |
+| **⚙️ Settings** | Save / load worlds (also autosaved every 25 days), start a new world, model usage per brain, keyboard shortcuts. |
 
-## The hub
-Watch agents move on the map, with speech bubbles and a world feed. Click an agent (on the map or in the list)
-to see its current thought and action, stats, and its full history of thoughts and actions. Pause/speed controls
-are in the header. `serve.py --host 0.0.0.0 --port 8000` exposes it beyond localhost.
+Keyboard: `Space` pause · `N` next day · `+`/`−` zoom · `0` fit · `F` follow · `/` talk · `Esc` close · `1`–`5` tabs · `?` help.
 
-## Exploring and making things
-- **Fog of war:** the map starts dark; whatever agents see becomes the community's shared map (toggle the fog in the hub).
-  Each agent is told how much is explored and which direction the nearest unexplored area is; `move` can take up to 3 steps.
-  Big discoveries become memories ("I explored land with a lake and 6 food bushes") and feed events.
-- **Crafting:** `craft` makes any named object for 1 wood/stone. Objects matter: axe/hatchet = extra wood, pickaxe/hammer =
-  extra stone, hoe/shovel/rake = faster plant growth, fishing rod/net/spear = catch fish from water (a new food source).
-  Objects can be given to others. `build` now costs 1 wood/stone.
+## How the world works
+- **Map:** 64×40 tiles of grass, sand, water, rock and forest. Trees give wood, rocks stone, berry bushes food (and seeds);
+  bushes take 150 days to regrow.
+- **Survival:** hunger rises every day; at 100 an agent loses health and can starve. Elders (500+ days) may die of old age.
+- **Farming:** plant a seed, tend it; a second farmer within 6 days doubles the growth. Ripe crops give 3 food and replant.
+- **Making things:** `build` anything (houses, signs, bridges — bridges can cross water) and `craft` objects. Tools work:
+  axe = more wood, pickaxe = more stone, hoe = faster crops, fishing rod/net = fish from water.
+- **Society:** no roles or family at the start. Agents claim their own roles, `invent` ideas everyone hears about, build
+  friendships by talking, giving and farming together, and when two adults love each other (50+ both ways) they can have
+  a child, who inherits a mix of their personalities.
+- **Memory:** everything notable goes into each agent's lifelong log; older memories are folded into a running summary
+  so prompts stay small and nothing is forgotten.
 
-## Survival, farming, love and children
-- **Scarce food:** wild bushes take 150 turns to regrow. At hunger 100 an agent loses health and can starve to death (🪦).
-- **Farming (discovered, not taught):** picking a bush sometimes yields a seed. `plant` it on grass, then `tend` it. A second agent
-  tending within 6 turns doubles the effect (teamwork); ripe crops give 3 food + a seed and replant themselves.
-- **Imagination:** agents can `invent` ideas/customs/tools, which are shared with everyone (shown in the hub) and keep a
-  long-term `remember` memory.
-- **Love & children:** `court`, `give` and talking build a *bond*. When two adult, non-related agents each reach 50, both
-  choose `procreate` (each pays 2 food) and a baby spawns. Population is capped (`--max-agents`, default 14).
-- **Brains/cost tiers:** babies run on the free local model. In the hub's inspector pick any agent's brain: Local, Haiku, Sonnet,
-  **Enlighten (Opus, only one agent at a time)** or any model id. More agents = more calls per turn.
+## Project layout
+```
+serve.py / run.py        start the hub / run headless (`py run.py --days 50 --save test`)
+society/
+  config.py              every tunable number (costs, ages, radii, regrowth...)
+  world.py               map generation, resources, farming, structures, fog of war
+  models.py              Agent and Traits data
+  mind.py                prompts, parsing the model's JSON, calling the model
+  actions.py             what each action does (one function per action)
+  engine.py              the day loop, life & death, the Human's interactions, stats, save state
+  views.py               JSON sent to the hub
+  persistence.py         save / load / list saves (./saves)
+  llm.py, mock.py, cli.py  model backends (Claude, local, router), the offline mock, command-line options
+hub/server.py            HTTP server + simulation thread
+hub/static/              index.html, style.css, app.js (no build step)
+tests/                   `python -m unittest`
+```
+**Adding an action:** write a function in `society/actions.py` decorated with `@action("name")`, add the name to
+`ACTIONS` and a one-line description in `system_prompt` in `society/mind.py`.
 
-## Talking to the agents
-The **Talk** panel in the hub lets you message everyone, one agent, or any group (click the name chips, type, press Enter).
-Each addressed agent answers immediately, in character and aware of its current situation, in a chat thread (one extra API
-call per agent per message, on that agent's own model). The exchange is also saved in its history and memory for its next turn.
-No restart needed for new messages.
-
-## Usage counter
-The hub header shows API calls and input/output tokens used this run (hover for a per-model breakdown).
-For a dollar estimate, give prices in USD per million tokens: `python serve.py --price claude-haiku-5-5=IN,OUT --price claude-opus-5-5=IN,OUT`
-(the estimate appears only when every model in use has a price; look up current prices in the Anthropic docs).
+## Cost
+The top bar and ⚙️ Settings show calls and tokens per model. Local models are free. For a dollar estimate start with
+`--price claude-haiku-5-5=IN,OUT` (USD per million tokens, from Anthropic's pricing page). Each agent makes one call per
+day (plus one per message you send it), so more agents and a shorter `--interval` cost more.

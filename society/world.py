@@ -1,20 +1,18 @@
-"""2D tile world: generation, walkability, resources, farming and player-built structures."""
+"""2D tile world: generation, walkability, resources, farming, structures and the explored map."""
 import random
 
 GRASS, WATER, SAND, ROCK, FOOD, SPROUT, CROP = "grass", "water", "sand", "rock", "food", "sprout", "crop"
 TREE, STRUCTURE = "tree", "structure"
 GLYPH = {GRASS: "g", WATER: "~", SAND: ".", ROCK: "#", FOOD: "f", SPROUT: ",", CROP: "*", TREE: "^", STRUCTURE: "&"}
-FOOD_REGROW_TICKS = 150     # wild bushes come back slowly
-TREE_REGROW_TICKS = 300
-GROW_NEEDED = 8.0           # growth points for a planted sprout to ripen
-TEAMWORK_WINDOW = 6         # turns within which a second farmer counts as "working together"
+from .config import FOOD_REGROW_DAYS, GROW_NEEDED, TEAMWORK_WINDOW, TREE_REGROW_DAYS, WORLD_H, WORLD_W
+
 WALKABLE = (GRASS, SAND, FOOD, SPROUT, CROP)
 WALK_WORDS = ("bridge", "path", "road", "floor", "gate", "door", "bed", "bench", "dock", "stair", "plaza", "carpet")
 WATER_OK_WORDS = ("bridge", "dock", "pier", "raft", "path")
 
 
 class World:
-    def __init__(self, width: int = 64, height: int = 40, seed: int | None = None):
+    def __init__(self, width: int = WORLD_W, height: int = WORLD_H, seed: int | None = None):
         self.width, self.height = width, height
         self.rng = random.Random(seed)
         self.tiles = self._generate()
@@ -22,6 +20,9 @@ class World:
         self.plants: dict[tuple[int, int], dict] = {}  # (x, y) -> {"growth": float, "tended": {name: tick}}
         self.structures: dict[tuple[int, int], dict] = {}  # (x, y) -> {kind, text, by, tick, walkable, under}
         self.explored: set[tuple[int, int]] = set()    # tiles any agent has seen (the community's shared map)
+        self._find_irrigated()
+
+    def _find_irrigated(self):
         self.irrigated = {(x, y) for y in range(self.height) for x in range(self.width)
                           if any(self.in_bounds(x + dx, y + dy) and self.tiles[y + dy][x + dx] == WATER
                                  for dx in (-2, -1, 0, 1, 2) for dy in (-2, -1, 0, 1, 2))}
@@ -101,7 +102,7 @@ class World:
         t = self.tiles[y][x]
         if t == FOOD:
             self.tiles[y][x] = GRASS
-            self.regrow[(x, y)] = (tick + FOOD_REGROW_TICKS, FOOD)
+            self.regrow[(x, y)] = (tick + FOOD_REGROW_DAYS, FOOD)
             return {"what": "a wild bush", "food": 1, "seeds": 1 if self.rng.random() < 0.5 else 0, "wood": 0, "stone": 0}
         if t == CROP:
             self.tiles[y][x] = SPROUT
@@ -109,7 +110,7 @@ class World:
             return {"what": "a ripe crop", "food": 3, "seeds": 1, "wood": 0, "stone": 0}
         if t == TREE:
             self.tiles[y][x] = GRASS
-            self.regrow[(x, y)] = (tick + TREE_REGROW_TICKS, TREE)
+            self.regrow[(x, y)] = (tick + TREE_REGROW_DAYS, TREE)
             return {"what": "a tree", "food": 0, "seeds": 0, "wood": 2, "stone": 0}
         if t == ROCK:
             return {"what": "a rock", "food": 0, "seeds": 0, "wood": 0, "stone": 1}
@@ -132,6 +133,14 @@ class World:
         if p["growth"] >= GROW_NEEDED:
             self.tiles[y][x] = CROP
         return p["growth"], partners
+
+    def boost(self, x: int, y: int, amount: float) -> float:
+        """Extra growth (e.g. from a hoe); returns the new growth."""
+        p = self.plants[(x, y)]
+        p["growth"] += amount
+        if p["growth"] >= GROW_NEEDED and self.tiles[y][x] == SPROUT:
+            self.tiles[y][x] = CROP
+        return p["growth"]
 
     def plants_near(self, x: int, y: int, reach: int = 1):
         return [(fx, fy) for fy in range(max(0, y - reach), min(self.height, y + reach + 1))
@@ -235,3 +244,25 @@ class World:
                     row += GLYPH[self.tiles[yy][xx]]
             lines.append(row)
         return "\n".join(lines)
+
+    # ---- saving ----
+    def to_dict(self) -> dict:
+        key = lambda p: f"{p[0]},{p[1]}"
+        return {"width": self.width, "height": self.height, "tiles": self.tiles,
+                "regrow": {key(p): list(v) for p, v in self.regrow.items()},
+                "plants": {key(p): v for p, v in self.plants.items()},
+                "structures": {key(p): v for p, v in self.structures.items()},
+                "explored": sorted(key(p) for p in self.explored)}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "World":
+        pos = lambda k: tuple(int(v) for v in k.split(","))
+        w = cls.__new__(cls)
+        w.width, w.height, w.tiles = d["width"], d["height"], d["tiles"]
+        w.rng = random.Random()
+        w.regrow = {pos(k): tuple(v) for k, v in d["regrow"].items()}
+        w.plants = {pos(k): v for k, v in d["plants"].items()}
+        w.structures = {pos(k): v for k, v in d["structures"].items()}
+        w.explored = {pos(k) for k in d["explored"]}
+        w._find_irrigated()
+        return w

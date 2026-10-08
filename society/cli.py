@@ -1,7 +1,9 @@
 """Shared command-line options and backend setup for serve.py and run.py."""
 import os
 
-from .llm import HAIKU, LOCAL, ClaudeLLM, LocalLLM, MockLLM, RouterLLM, is_local
+from .config import HAIKU, LOCAL
+from .llm import ClaudeLLM, LocalLLM, RouterLLM, is_local
+from .mock import MockLLM
 
 
 def add_llm_args(p):
