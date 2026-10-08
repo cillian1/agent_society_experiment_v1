@@ -127,6 +127,9 @@ class Hub:
                 self.max_wait = max(0.5, float(d["max_wait"]))
             if d.get("step"):
                 self.step_once = True
+            if d.get("gm_model"):
+                sim.gm_model = {"local": "local", "haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5",
+                                "opus": "claude-opus-5-5"}.get(d["gm_model"], d["gm_model"])
             if d.get("authority") in ("leader", "advisor", "observer"):
                 sim.human_authority = d["authority"]
             return {"paused": self.paused, "interval": self.interval, "max_wait": self.max_wait,

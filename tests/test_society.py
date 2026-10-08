@@ -174,6 +174,34 @@ class PlanningTests(unittest.TestCase):
         self.assertTrue(any(a.ambition for a in sim.agents.values()))
 
 
+class GameMasterTests(unittest.TestCase):
+    def test_outcome_is_clamped_and_discoveries_work(self):
+        from society.gm import apply_outcome
+        sim = make()
+        ada = sim.agents["Ada"]
+        food = ada.food
+        verdict = {"success": True, "story": "Ada smokes fish over a fire.", "gain": {"food": 99, "wood": -5},
+                   "cost": {"stone": 50}, "hunger": -500, "health": 500,
+                   "discovery": {"name": "Smoked Fish", "description": "food keeps longer", "effect": "harvest", "amount": 9}}
+        out = apply_outcome(sim, ada, {"action": "attempt", "what": "smoke fish"}, verdict, 1)
+        self.assertIn("DISCOVERY", out)
+        self.assertEqual(ada.food, food + 3)                   # gains capped at 3
+        self.assertEqual(sim.discoveries[0]["amount"], 1)      # effect capped
+        self.assertEqual(sim.tech("harvest"), 1)
+        self.assertIn("Smoked Fish", ada.log[-1] + " ".join(o.log[-1] for o in sim.agents.values()))
+        # a second discovery straight away is refused (cooldown), as is a duplicate name
+        apply_outcome(sim, ada, {"action": "attempt", "what": "x"}, {"success": True, "discovery":
+                      {"name": "Wheel", "effect": "speed", "amount": 1}}, 2)
+        self.assertEqual(len(sim.discoveries), 1)
+
+    def test_unknown_effects_are_ignored(self):
+        from society.gm import apply_outcome
+        sim = make()
+        apply_outcome(sim, sim.agents["Ada"], {"action": "attempt", "what": "fly"},
+                      {"success": True, "discovery": {"name": "Flight", "effect": "teleport", "amount": 5}}, 1)
+        self.assertEqual(sim.discoveries, [])
+
+
 class SaveTests(unittest.TestCase):
     def test_round_trip_and_continue(self):
         sim = make(60)

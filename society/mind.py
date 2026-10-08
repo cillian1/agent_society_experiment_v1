@@ -9,13 +9,17 @@ from .models import Agent
 
 DIRS = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
 ACTIONS = ("go", "move", "gather", "eat", "say", "give", "plant", "tend", "build", "craft", "court", "procreate",
-           "care", "invent", "wait")
+           "care", "invent", "attempt", "wait")
 
 INSPIRATION = [   # one is offered each day to spark creativity
     "Could you name a place - a lake, a hill, your camp - and put up a sign?",
     "Is there a custom, festival or ritual your community could start?",
     "Could you teach a child something, or tell someone a story?",
-    "Is there a tool nobody has made yet that would help?",
+    "Is there a tool nobody has made yet that would help? Attempt to make it.",
+    "What would make winter, hunger or sickness less dangerous? Attempt it - it could become a discovery.",
+    "Could you improve on a discovery someone already made?",
+    "What would a much more advanced society have? Try to invent the first step toward it.",
+    "Could you domesticate an animal, find a new food, or a better way to farm? Attempt it.",
     "Could you build something everyone can use: a meeting place, a storehouse, a bridge, a path?",
     "Is anyone lonely, hungry or struggling? Could you help them?",
     "Could you propose a rule or a fair way to share food?",
@@ -53,7 +57,8 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         "nobody is anybody's family until children are born. You are free to do what you want: explore, "
         "talk, make friends (or enemies), plan together, farm, build, invent customs, tools, jobs and laws. "
         "Be creative and resourceful: try new things, combine ideas, invent, build, organise, specialise - "
-        "a thriving society needs more than gathering food. "
+        "a thriving society needs more than gathering food. In this world ANYTHING is possible: if you can imagine it, "
+        "attempt it. Build on the discoveries others have made. "
         "Talking is valuable: answer people who speak to you, share what you know, ask questions, make deals. "
         "You remember everything that has happened to you. Survival comes first: eat before you get very hungry, "
         "and keep some food on you. Don't repeat or echo what others just said, and don't repeat your own last action "
@@ -92,7 +97,12 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         f'  care    - {{"to": "<name>"}} feed (uses 1 of your food) and look after a baby next to you. Babies can\'t feed '
         f"themselves for their first {BABY_DAYS} days and die if nobody cares for them; then they are children until "
         f"day {ADULT_AGE}, then adults.\n"
-        '  invent  - {"title": "...", "message": "describe your idea, custom, tool or law"} shared with the whole society\n'
+        '  attempt - {"what": "<ANYTHING you can imagine trying>"} e.g. tame a deer, dig a well, brew medicine from herbs, '
+        "build a boat, hold a harvest festival, start a school, smoke fish to preserve it, make a map. A fair game master "
+        "decides what happens - you may gain things, make objects or buildings, or make a DISCOVERY that changes the "
+        "world for everyone. Anything is possible if it's plausible; ambitious ideas may need materials, help or skill.\n"
+        '  invent  - {"title": "...", "message": "describe your idea, custom, tool or law"} shared with the whole society '
+        "(a truly useful idea can become a discovery)\n"
         "  wait\n"
         + HUMAN_NOTES[a.authority] + " (Talking with the Human happens in a separate chat, so it does not use up your turn.)\n"
         "THINK IN PROJECTS, not single steps: with \"next\" you can line up to "
@@ -156,6 +166,10 @@ def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[s
         if not talked:
             add(f"{o.name} is nearby and you haven't talked lately", action="say", to=o.name,
                 message="<something worth saying>")
+    if a.ambition and a.hunger < HUNGER_WARNING:
+        add("take a real step toward your ambition", action="attempt", what=f"<something concrete toward: {a.ambition[:80]}>")
+    elif a.hunger < HUNGER_WARNING and tick % 3 == hash(a.name) % 3:
+        add("try something nobody has tried before", action="attempt", what="<your boldest useful idea>")
     if world.nearest_unexplored(a.x, a.y):
         add("much of the world is still unexplored", action="go", target="explore")
     seen, unique = set(), []
@@ -167,7 +181,8 @@ def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[s
     return unique[:4]
 
 
-def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str]) -> str:
+def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str],
+                discoveries: list[str] = ()) -> str:
     """Everything the agent perceives and remembers this turn."""
     others = {(o.x, o.y): o.symbol for o in agents if o is not a}
     stage = {"child": f"a child - you become an adult at {ADULT_AGE} days", "adult": "an adult",
@@ -266,6 +281,9 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
             "- " + m for m in a.log[max(a.sum_upto, len(a.log) - a.abilities.memory()):]))
     if ideas:
         lines.append("Ideas invented by the society so far:\n" + "\n".join("- " + i for i in ideas))
+    if discoveries:
+        lines.append("Discoveries your society has made (they really work - build on them!):\n"
+                     + "\n".join("- " + d for d in discoveries))
     lines.append("Messages heard this turn:\n" + ("\n".join(a.heard) or "(none)"))
     lines.append("An idea to consider (only if it fits): " + random.Random(hash((a.name, tick))).choice(INSPIRATION))
     recent = [f"t{h['tick']}: {h['action']} -> {h['result']}" for h in a.history[-4:]]
@@ -310,11 +328,11 @@ def parse_action(raw: str, others: list[str], depth: int = 0) -> dict:
     return {"thought": s("thought") or raw[:200].strip(),
             "action": data.get("action") if data.get("action") in ACTIONS else "wait",
             "direction": data.get("direction"), "to": to, "target": s("target") or s("to"), "message": s("message"), "title": s("title"),
-            "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"), "plan": s("plan"),
+            "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"), "plan": s("plan"), "what": s("what"),
             "steps": data.get("steps") if isinstance(data.get("steps"), int) else 1,
             "next": [] if depth else [
                 parse_action(json.dumps(n), others, 1) for n in (data.get("next") or [])[:MAX_QUEUE]
-                if isinstance(n, dict) and n.get("action") in ACTIONS and n.get("action") != "wait"]}
+                if isinstance(n, dict) and n.get("action") in ACTIONS and n.get("action") not in ("wait", "attempt", "invent")]}
 
 
 def failed_action(err: Exception) -> dict:

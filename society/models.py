@@ -172,7 +172,7 @@ class Agent:
 
     # ---- things ----
     def has_tool(self, use: str) -> bool:
-        return any(w in i["name"].lower() for i in self.items for w in TOOLS[use])
+        return any(i.get("use") == use or any(w in i["name"].lower() for w in TOOLS[use]) for i in self.items)
 
     def materials(self) -> int:
         return self.wood + self.stone

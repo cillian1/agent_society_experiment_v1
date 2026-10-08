@@ -22,6 +22,15 @@ class MockLLM(UsageMixin):
         if "SUMMARIZE_MEMORIES" in prompt:
             lines = prompt.split("New memories to fold in:\n", 1)[-1].split("\n\nWrite the updated")[0].splitlines()
             return "I remember: " + " ".join(l.split(": ", 1)[-1] for l in lines)[:600]
+        if "GAME_MASTER" in prompt:
+            ideas = [("Smoked Fish", "hunger"), ("Irrigation Ditches", "growth"), ("Herbal Medicine", "health"),
+                     ("The Wheel", "speed"), ("Stone Tools", "materials"), ("Harvest Festival", "friendship")]
+            name, effect = rng.choice(ideas)
+            ok = rng.random() < 0.7
+            return json.dumps(dict(success=ok, story="After some effort, it " + ("worked!" if ok else "fell apart."),
+                                   gain={"food": 1 if ok else 0}, cost={"wood": 1},
+                                   discovery={"name": name, "description": "a mock discovery", "effect": effect,
+                                              "amount": 1} if ok and rng.random() < 0.4 else None))
         if "REFLECT_ON_LIFE" in prompt:
             goal = rng.choice(["build a village by the lake", "become the best farmer around", "map the whole world",
                                "raise a big family", "make tools for everyone"])
@@ -89,6 +98,9 @@ class MockLLM(UsageMixin):
             d = dict(thought="Time to explore somewhere new.", action="go", target="explore")
         elif m and rng.random() < 0.9:
             d = dict(thought="I can sense food nearby, heading for it.", action="go", to="food")
+        elif rng.random() < 0.06:
+            d = dict(thought="Let me try something new.", action="attempt",
+                     what=rng.choice(["dig a well", "smoke fish to keep it longer", "build a raft", "hold a feast"]))
         elif rng.random() < 0.05:
             d = dict(thought="An idea!", action="invent", title="Shared Harvest",
                      message="Everyone brings extra food to the middle of the map.")

@@ -1,5 +1,5 @@
 """JSON views of a society for the hub: a light state for polling, and full detail for one agent."""
-from .config import ADULT_AGE, LOVE_BOND, OLD_AGE
+from .config import ADULT_AGE, EFFECTS, LOVE_BOND, OLD_AGE
 from .engine import Society, tier_of
 from .models import ABILITY_INFO, Agent
 
@@ -30,6 +30,8 @@ def state(sim: Society, since_event: int = 0) -> dict:
             "chat": sim.chat[-60:],
             "talk": sim.talk[-60:],
             "inventions": sim.inventions[-40:],
+            "discoveries": [{**d, "meaning": EFFECTS[d["effect"]][0].replace("N", str(d["amount"]))} for d in sim.discoveries],
+            "gm_model": sim.gm_model,
             "structures": [{"x": x, "y": y, "kind": s["kind"], "text": s["text"], "by": s["by"], "walkable": s["walkable"]}
                            for (x, y), s in sim.world.structures.items()],
             "explored": sim.world.explored_pct(),

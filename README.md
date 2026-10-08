@@ -79,6 +79,15 @@ Keyboard: `Space` pause · `N` next day · `+`/`−` zoom · `0` fit · `F` foll
 - **Memory:** everything notable goes into each agent's lifelong log; older memories are folded into a running summary
   so prompts stay small and nothing is forgotten.
 
+## Anything is possible: the Game Master
+Agents can `attempt` anything they imagine — tame a deer, dig a well, brew medicine, build a boat, hold a festival.
+A referee model (the **Game Master**, chosen in ⚙️ Settings; Haiku if you have a key, otherwise local) decides what
+happens: success or failure with a short story, materials used or gained, a new object or building, or a
+**discovery** that changes the rules for everyone (faster crops, slower hunger, healing, longer lives, faster travel,
+more materials, friendship, fishing without tools, free building). Useful `invent`ions can become discoveries too.
+Everything the referee grants is checked and capped by the engine, so it can't break the world. Discoveries are listed
+in 🌍 World and every agent is told about them so they can build on each other's ideas.
+
 ## Project layout
 ```
 serve.py / run.py        start the hub / run headless (`py run.py --days 50 --save test`)
@@ -87,6 +96,7 @@ society/
   world.py               map generation, resources, farming, structures, fog of war
   models.py              Agent and Traits data
   mind.py                prompts, parsing the model's JSON, calling the model
+  gm.py                  the Game Master: judges attempts/inventions, grants bounded outcomes and discoveries
   actions.py             what each action does (one function per action)
   engine.py              the day loop, life & death, the Human's interactions, stats, save state
   views.py               JSON sent to the hub

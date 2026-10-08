@@ -472,12 +472,14 @@ async function send() {
 $('send').onclick = send;
 $('msg').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 $('auth').onchange = e => api.post('/api/control', { authority: e.target.value });
+$('gm').onchange = e => api.post('/api/control', { gm_model: e.target.value });
+$('discoveries').onclick = e => { const g = e.target.closest('[data-goto]'); if (g) select(g.dataset.goto); };
 
 // ======================================================================= world feed
 const FILTERS = { all: 'All', talk: '💬 Talk', life: '❤️ Life', making: '🔨 Making', ideas: '💡 Ideas', explore: '🧭 Exploring', survival: '🍎 Food' };
-const KIND_FILTER = { goal: 'ideas', care: 'life', birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
+const KIND_FILTER = { discovery: 'ideas', attempt: 'ideas', goal: 'ideas', care: 'life', birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
   idea: 'ideas', explore: 'explore', food: 'survival', role: 'life', brain: 'life' };
-const KIND_ICON = { goal: '🎯', care: '🍼', birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
+const KIND_ICON = { discovery: '💡', attempt: '✨', goal: '🎯', care: '🍼', birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
 $('filters').innerHTML = Object.entries(FILTERS).map(([k, l]) => `<span class="chip ${k === 'all' ? 'on' : ''}" data-f="${k}">${l}</span>`).join('');
 $('filters').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; S.filter = c.dataset.f; for (const x of $('filters').children) x.classList.toggle('on', x === c); renderFeed(S.st, true); };
 let feedKey = '';
@@ -496,7 +498,7 @@ $('feed').onclick = e => { const g = e.target.closest('[data-goto]'); if (g) sel
 
 // ======================================================================= stats (small multiples, one measure each, shared crosshair)
 const METRICS = [['population', 'Population'], ['hunger', 'Average hunger'], ['food', 'Food carried'], ['explored', 'Explored %'],
-  ['structures', 'Structures'], ['farms', 'Farm plots'], ['objects', 'Objects'], ['ideas', 'Ideas']];
+  ['structures', 'Structures'], ['farms', 'Farm plots'], ['objects', 'Objects'], ['ideas', 'Ideas'], ['discoveries', 'Discoveries']];
 $('charts').innerHTML = METRICS.map(([k, l]) => `<div class="chart"><div class="title"><span>${l}</span><b id="v-${k}">–</b></div><canvas id="c-${k}" data-k="${k}"></canvas></div>`).join('');
 async function loadStats() { S.stats = await api.get('/api/stats'); drawCharts(); }
 function drawCharts() {
@@ -579,7 +581,7 @@ function toast(text, color = 'var(--accent)', name) {
   setTimeout(() => t.remove(), 6000);
   while ($('toasts').children.length > 4) $('toasts').firstChild.remove();
 }
-const TOAST_KINDS = { birth: '#f15bb5', death: '#8590a0', idea: '#ffd93d', brain: '#9085e9' };
+const TOAST_KINDS = { discovery: '#ffd93d', birth: '#f15bb5', death: '#8590a0', idea: '#ffd93d', brain: '#9085e9' };
 function toastNewEvents(events) {
   const key = e => `${e.tick}|${e.agent}|${e.text}`;
   if (S.lastEvent === null) { S.lastEvent = events.length ? key(events[events.length - 1]) : ''; return; }
@@ -623,6 +625,11 @@ async function poll() {
     if ($('to').children.length !== st.agents.length + 1) renderTo();
     if (document.activeElement !== $('auth')) $('auth').value = st.authority;
     renderChat(); renderFeed(st); toastNewEvents(st.events);
+    $('discoveries').innerHTML = st.discoveries.length ? st.discoveries.slice().reverse().map(d => `<div class="disc"><b>${esc(d.name)}</b>
+      <span class="muted">by <span class="who" data-goto="${esc(d.by)}" style="color:${d.color};cursor:pointer">${esc(d.by)}</span>, day ${d.tick}</span>
+      <div>${esc(d.description)}</div><span class="eff">⚡ ${esc(d.meaning)}</span></div>`).join('')
+      : '<p class="muted small">Nothing yet. When an agent attempts or invents something genuinely useful, it shows up here and changes the rules for everyone.</p>';
+    if (document.activeElement !== $('gm')) $('gm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[st.gm_model] || 'local';
     if (S.tab === 'settings') renderUsage();
   } catch (e) { console.error(e); }
   polling = false;

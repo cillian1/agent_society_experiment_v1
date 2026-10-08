@@ -70,3 +70,19 @@ REFLECT_EVERY = 20                    # days between an agent's reflections on i
 AUTOSAVE_EVERY = 25                   # days
 MAX_EVENTS = 300
 MAX_STATS_POINTS = 2000
+
+# ---- the Game Master: judges free-form attempts and turns ideas into real discoveries ----
+DISCOVERY_COOLDOWN = 10               # days between discoveries by the same agent
+EFFECTS = {                           # what a discovery may do: key -> (meaning, max amount per discovery, max total)
+    "harvest": ("+N extra food from every harvest", 1, 2),
+    "growth": ("plants grow +N faster per day", 0.3, 0.8),
+    "hunger": ("hunger rises N% slower", 20, 40),
+    "health": ("+N health recovered per day when fed", 2, 4),
+    "speed": ("+N tiles per move", 1, 2),
+    "materials": ("+N extra wood/stone per gather", 1, 2),
+    "friendship": ("friendships grow N% faster", 40, 100),
+    "lifespan": ("+N days of life", 150, 400),
+    "fishing": ("anyone can fish without a tool", 1, 1),
+    "building": ("building and crafting cost nothing", 1, 1),
+}
+

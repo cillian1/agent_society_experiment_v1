@@ -35,7 +35,7 @@ def move(sim, a, act, tick):
     if (dx, dy) == (0, 0):
         return "invalid direction"
     w, moved, why = sim.world, 0, ""
-    for _ in range(max(1, min(a.abilities.steps(), act.get("steps") or 1))):
+    for _ in range(max(1, min(a.abilities.steps() + int(sim.tech("speed")), act.get("steps") or 1))):
         nx, ny = a.x + dx, a.y + dy
         if not w.in_bounds(nx, ny):
             why = "edge of the world"
@@ -91,7 +91,7 @@ def go(sim, a, act, tick):
         return f"there is no way to reach {label} from here"
     if not path:
         return f"you are already at {label}"
-    steps = path[:a.abilities.steps()]
+    steps = path[:a.abilities.steps() + int(sim.tech("speed"))]
     for x, y in steps:
         a.x, a.y = x, y
         sim.explore(a, tick)
@@ -107,6 +107,10 @@ def gather(sim, a, act, tick):
         if not got:
             continue
         bonus = ""
+        if got["food"]:
+            got["food"] += int(sim.tech("harvest"))
+        if got["wood"] or got["stone"]:
+            got["wood" if got["wood"] else "stone"] += int(sim.tech("materials"))
         if (got["wood"] or got["stone"]) and sim.rng.random() < a.abilities.strength / 12:
             got["wood" if got["wood"] else "stone"] += 1
             bonus = " (strong arms)"
@@ -124,7 +128,7 @@ def gather(sim, a, act, tick):
             sim.event(tick, a, msg, "food")
         return msg
     if w.water_near(a.x, a.y):
-        if not a.has_tool("fish"):
+        if not a.has_tool("fish") and sim.tech("fishing") < 1:
             return "water here, but you need a fishing tool (craft a fishing rod or net) to catch fish"
         if tick - a.last_fish_tick < FISH_COOLDOWN:
             return "the fish aren't biting yet - try again in a moment"
@@ -238,8 +242,9 @@ def tend(sim, a, act, tick):
 
 @action("build")
 def build(sim, a, act, tick):
-    if a.materials() < BUILD_COST:
-        return f"need {BUILD_COST} wood/stone to build (you have {a.wood} wood, {a.stone} stone)"
+    cost = 0 if sim.tech("building") >= 1 else BUILD_COST
+    if a.materials() < cost:
+        return f"need {cost} wood/stone to build (you have {a.wood} wood, {a.stone} stone)"
     title = (act["title"] or "structure")[:40]
     why = "no adjacent tile given"
     for dx, dy in [DIRS[act["direction"]]] if act["direction"] in DIRS else DIRS.values():
@@ -249,7 +254,7 @@ def build(sim, a, act, tick):
             continue
         ok, why = sim.world.build(x, y, title, act["message"][:160], a.name, tick)
         if ok:
-            a.spend_materials(BUILD_COST)
+            a.spend_materials(cost)
             sim.event(tick, a, f'built a {title} at ({x}, {y}){_quote(act["message"])}', "build")
             for o in sim.agents.values():
                 if o is not a and max(abs(o.x - x), abs(o.y - y)) <= HEARING_RADIUS:
@@ -264,13 +269,14 @@ def craft(sim, a, act, tick):
     title = act["title"][:30]
     if not title:
         return "name the object you want to craft (title)"
-    if a.materials() < CRAFT_COST:
-        return f"need {CRAFT_COST} wood/stone to craft (you have {a.wood} wood, {a.stone} stone)"
+    cost = 0 if sim.tech("building") >= 1 else CRAFT_COST
+    if a.materials() < cost:
+        return f"need {cost} wood/stone to craft (you have {a.wood} wood, {a.stone} stone)"
     if len(a.items) >= MAX_ITEMS:
         return f"your hands are full ({MAX_ITEMS} objects)"
     if any(i["name"].lower() == title.lower() for i in a.items):
         return f"you already have a {title}"
-    a.spend_materials(CRAFT_COST)
+    a.spend_materials(cost)
     a.items.append({"name": title, "text": act["message"][:120], "by": a.name, "tick": tick})
     sim.event(tick, a, f"crafted a {title}{_quote(act['message'])}", "craft")
     a.remember(tick, f"I crafted a {title}" + (f" ({act['message']})." if act["message"] else "."))
@@ -292,6 +298,17 @@ def court(sim, a, act, tick):
     return f"courted {o.name} (their feelings toward you: {int(o.bonds.get(a.name, 0))})"
 
 
+@action("attempt")
+def attempt(sim, a, act, tick):
+    """Try anything at all - the Game Master decides what happens."""
+    from .gm import apply_outcome
+    if not (act.get("what") or act.get("message") or act.get("title")):
+        return "say what you want to try (what)"
+    if not act.get("gm"):
+        return "nothing came of it this time"
+    return apply_outcome(sim, a, act, act["gm"], tick)
+
+
 @action("invent")
 def invent(sim, a, act, tick):
     if not act["title"] and not act["message"]:
@@ -303,6 +320,9 @@ def invent(sim, a, act, tick):
     for o in sim.agents.values():
         o.remember(tick, f'I proposed the idea "{idea["title"]}": {idea["text"]}' if o is a
                    else f'{a.name} proposed the idea "{idea["title"]}": {idea["text"]}')
+    if act.get("gm"):                    # the referee may turn the idea into a real discovery
+        from .gm import apply_outcome
+        return f'invented "{idea["title"]}". ' + apply_outcome(sim, a, act, act["gm"], tick)
     return f'invented "{idea["title"]}"'
 
 

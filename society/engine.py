@@ -8,8 +8,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import actions, mind
-from .config import (HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND_DECAY,
+from . import actions, gm, mind
+from .config import (EFFECTS, HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND_DECAY,
                      DEFAULT_MAX_AGENTS, EAT_RELIEF, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
                      MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS)
 from .models import Abilities, Agent, Traits
@@ -69,7 +69,10 @@ class Society:
         self.talk: list[dict] = []                 # agents <-> agents
         self.errors: list[dict] = []
         self.stats: list[dict] = []
+        self.discoveries: list[dict] = []        # ideas the Game Master made real: they change the rules
         self.lock = threading.RLock()
+        info = llm.info() if hasattr(llm, 'info') else {}
+        self.gm_model = HAIKU if info.get('claude') else LOCAL   # the referee for attempts and inventions
         if spawn:
             self._spawn()
             self._record_stats()
@@ -107,7 +110,7 @@ class Society:
         """Advance the clock: the world grows, everyone gets hungrier and older (some may die)."""
         with self.lock:
             self.tick += 1
-            self.world.update(self.tick)
+            self.world.update(self.tick, self.tech('growth'))
             for a in list(self.agents.values()):
                 a.authority = self.human_authority
                 if self._live_a_day(a, self.tick):
@@ -126,7 +129,7 @@ class Society:
             if a.name not in self.agents or a.is_baby(self.tick):     # babies don't think (and cost nothing)
                 return None
             agents = list(self.agents.values())
-            job = {"prompt": mind.observation(a, self.world, agents, self.tick, self._ideas()),
+            job = {"prompt": mind.observation(a, self.world, agents, self.tick, self._ideas(), self._discoveries()),
                    "others": [o.name for o in agents if o is not a], "heard": a.heard}
             a.heard = []
             return job
@@ -174,6 +177,11 @@ class Society:
         except Exception as e:                        # one broken brain must not stop everyone else
             self._error(a, e)
             act = mind.failed_action(e)
+        if act["action"] in ("attempt", "invent"):   # the referee decides what really happens
+            try:
+                act["gm"] = gm.judge(self, a, act)
+            except Exception as e:
+                self._error(a, e, "game master failed")
         if a.needs_compaction():
             try:
                 mind.compact_memory(a, self.llm, self._summary_model())
@@ -218,7 +226,8 @@ class Society:
     def _live_a_day(self, a: Agent, tick: int) -> bool:
         """Hunger, health, fading feelings, old age. False if the agent died."""
         baby = a.is_baby(tick)
-        a.hunger = min(100.0, a.hunger + (BABY_HUNGER_PER_DAY if baby else HUNGER_PER_DAY * a.abilities.hunger_factor()))
+        a.hunger = min(100.0, a.hunger + (BABY_HUNGER_PER_DAY if baby else HUNGER_PER_DAY * a.abilities.hunger_factor()
+                                                  * (1 - self.tech('hunger') / 100)))
         if not baby and a.food > 0 and a.hunger >= INSTINCT_EAT_AT:   # survival instinct: eat without thinking
             a.food -= 1
             a.hunger = max(0.0, a.hunger - EAT_RELIEF)
@@ -233,11 +242,11 @@ class Society:
         if a.hunger >= 100:
             a.health -= BABY_STARVE_DAMAGE if baby else STARVE_DAMAGE
         elif a.hunger < 60:
-            a.health = min(100.0, a.health + 1)
+            a.health = min(100.0, a.health + 1 + self.tech("health"))
         if a.health <= 0:
             self.die(a, tick, "neglect - nobody fed them" if baby else "starvation")
             return False
-        if a.age(tick) >= a.abilities.lifespan() and self.rng.random() < OLD_AGE_DEATH_CHANCE:
+        if a.age(tick) >= a.abilities.lifespan() + self.tech("lifespan") and self.rng.random() < OLD_AGE_DEATH_CHANCE:
             self.die(a, tick, "old age")
             return False
         return True
@@ -274,7 +283,12 @@ class Society:
 
     def bond(self, a: Agent, b: Agent, amount: float):
         """Raise a's feeling toward b (charming people are liked faster)."""
-        a.bonds[b.name] = min(100.0, a.bonds.get(b.name, 0) + amount * b.abilities.charm())
+        a.bonds[b.name] = min(100.0, a.bonds.get(b.name, 0)
+                              + amount * b.abilities.charm() * (1 + self.tech("friendship") / 100))
+
+    def tech(self, effect: str) -> float:
+        """Total bonus the society's discoveries give for one effect (capped)."""
+        return min(EFFECTS[effect][2], sum(d["amount"] for d in self.discoveries if d["effect"] == effect))
 
     def occupied(self, x: int, y: int, ignore: Agent | None = None) -> bool:
         return any(o is not ignore and (o.x, o.y) == (x, y) for o in self.agents.values())
@@ -381,6 +395,10 @@ class Society:
             o.heard.append(f"{a.name} has died ({cause}).")
             o.remember(tick, f"{a.name} died of {cause}" + (" - my own child." if a.name in o.children else "."))
 
+    def _discoveries(self) -> list[str]:
+        return [f"{d['name']} (by {d['by']}): {d['description']} - {EFFECTS[d['effect']][0].replace('N', str(d['amount']))}"
+                for d in self.discoveries]
+
     def _ideas(self) -> list[str]:
         return [f"{i['title']} (by {i['by']}): {i['text']}" for i in self.inventions[-MAX_IDEAS_IN_PROMPT:]]
 
@@ -403,6 +421,7 @@ class Society:
             "hunger": round(sum(a.hunger for a in alive) / n, 1), "food": sum(a.food for a in alive),
             "explored": self.world.explored_pct(), "structures": len(self.world.structures),
             "objects": sum(len(a.items) for a in alive), "ideas": len(self.inventions),
+            "discoveries": len(self.discoveries),
             "farms": sum(t in ("sprout", "crop") for row in self.world.tiles for t in row),
         })
         if len(self.stats) > MAX_STATS_POINTS:             # keep history bounded: halve resolution of the old half
@@ -508,7 +527,7 @@ class Society:
                 "world": self.world.to_dict(),
                 "agents": [a.to_dict() for a in self.agents.values()],
                 "dead": [{"agent": d["agent"].to_dict(), "tick": d["tick"], "cause": d["cause"]} for d in self.dead.values()],
-                "events": self.events, "inventions": self.inventions, "talk": self.talk, "stats": self.stats,
+                "events": self.events, "inventions": self.inventions, "discoveries": self.discoveries, "talk": self.talk, "stats": self.stats,
                 "chat": [c for c in self.chat if not c.get("pending")],
             }
 
@@ -522,6 +541,6 @@ class Society:
         s.tick, s.human_authority = d["tick"], d.get("human_authority", "leader")
         s.dead = {x["agent"]["name"]: {"agent": Agent.from_dict(x["agent"]), "tick": x["tick"], "cause": x["cause"]}
                   for x in d.get("dead", [])}
-        for k in ("events", "inventions", "talk", "stats", "chat"):
+        for k in ("events", "inventions", "talk", "stats", "chat", "discoveries"):
             setattr(s, k, d.get(k, []))
         return s

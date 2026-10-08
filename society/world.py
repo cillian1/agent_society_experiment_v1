@@ -260,7 +260,7 @@ class World:
                    for dx in (-1, 0, 1) for dy in (-1, 0, 1))
 
     # ---- time ----
-    def update(self, tick: int):
+    def update(self, tick: int, growth_bonus: float = 0.0):
         for pos, (t, tile) in list(self.regrow.items()):
             if tick >= t:
                 if self.tiles[pos[1]][pos[0]] == GRASS:
@@ -268,7 +268,7 @@ class World:
                 del self.regrow[pos]
         for (x, y), p in self.plants.items():
             if self.tiles[y][x] == SPROUT:
-                p["growth"] += IRRIGATED_GROWTH_PER_DAY if (x, y) in self.irrigated else PLANT_GROWTH_PER_DAY
+                p["growth"] += (IRRIGATED_GROWTH_PER_DAY if (x, y) in self.irrigated else PLANT_GROWTH_PER_DAY) + growth_bonus
                 if p["growth"] >= GROW_NEEDED:
                     self.tiles[y][x] = CROP
 
