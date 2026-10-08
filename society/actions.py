@@ -2,7 +2,7 @@
 string that the agent sees next turn. Register new actions with @action("name") - and describe them in mind.py."""
 import re
 
-from .config import (BUILD_COST, CARE_RELIEF, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN,
+from .config import (BOND, FRIEND_BOND, BUILD_COST, CARE_RELIEF, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN,
                      GROW_NEEDED, HEARING_RADIUS, LOVE_BOND, MAX_ITEMS)
 from .mind import DIRS
 
@@ -158,8 +158,10 @@ def say(sim, a, act, tick):
         o.heard.append(f'{a.name} says{"" if to == "all" else " to you"}: "{msg}"')
         o.remember(tick, f'{a.name} said to {"everyone nearby" if to == "all" else "me"}: "{msg}"')
         if to == o.name:
-            sim.bond(o, a, 2)
-            sim.bond(a, o, 1)
+            sim.bond(o, a, BOND["talked_to"])
+            sim.bond(a, o, BOND["talked_back"])
+        else:
+            sim.bond(o, a, BOND["heard"])
     a.last_say, a.last_say_to, a.last_say_tick = msg, to, tick
     a.remember(tick, f'I said to {to}: "{msg}"')
     sim.talk.append({"tick": tick, "from": a.name, "to": to, "text": msg, "color": a.color})
@@ -185,13 +187,19 @@ def give(sim, a, act, tick):
         a.food -= 1
         o.food += 1
         what = "food"
-    sim.bond(o, a, 10)
-    sim.bond(a, o, 3)
-    o.heard.append(f"{a.name} gave you {what}.")
-    a.remember(tick, f"I gave {what} to {o.name}.")
-    o.remember(tick, f"{a.name} gave me {what}.")
-    sim.event(tick, a, f"gave {what} to {o.name}", "gift")
-    return f"gave {what} to {o.name}"
+    sim.bond(o, a, BOND["gift"])
+    sim.bond(a, o, BOND["gave"])
+    msg = act["message"]
+    loving = a.bonds.get(o.name, 0) >= FRIEND_BOND or bool(msg)     # a gift for someone dear is a gesture of love
+    if loving:
+        sim.bond(o, a, BOND["love_gift"])
+        a.heart_tick = o.heart_tick = tick
+    words = f' with the words "{msg}"' if msg else ""
+    o.heard.append(f"{a.name} gave you {what}{words}" + (" - a sign of their affection." if loving else "."))
+    a.remember(tick, f"I gave {what} to {o.name}{words}" + (" to show I care." if loving else "."))
+    o.remember(tick, f"{a.name} gave me {what}{words}" + (" - they really care about me." if loving else "."))
+    sim.event(tick, a, f"gave {what} to {o.name}{words}" + (" ❤️" if loving else ""), "love" if loving else "gift")
+    return f"gave {what} to {o.name}{words} (their feelings toward you: {int(o.bonds.get(a.name, 0))})"
 
 
 @action("plant")
@@ -228,8 +236,8 @@ def tend(sim, a, act, tick):
     if partners:
         for n in partners:
             if n in sim.agents:
-                sim.bond(a, sim.agents[n], 1)
-                sim.bond(sim.agents[n], a, 1)
+                sim.bond(a, sim.agents[n], BOND["teamwork"])
+                sim.bond(sim.agents[n], a, BOND["teamwork"])
         sim.event(tick, a, f"and {', '.join(partners)} worked together on the plant at ({x}, {y})", "farm")
         a.remember(tick, f"I farmed together with {', '.join(partners)} at ({x}, {y}).")
     if ripe:
@@ -288,8 +296,8 @@ def court(sim, a, act, tick):
     o = sim.agents.get(act["to"])
     if not o or o is a or a.dist(o) > 3:
         return "nobody by that name close enough to court"
-    sim.bond(o, a, 8 * (0.5 + o.traits.agreeableness))
-    sim.bond(a, o, 3)
+    sim.bond(o, a, BOND["court"] * (0.5 + o.traits.agreeableness))
+    sim.bond(a, o, BOND["courted"])
     a.heart_tick = o.heart_tick = tick
     o.heard.append(f"{a.name} is courting you{_quote(act['message']) or '.'}")
     a.remember(tick, f"I courted {o.name}.")
@@ -335,8 +343,8 @@ def care(sim, a, act, tick):
         if not babies:
             return "nobody next to you to care for"
         o = sim.agents[babies[0]]
-    sim.bond(o, a, 6)
-    sim.bond(a, o, 4)
+    sim.bond(o, a, BOND["cared_for"])
+    sim.bond(a, o, BOND["carer"])
     if a.food > 0 and o.hunger >= 20:
         a.food -= 1
         o.hunger = max(0.0, o.hunger - CARE_RELIEF)

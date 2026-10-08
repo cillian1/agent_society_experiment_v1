@@ -83,7 +83,9 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         "(stone); next to water with a fishing tool you catch fish (food)\n"
         "  eat     - eat one carried food (hunger -40)\n"
         '  say     - {"to": "<name or all>", "message": "..."} heard within 8 tiles; talk to people!\n'
-        '  give    - {"to": "<name>", "title": "<object name, optional>"} hand one food (or that object) to an adjacent agent\n'
+        '  give    - {"to": "<name>", "title": "<object, optional>", "message": "<optional words>"} hand one food (or that '
+        "object) to an adjacent agent. A gift - especially with a few kind words - is a lovely way to show friendship "
+        "or love and wins hearts fast\n"
         '  plant   - {"direction": "..."} put a carried seed into an adjacent grass tile\n'
         "  tend    - speed up a young plant within reach (helps once every few days; plants also grow on their own)\n"
         f'  build   - {{"direction": "...", "title": "<house, wall, bridge, sign, anything>", "message": "<description or sign text>"}} '
@@ -92,6 +94,8 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         f"{CRAFT_COST} wood/stone; you carry it (max {MAX_ITEMS}). Objects matter: an axe/hatchet gets extra wood, a "
         "pickaxe/hammer extra stone, a hoe/shovel/rake speeds up plants, a fishing rod/net/spear catches fish from water.\n"
         '  court   - {"to": "<name>", "message": "..."} show affection to an agent within 3 tiles\n'
+        "Relationships grow from talking to someone directly, spending time together, gifts, courting, caring and "
+        f"working together; at {FRIEND_BOND}+ you are friends, at {LOVE_BOND}+ in love.\n"
         f'  procreate - {{"to": "<name>", "baby_name": "..."}} a woman and a man who love each other (mutual love >= {LOVE_BOND}, '
         f"adults, nearby, each pays {CHILD_FOOD_COST} food) both choose it; she is then pregnant for {PREGNANCY_DAYS} days\n"
         f'  care    - {{"to": "<name>"}} feed (uses 1 of your food) and look after a baby next to you. Babies can\'t feed '

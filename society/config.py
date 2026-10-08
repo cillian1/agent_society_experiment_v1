@@ -35,7 +35,17 @@ OLD_AGE_DEATH_CHANCE = 0.005          # per day once past one's lifespan
 # ---- relationships & family ----
 LOVE_BOND = 50
 FRIEND_BOND = 25
-BOND_DECAY = 0.998
+BOND_DECAY = 0.999                    # feelings fade slowly without contact
+BOND = {                              # how much each kind of contact raises feelings (before charisma & discoveries)
+    "talked_to": 5, "talked_back": 3,     # someone speaks to you directly / you speak to them
+    "heard": 1,                           # you hear someone talking to everyone
+    "gift": 15, "gave": 6,                # receiving / giving food or an object
+    "love_gift": 12,                      # extra when a gift is a gesture of love (fond of them, or with a message)
+    "court": 14, "courted": 5,            # being courted (scaled by your agreeableness) / courting
+    "cared_for": 10, "carer": 8,
+    "teamwork": 3,                        # farming the same plant
+    "together": 0.6,                      # each day spent within 2 tiles of each other
+}
 CHILD_FOOD_COST = 2                   # each parent pays this at conception
 CHILD_COOLDOWN = 50
 PREGNANCY_DAYS = 10
