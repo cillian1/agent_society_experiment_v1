@@ -43,7 +43,9 @@ const TW = 40, TH = 20, TOP = 80, PAD = 24;
 const cv = $('map'), ctx = cv.getContext('2d');
 const bg = document.createElement('canvas'), bctx = bg.getContext('2d');
 const fogc = document.createElement('canvas'), fctx = fogc.getContext('2d');
-const FOG_SCALE = 4;
+const FOG_SCALE = 4, BG_SCALE = 2, SPRITE_SCALE = 4;   // ground cache and sprites are kept sharper than 1:1
+let WW = 0, WH = 0;                                   // world size in world pixels; the canvas itself is screen-sized
+S.cam = { x: 0, y: 0 };
 const scroller = $('mapscroll');
 const drawn = [];
 const rnd = (x, y, k = 0) => { let h = (x * 374761393 + y * 668265263 + k * 2147483647) >>> 0; h = ((h ^ (h >>> 13)) * 1274126177) >>> 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
@@ -67,13 +69,13 @@ const shade = (hex, k) => {                                          // lighten 
 // ---- ground
 const GROUND = { grass: '#4f9a47', food: '#4f9a47', tree: '#478f40', sprout: '#7a5634', crop: '#7a5634', water: '#2f6fb5',
   sand: '#d8c68a', rock: '#8c8a80', structure: '#8f7a55' };
-function paintTile(x, y) {
-  const t = S.tiles[y][x], c = bctx, v = rnd(x, y), base = GROUND[t] || '#444';
+function paintTile(x, y, c = bctx) {
+  const t = S.tiles[y][x], v = rnd(x, y), base = GROUND[t] || '#444';
   const col = shade(base, (v - .5) * .12);
-  diamond(c, x, y); c.fillStyle = col; c.strokeStyle = col; c.lineWidth = 1; c.fill(); c.stroke();
+  diamond(c, x, y); c.fillStyle = col; c.strokeStyle = col; c.lineWidth = .7; c.fill(); c.stroke();
   const [cx, cy] = ground(x, y);
   if (t === 'grass' || t === 'food' || t === 'tree') {
-    c.strokeStyle = 'rgba(25,80,30,.5)'; c.lineWidth = 1;
+    c.strokeStyle = 'rgba(25,80,30,.32)'; c.lineWidth = .8;
     for (let i = 0; i < 3; i++) { const a = cx + (rnd(x, y, i + 1) - .5) * TW * .5, b = cy + (rnd(x, y, i + 9) - .5) * TH * .45; c.beginPath(); c.moveTo(a, b); c.lineTo(a - 1.5, b - 3); c.moveTo(a, b); c.lineTo(a + 1.5, b - 3); c.stroke(); }
     if (t === 'grass' && rnd(x, y, 20) > .92) { c.fillStyle = rnd(x, y, 21) > .5 ? '#fff3a0' : '#f8c8e0'; c.beginPath(); c.arc(cx + (rnd(x, y, 22) - .5) * TW * .4, cy + (rnd(x, y, 23) - .5) * TH * .4, 1.8, 0, 7); c.fill(); }
   }
@@ -85,6 +87,10 @@ function paintTile(x, y) {
   }
   if (t === 'water') {
     c.fillStyle = 'rgba(10,40,90,.18)'; diamond(c, x + .15, y + .15, .7, .7); c.fill();
+    const bank = (a, b) => { c.fillStyle = '#6e5a3c'; c.beginPath(); c.moveTo(...a); c.lineTo(...b); c.lineTo(b[0], b[1] + 5); c.lineTo(a[0], a[1] + 5); c.closePath(); c.fill(); };
+    const up = S.tiles[y - 1]?.[x], left = S.tiles[y]?.[x - 1];       // land behind the water looks raised
+    if (up && up !== 'water') bank(iso(x, y), iso(x + 1, y));
+    if (left && left !== 'water') bank(iso(x, y + 1), iso(x, y));
     c.strokeStyle = 'rgba(220,240,255,.55)'; c.lineWidth = 2;                          // foam where water meets land
     const p = [iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)];
     [[0, -1, 0, 1], [1, 0, 1, 2], [0, 1, 2, 3], [-1, 0, 3, 0]].forEach(([dx, dy, i, j]) => {
@@ -111,7 +117,10 @@ function syncTiles(next) {
 // ---- props (cached sprites, anchored at the tile centre)
 const SPR = {};
 function sprite(key, w, h, draw) {
-  if (!SPR[key]) { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h); SPR[key] = c; }
+  if (!SPR[key]) {
+    const c = document.createElement('canvas'); c.width = w * SPRITE_SCALE; c.height = h * SPRITE_SCALE;
+    const g = c.getContext('2d'); g.scale(SPRITE_SCALE, SPRITE_SCALE); draw(g, w, h); SPR[key] = c;
+  }
   return SPR[key];
 }
 const blob = (c, x, y, r, col) => { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); };
@@ -150,7 +159,7 @@ const PROP = {
 function drawProp(p, fade) {
   const P = PROP[p.t], img = sprite(p.t + p.v, P.w, P.h, c => P.draw(c, p.v)), [gx, gy] = ground(p.x, p.y);
   if (fade) ctx.globalAlpha = .45;
-  ctx.drawImage(img, gx - P.ax, gy - P.ay);
+  ctx.drawImage(img, gx - P.ax, gy - P.ay, P.w, P.h);
   ctx.globalAlpha = 1;
 }
 
@@ -249,8 +258,8 @@ function drawBuilding(s, t) {
   ctx.globalAlpha = 1;
 }
 function buildingOverlay(s) {
-  const [cx, cy] = iso(s.x + s.w / 2, s.y + s.h / 2), small = s.w * s.h === 1 && (s.func === 'fire' || s.func === 'well');
-  const top = cy - (!s.done ? wallH(s) + 10 : isFlat(s) ? 6 : small ? 34 : wallH(s) + 14 + 4 * Math.max(s.w, s.h));
+  const [wx, wy] = iso(s.x + s.w / 2, s.y + s.h / 2), small = s.w * s.h === 1 && (s.func === 'fire' || s.func === 'well');
+  const [cx, top] = scr(wx, wy - (!s.done ? wallH(s) + 10 : isFlat(s) ? 6 : small ? 34 : wallH(s) + 14 + 4 * Math.max(s.w, s.h)));
   if (!s.done) {
     const p = s.work ? Math.min(1, s.progress / s.work) : 0;
     bar(cx, top - 8, 44, p, '#ffd93d');
@@ -267,11 +276,28 @@ function bar(x, y, w, frac, color) {
 const SKIN = ['#f1c7a3', '#e0ac85', '#c68863', '#8d5a3b', '#f5d6b8', '#b07850'];
 const HAIR = ['#2b1d14', '#5a3a1e', '#a0522d', '#d9b26a', '#1a1a1a', '#7a4a2a'];
 const scaleOf = a => a.stage === 'baby' ? .55 : a.adult ? 1 : .75;
-function pos(a) {                       // smooth movement; agents sharing a tile fan out a little
-  const d = S.disp[a.name] || (S.disp[a.name] = { x: a.x, y: a.y });
-  const [ox, oy] = S.offset[a.name] || [0, 0];
-  d.moving = Math.hypot(a.x + ox - d.x, a.y + oy - d.y) > .03;
-  d.x += (a.x + ox - d.x) * .12; d.y += (a.y + oy - d.y) * .12;
+function pos(a) {
+  // Walk at a steady pace, timed so a move finishes about when the next hour starts; when staying put, shuffle
+  // around a little (people don't stand frozen while they work, chat or wait).
+  const d = S.disp[a.name] || (S.disp[a.name] = { x: a.x, y: a.y, wx: 0, wy: 0, next: 0 });
+  const [ox, oy] = S.offset[a.name] || [0, 0], now = performance.now() / 1000;
+  const still = a.asleep || a.stage === 'baby';
+  if (d.tx !== a.x || d.ty !== a.y) { d.tx = a.x; d.ty = a.y; d.wx = d.wy = 0; d.next = now + 1 + Math.random() * 2; }
+  else if (!still && now > d.next) {                  // a small wander within the tile
+    const r = a.inside ? .35 : .22, ang = Math.random() * 6.283;
+    d.wx = Math.cos(ang) * r * Math.random(); d.wy = Math.sin(ang) * r * Math.random();
+    d.next = now + 1.5 + Math.random() * 3;
+  }
+  const tx = a.x + ox + d.wx, ty = a.y + oy + d.wy, dist = Math.hypot(tx - d.x, ty - d.y);
+  if (dist > 6) { d.x = tx; d.y = ty; d.moving = false; return d; }       // teleports (e.g. loading a save)
+  const hour = Math.max(.35, Math.min(4, S.st?.day_seconds || S.st?.interval || 1));
+  const speed = Math.max(.5, d.leg ? d.leg / (hour * .85) : 1);           // tiles per second
+  if (dist > .01) {
+    if (!d.moving || dist > (d.leg || 0)) d.leg = dist;                    // length of the current walk
+    const k = Math.min(1, speed * S.dt / dist);
+    d.x += (tx - d.x) * k; d.y += (ty - d.y) * k;
+  }
+  d.moving = dist > .03; if (!d.moving) d.leg = 0;
   return d;
 }
 function spread(agents) {
@@ -297,7 +323,8 @@ function drawPerson(a, t) {
     blob(ctx, gx - 9 * s, gy - 5 * s, 4.5 * s, skin); blob(ctx, gx - 10 * s, gy - 7 * s, 3.5 * s, hair);
     head = [gx, gy - 16 * s];
   } else {
-    const ph = h % 7, step = d.moving ? Math.sin(t * 11 + ph) : 0, bob = Math.abs(step) * 1.8 * s;
+    const busy = !d.moving && /^(gather|work|tend|build|plant|craft|care)/.test(a.doing || '');
+    const ph = h % 7, step = d.moving ? Math.sin(t * 9 + ph) : 0, bob = Math.abs(step) * 1.8 * s + (busy ? (Math.sin(t * 7 + ph) + 1) * 1.4 * s : 0);
     ctx.strokeStyle = '#2a2a35'; ctx.lineWidth = 2.6 * s; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(gx - 2.5 * s, gy - 8 * s - bob); ctx.lineTo(gx - 2.5 * s + step * 2.5 * s, gy - 1);
     ctx.moveTo(gx + 2.5 * s, gy - 8 * s - bob); ctx.lineTo(gx + 2.5 * s - step * 2.5 * s, gy - 1); ctx.stroke(); ctx.lineCap = 'butt';
@@ -318,7 +345,7 @@ function drawPerson(a, t) {
 }
 function personOverlay(a) {
   const H = S.head[a.name]; if (!H) return;
-  const { x, y, gy, s } = H;
+  const [x, y] = scr(H.x, H.y), gy = scr(H.x, H.gy)[1];
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   let top = y - 4;
   if (a.task) { bar(x, top - 4, 28, Math.min(1, a.task.progress / a.task.total), '#ffd93d'); top -= 8; }
@@ -336,14 +363,14 @@ function personOverlay(a) {
 function drawTalkLine(a) {
   const d = S.disp[a.name], tg = a.say_to && a.say_to !== 'all' && a.say_to !== 'Human' ? S.disp[a.say_to] : null;
   if (!d || !tg) return;
-  const [x1, y1] = ground(d.x, d.y), [x2, y2] = ground(tg.x, tg.y);
+  const [x1, y1] = scr(...ground(d.x, d.y)), [x2, y2] = scr(...ground(tg.x, tg.y));
   ctx.strokeStyle = a.color; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); ctx.globalAlpha = .7;
-  ctx.beginPath(); ctx.moveTo(x1, y1 - 12); ctx.lineTo(x2, y2 - 12); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x1, y1 - 12 * S.zoom); ctx.lineTo(x2, y2 - 12 * S.zoom); ctx.stroke();
   ctx.setLineDash([]); ctx.globalAlpha = 1;
 }
 function drawBubble(a) {
   const H = S.head[a.name]; if (!H) return;
-  const px = H.x, py = H.y - 12;
+  const [px, hy] = scr(H.x, H.y), py = hy - 12;
   const label = `${a.name} → ${a.say_to === 'all' ? 'everyone' : a.say_to === 'Human' ? 'you' : a.say_to}`;
   const txt = a.say.length > 90 ? a.say.slice(0, 88) + '…' : a.say;
   ctx.font = '12px system-ui';
@@ -351,7 +378,7 @@ function drawBubble(a) {
   for (const w of txt.split(' ')) { if (ctx.measureText(cur + ' ' + w).width > 200 && cur) { lines.push(cur); cur = w; } else cur = cur ? cur + ' ' + w : w; }
   lines.push(cur);
   const w = Math.max(...lines.map(l => ctx.measureText(l).width), ctx.measureText(label).width) + 16, h = lines.length * 15 + 22;
-  const bx = Math.min(Math.max(px - w / 2, 3), cv.width - w - 3), by = Math.max(3, py - h - 8);
+  const bx = Math.min(Math.max(px - w / 2, 3), scroller.clientWidth - w - 3), by = Math.max(46, py - h - 8);
   ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.beginPath(); ctx.roundRect(bx, by, w, h, 8); ctx.fill();   // see-through
   ctx.globalAlpha = .7; ctx.strokeStyle = a.color; ctx.lineWidth = 2; ctx.stroke(); ctx.globalAlpha = 1;
   ctx.beginPath(); ctx.moveTo(px - 6, by + h); ctx.lineTo(px, by + h + 8); ctx.lineTo(px + 6, by + h); ctx.fill();
@@ -381,23 +408,41 @@ function syncFog(fog) {
 function darkness(h) {               // 0 = full day, ~.5 = deep night
   return h >= 22 || h < 5 ? .5 : h === 5 ? .38 : h === 6 ? .22 : h === 7 ? .08 : h < 18 ? 0 : h === 18 ? .08 : h === 19 ? .18 : h === 20 ? .3 : .42;
 }
-function view() {                     // the part of the canvas on screen (canvas pixels), for culling
+const scr = (wx, wy) => [(wx - S.cam.x) * S.zoom, (wy - S.cam.y) * S.zoom];   // world px -> screen px
+function view() {                     // the part of the world on screen (world pixels), for culling
   const z = S.zoom, m = 90;
-  return { x0: scroller.scrollLeft / z - m, y0: scroller.scrollTop / z - m, x1: (scroller.scrollLeft + scroller.clientWidth) / z + m, y1: (scroller.scrollTop + scroller.clientHeight) / z + m + 60 };
+  return { x0: S.cam.x - m, y0: S.cam.y - m, x1: S.cam.x + scroller.clientWidth / z + m, y1: S.cam.y + scroller.clientHeight / z + m + 60 };
 }
+function resize() {
+  const dpr = devicePixelRatio || 1, w = scroller.clientWidth, h = scroller.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+}
+let lastFrame = 0;
 function drawFrame(now) {
-  const t = now / 1000, st = S.st, V = view();
-  const vx = Math.max(0, V.x0), vy = Math.max(0, V.y0), vw = Math.min(cv.width, V.x1) - vx, vh = Math.min(cv.height, V.y1) - vy;
-  ctx.fillStyle = '#0b1220'; ctx.fillRect(vx, vy, vw, vh);
-  if (vw > 0 && vh > 0) ctx.drawImage(bg, vx, vy, vw, vh, vx, vy, vw, vh);
+  const t = now / 1000, st = S.st, dpr = devicePixelRatio || 1;
+  S.dt = Math.min(.1, (now - lastFrame) / 1000 || .016); lastFrame = now;
+  resize();
+  if (S.camTo) {                                       // smooth camera moves (find / follow)
+    S.cam.x += (S.camTo.x - S.cam.x) * .14; S.cam.y += (S.camTo.y - S.cam.y) * .14;
+    if (Math.hypot(S.camTo.x - S.cam.x, S.camTo.y - S.cam.y) < .5) S.camTo = null;
+  }
+  const V = view(), k = dpr * S.zoom;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0b1220'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(k, 0, 0, k, -S.cam.x * k, -S.cam.y * k);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  const vx = Math.max(0, V.x0), vy = Math.max(0, V.y0), vw = Math.min(WW, V.x1) - vx, vh = Math.min(WH, V.y1) - vy;
+  const vis = (x, y) => { const [a, b] = ground(x, y); return a > V.x0 && a < V.x1 && b > V.y0 && b < V.y1; };
+  if (vw > 0 && vh > 0) {
+    if (k <= BG_SCALE + .01) ctx.drawImage(bg, vx * BG_SCALE, vy * BG_SCALE, vw * BG_SCALE, vh * BG_SCALE, vx, vy, vw, vh);
+    else for (let y = 0; y < S.H; y++) for (let x = 0; x < S.W; x++) if (vis(x, y)) paintTile(x, y, ctx);   // close up: draw sharp
+  }
   if (st) {
-    const vis = (x, y) => { const [a, b] = ground(x, y); return a > V.x0 && a < V.x1 && b > V.y0 && b < V.y1; };
     // water shimmer
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.3;
     for (const w of S.water || []) {
       if (!vis(w.x, w.y)) continue;
-      const k = (Math.sin(t * 1.6 + w.ph) + 1) / 2, [a, b] = ground(w.x, w.y), o = Math.sin(t * .8 + w.ph) * 3;
-      ctx.globalAlpha = k * .35; ctx.beginPath(); ctx.moveTo(a - 6 + o, b); ctx.quadraticCurveTo(a + o, b - 2.5, a + 6 + o, b); ctx.stroke();
+      const q = (Math.sin(t * 1.6 + w.ph) + 1) / 2, [a, b] = ground(w.x, w.y), o = Math.sin(t * .8 + w.ph) * 3;
+      ctx.globalAlpha = q * .35; ctx.beginPath(); ctx.moveTo(a - 6 + o, b); ctx.quadraticCurveTo(a + o, b - 2.5, a + 6 + o, b); ctx.stroke();
     }
     ctx.globalAlpha = 1;
     // everything that stands up, back to front
@@ -417,23 +462,24 @@ function drawFrame(now) {
     for (const g of st.dead) if (vis(g.x, g.y)) items.push([g.x + g.y + .2, () => drawGrave(g)]);
     items.sort((p, q) => p[0] - q[0]).forEach(([, f]) => f());
     // fog of war
-    if ($('fog').checked && st.fog) { syncFog(st.fog); ctx.globalAlpha = .62; ctx.drawImage(fogc, vx / FOG_SCALE, vy / FOG_SCALE, vw / FOG_SCALE, vh / FOG_SCALE, vx, vy, vw, vh); ctx.globalAlpha = 1; }
+    if ($('fog').checked && st.fog && vw > 0 && vh > 0) { syncFog(st.fog); ctx.globalAlpha = .62; ctx.drawImage(fogc, vx / FOG_SCALE, vy / FOG_SCALE, vw / FOG_SCALE, vh / FOG_SCALE, vx, vy, vw, vh); ctx.globalAlpha = 1; }
     // time of day: darken, warm dawn/dusk, and let fires and homes glow
     const hour = st.time?.hour ?? 12, target = darkness(hour);
     S.dark += (target - S.dark) * .03;
     if (S.dark > .01) {
-      ctx.fillStyle = `rgba(12,18,52,${S.dark})`; ctx.fillRect(vx, vy, vw, vh);
-      if (hour === 6 || hour === 7 || hour === 18 || hour === 19) { ctx.fillStyle = 'rgba(255,140,60,.08)'; ctx.fillRect(vx, vy, vw, vh); }
+      ctx.fillStyle = `rgba(12,18,52,${S.dark})`; ctx.fillRect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0);
+      if (hour === 6 || hour === 7 || hour === 18 || hour === 19) { ctx.fillStyle = 'rgba(255,140,60,.08)'; ctx.fillRect(V.x0, V.y0, V.x1 - V.x0, V.y1 - V.y0); }
       ctx.globalCompositeOperation = 'lighter';
       for (const s of st.structures) {
         if (!s.done || (s.func !== 'fire' && s.func !== 'home')) continue;
-        const [cx, cy] = iso(s.x + s.w / 2, s.y + s.h / 2), r = s.func === 'fire' ? 70 : 40, k = S.dark * (s.func === 'fire' ? .9 + Math.sin(t * 7) * .08 : .5);
-        const g = ctx.createRadialGradient(cx, cy - 8, 2, cx, cy - 8, r); g.addColorStop(0, `rgba(255,170,70,${k * .7})`); g.addColorStop(1, 'rgba(255,170,70,0)');
+        const [cx, cy] = iso(s.x + s.w / 2, s.y + s.h / 2), r = s.func === 'fire' ? 70 : 40, q = S.dark * (s.func === 'fire' ? .9 + Math.sin(t * 7) * .08 : .5);
+        const g = ctx.createRadialGradient(cx, cy - 8, 2, cx, cy - 8, r); g.addColorStop(0, `rgba(255,170,70,${q * .7})`); g.addColorStop(1, 'rgba(255,170,70,0)');
         ctx.fillStyle = g; ctx.fillRect(cx - r, cy - 8 - r, r * 2, r * 2);
       }
       ctx.globalCompositeOperation = 'source-over';
     }
-    // labels on top, always readable
+    // labels on top in screen pixels: the same readable size at every zoom
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const s of st.structures) if (vis(s.x + s.w / 2, s.y + s.h / 2)) buildingOverlay(s);
     for (const a of S.agents) personOverlay(a);
@@ -445,29 +491,36 @@ function drawFrame(now) {
   requestAnimationFrame(drawFrame);
 }
 
-// zoom & pan
+// zoom & pan: a camera over the world
+function clampCam(c = S.cam) {
+  const vw = scroller.clientWidth / S.zoom, vh = scroller.clientHeight / S.zoom;
+  c.x = Math.max(-vw / 2, Math.min(WW - vw / 2, c.x)); c.y = Math.max(-vh / 2, Math.min(WH - vh / 2, c.y));
+  return c;
+}
 function setZoom(z, cx, cy) {
-  const old = S.zoom; S.zoom = Math.min(2.5, Math.max(.2, z));
-  const r = scroller.getBoundingClientRect();
-  cx = cx ?? r.width / 2; cy = cy ?? r.height / 2;
-  const wx = (scroller.scrollLeft + cx) / old, wy = (scroller.scrollTop + cy) / old;     // canvas px under the pointer
-  cv.style.width = Math.round(cv.width * S.zoom) + 'px'; cv.style.height = Math.round(cv.height * S.zoom) + 'px';
-  scroller.scrollLeft = wx * S.zoom - cx; scroller.scrollTop = wy * S.zoom - cy;
+  const old = S.zoom; S.zoom = Math.min(4, Math.max(.2, z));
+  cx = cx ?? scroller.clientWidth / 2; cy = cy ?? scroller.clientHeight / 2;
+  const wx = S.cam.x + cx / old, wy = S.cam.y + cy / old;                 // keep the world point under the pointer
+  S.cam.x = wx - cx / S.zoom; S.cam.y = wy - cy / S.zoom; S.camTo = null; clampCam();
   store.set('zoom', S.zoom);
 }
-const fitZoom = () => setZoom(Math.min(scroller.clientWidth / cv.width, scroller.clientHeight / cv.height));
+function lookAt(wx, wy, smooth = true) {
+  const c = clampCam({ x: wx - scroller.clientWidth / 2 / S.zoom, y: wy - scroller.clientHeight / 2 / S.zoom });
+  if (smooth) S.camTo = c; else { S.cam = c; S.camTo = null; }
+}
+const fitZoom = () => { setZoom(Math.min(scroller.clientWidth / WW, scroller.clientHeight / WH)); lookAt(WW / 2, WH / 2, false); };
 function centerOn(name, smooth = true) {
   const a = S.agents.find(x => x.name === name); if (!a) return;
   const d = S.disp[a.name] || a, [px, py] = ground(d.x, d.y);
-  scroller.scrollTo({ left: px * S.zoom - scroller.clientWidth / 2, top: (py - 15) * S.zoom - scroller.clientHeight / 2, behavior: smooth ? 'smooth' : 'auto' });
+  lookAt(px, py - 15, smooth);
 }
-function canvasAt(e) {
+function canvasAt(e) {                 // pointer -> world pixels
   const r = cv.getBoundingClientRect();
-  return { px: (e.clientX - r.left) / r.width * cv.width, py: (e.clientY - r.top) / r.height * cv.height };
+  return { px: S.cam.x + (e.clientX - r.left) / S.zoom, py: S.cam.y + (e.clientY - r.top) / S.zoom };
 }
-function agentAt(px, py, lim = 18) {   // nearest agent to a canvas point, measured to the middle of the body
+function agentAt(px, py, lim = 22) {   // nearest agent to a world point, within `lim` screen pixels of the body
   let best = null, bd = lim;
-  for (const a of S.agents) { const H = S.head[a.name]; if (!H) continue; const k = Math.hypot(H.x - px, (H.y + H.gy) / 2 - py); if (k < bd) { bd = k; best = a; } }
+  for (const a of S.agents) { const H = S.head[a.name]; if (!H) continue; const k = Math.hypot(H.x - px, (H.y + H.gy) / 2 - py) * S.zoom; if (k < bd) { bd = k; best = a; } }
   return best;
 }
 scroller.addEventListener('wheel', e => {
@@ -476,12 +529,12 @@ scroller.addEventListener('wheel', e => {
   setZoom(S.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - r.left, e.clientY - r.top);
 }, { passive: false });
 let drag = null;
-scroller.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, sl: scroller.scrollLeft, st: scroller.scrollTop, moved: false }; });
+scroller.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, cx: S.cam.x, cy: S.cam.y, moved: false }; });
 window.addEventListener('pointermove', e => {
   if (drag) {
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-    if (Math.abs(dx) + Math.abs(dy) > 4) { drag.moved = true; scroller.classList.add('dragging'); $('follow').checked = false; }
-    if (drag.moved) { scroller.scrollLeft = drag.sl - dx; scroller.scrollTop = drag.st - dy; }
+    if (Math.abs(dx) + Math.abs(dy) > 4) { drag.moved = true; scroller.classList.add('dragging'); $('follow').checked = false; S.camTo = null; }
+    if (drag.moved) { S.cam.x = drag.cx - dx / S.zoom; S.cam.y = drag.cy - dy / S.zoom; clampCam(); }
   }
 });
 window.addEventListener('pointerup', e => {
@@ -497,8 +550,8 @@ cv.addEventListener('mousemove', e => {
     food: 'Berry bush — food (slow to regrow)', sprout: 'Young plant — grows by itself', crop: 'Ripe crop — 3 food + a seed', structure: 'Built' };
   const unseen = st.fog && st.fog[y][x] === '0';
   let html = `<div class="muted">(${x}, ${y}) · ${unseen ? 'Unexplored' : names[t]}</div>`;
-  const a = agentAt(px, py, 16);
-  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${SEX[a.sex]} ${a.stage} ${extras(a)} · ${esc(a.age_text)} old · hunger ${a.hunger} · ${a.food} food${a.pregnant ? ` · due ${ts(a.due)}` : ''}</div><div class="muted">${a.asleep ? '💤 asleep' : esc(a.doing)}</div>` + html;
+  const a = agentAt(px, py, 18);
+  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${SEX[a.sex]} ${a.stage} ${extras(a)} · ${esc(a.age_text)} old · hunger ${a.hunger} · ${a.food} food${a.pregnant ? ` · due ${ts(a.due)}` : ''}</div><div class="muted">${a.dreaming ? '🌙 dreaming' : a.asleep ? '💤 asleep' : esc(a.doing)}</div>` + html;
   const s = st.structures.find(q => x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h);
   if (s) html += `<div>${iconFor(s.kind, s.func)} <b>${esc(s.kind)}</b> <span class="muted">${s.w}×${s.h} · by ${esc(s.by)}</span>${!s.done ? `<div style="color:var(--gold)">🏗️ under construction: ${s.progress}/${s.work} hours of work</div>` : ''}${s.function ? `<div style="color:var(--gold)">⚙️ ${esc(s.function)}</div>` : '<div class="muted">decorative</div>'}${s.stock && Object.keys(s.stock).length ? `<div>📦 ${Object.entries(s.stock).map(([k, v]) => `${v} ${k}`).join(' · ')}</div>` : ''}${s.text ? `<div class="muted">“${esc(s.text)}”</div>` : ''}</div>`;
   const g = st.dead.find(q => q.x === x && q.y === y);
@@ -907,7 +960,7 @@ async function poll() {
     if (S.centerOnce && st.agents.length) {          // first visit: look at where the people are
       S.centerOnce = false;
       const [px, py] = ground(st.agents.reduce((n, a) => n + a.x, 0) / st.agents.length, st.agents.reduce((n, a) => n + a.y, 0) / st.agents.length);
-      scroller.scrollLeft = px * S.zoom - scroller.clientWidth / 2; scroller.scrollTop = py * S.zoom - scroller.clientHeight / 2;
+      lookAt(px, py, false);
     }
     if (st.tiles.length === S.H) syncTiles(st.tiles);
     renderTop(st);
@@ -942,16 +995,17 @@ async function poll() {
 async function loadWorld() {
   const w = await api.get('/api/world');
   S.W = w.width; S.H = w.height; S.tiles = w.tiles;
-  cv.width = bg.width = (S.W + S.H) * TW / 2 + PAD * 2; cv.height = bg.height = (S.W + S.H) * TH / 2 + TOP + PAD;
-  fogc.width = Math.ceil(cv.width / FOG_SCALE); fogc.height = Math.ceil(cv.height / FOG_SCALE); fogKey = '';
-  drawn.length = 0; bctx.clearRect(0, 0, bg.width, bg.height);
+  WW = (S.W + S.H) * TW / 2 + PAD * 2; WH = (S.W + S.H) * TH / 2 + TOP + PAD;
+  bg.width = WW * BG_SCALE; bg.height = WH * BG_SCALE; bctx.setTransform(BG_SCALE, 0, 0, BG_SCALE, 0, 0);
+  fogc.width = Math.ceil(WW / FOG_SCALE); fogc.height = Math.ceil(WH / FOG_SCALE); fogKey = '';
+  drawn.length = 0; resize();
   syncTiles(w.tiles);
 }
 (async () => {
   if (innerWidth < 1000) document.querySelector('.legend').open = false;
   await loadWorld();
   const z = store.get('zoom', null);
-  if (z) setZoom(z); else { setZoom(1); S.centerOnce = true; }
+  setZoom(z || 1.5); S.centerOnce = true;
   showTab(store.get('tab', 'people'));
   await poll();
   requestAnimationFrame(drawFrame);

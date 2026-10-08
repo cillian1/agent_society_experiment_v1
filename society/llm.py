@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import urllib.error
+from contextlib import contextmanager
 import urllib.request
 
 from .config import HAIKU, LOCAL
@@ -79,6 +80,29 @@ class ClaudeLLM(UsageMixin):
         return "".join(b.text for b in resp.content if b.type == "text")
 
 
+class Slots:
+    """How many requests we send to the local server at once - with a fast lane: an urgent request (the Human is
+    waiting for an answer) goes before every queued routine one, and may use a couple of extra slots."""
+
+    def __init__(self, n: int, extra: int = 2):
+        self.free, self.extra, self.urgent, self.cv = n, extra, 0, threading.Condition()
+
+    @contextmanager
+    def take(self, urgent: bool = False):
+        with self.cv:
+            self.urgent += urgent
+            while not (self.free > -self.extra if urgent else self.free > 0 and not self.urgent):
+                self.cv.wait()
+            self.urgent -= urgent
+            self.free -= 1
+        try:
+            yield
+        finally:
+            with self.cv:
+                self.free += 1
+                self.cv.notify_all()
+
+
 class LocalLLM(UsageMixin):
     """Local model served by Ollama (native /api/chat) or any OpenAI-compatible server (LM Studio, llama.cpp, vLLM)."""
 
@@ -88,7 +112,7 @@ class LocalLLM(UsageMixin):
         self._init_usage()
         self.base, self.model, self.api = base_url.rstrip("/"), model, api
         self.ctx, self.max_tokens, self.timeout = ctx, max_tokens, timeout
-        self.sem = threading.Semaphore(concurrency)   # how many requests we send to the server at once
+        self.slots = Slots(concurrency)                # how many requests we send to the server at once
         self.smart_model = None                       # optional bigger model ("Smart local")
 
     def usage(self) -> dict:
@@ -108,10 +132,11 @@ class LocalLLM(UsageMixin):
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
             raise RuntimeError(f"can't reach the local model server at {self.base} ({e})") from e
 
-    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True) -> str:
+    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True,
+                 urgent: bool = False) -> str:
         model = model or self.model
         msgs = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
-        with self.sem:
+        with self.slots.take(urgent):
             if self.api == "ollama":
                 body = {"model": model, "messages": msgs, "stream": False, "keep_alive": "30m",
                         "options": {"num_ctx": self.ctx, "temperature": 0.6, "num_predict": self.max_tokens}}
@@ -156,14 +181,16 @@ class RouterLLM:
         self.notes = notes or []
         self.default_model = LOCAL if local else HAIKU
 
-    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True) -> str:
+    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True,
+                 urgent: bool = False) -> str:
+        """urgent: someone (the Human) is waiting for this answer - it skips the queue of routine thinking."""
         model = model or self.default_model
         if self.mock:
             return self.mock.complete(system, prompt, model, json_mode)
         if is_local(model):
             if not self.local:
                 raise RuntimeError("no local model server available (is Ollama running?)")
-            return self.local.complete(system, prompt, None if model == LOCAL else model[6:], json_mode)
+            return self.local.complete(system, prompt, None if model == LOCAL else model[6:], json_mode, urgent)
         if not self.claude:
             raise RuntimeError("no ANTHROPIC_API_KEY set, so Claude models are unavailable")
         return self.claude.complete(system, prompt, model, json_mode)

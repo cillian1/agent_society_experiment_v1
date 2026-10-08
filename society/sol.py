@@ -67,7 +67,7 @@ def chat(sim, message: str) -> dict:
               "Answer the Human helpfully and honestly in 1-4 sentences. If they ask you to pass something on or to guide "
               "people, also include a speech to everyone and/or advice (with next actions) for specific people. "
               + FORMAT.replace('"note_to_human"', '"message": "<your answer to the Human>", "note_to_human"'))
-    return _json(sim.llm.complete(INSTRUCTIONS, prompt, model=sim.sol_model))
+    return _json(sim.llm.complete(INSTRUCTIONS, prompt, model=sim.sol_model, urgent=True))
 
 
 def apply(sim, data: dict, source: str):

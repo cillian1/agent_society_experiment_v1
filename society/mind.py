@@ -360,6 +360,28 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
     return "\n".join(lines) + "\n\nWhat do you do?"
 
 
+def situation(a: Agent, world, agents: list[Agent], tick: int) -> str:
+    """A short version of the observation for answering the Human: enough to reply in character, quick to read."""
+    near = [o.name for o in agents if o is not a and a.dist(o) <= a.abilities.view()]
+    site = world.buildings.get((a.task or {}).get("id")) if a.task else None
+    lines = [identity(a, [o.name for o in agents if o is not a], tick),
+             f"It is {clock.stamp(tick)}. You are at ({a.x}, {a.y}), {age_text(a.age(tick))} old"
+             + (f", known as the {a.role}" if a.role else "") + ".",
+             f"Hunger {int(a.hunger)}/100, health {int(a.health)}/100. Carrying {a.food} food, {a.seeds} seeds, "
+             f"{a.wood} wood, {a.stone} stone" + (", " + ", ".join(i["name"] for i in a.items) if a.items else "") + ".",
+             f"Near you: {', '.join(near) or 'nobody'}."]
+    if site and not site.get("done", True):
+        lines.append(f"You are building a {site['kind']} ({site['progress']:.0f}/{site['work']} hours done).")
+    if a.ambition:
+        lines.append(f"Ambition: {a.ambition}")
+    if a.plan:
+        lines.append(f"Plan: {a.plan}")
+    if a.summary:
+        lines.append(f"Your life so far: {a.summary[:500]}")
+    lines.append("Lately:\n" + "\n".join("- " + m for m in recent_memories(a.log[-8:])))
+    return "\n".join(lines)
+
+
 def recent_memories(lines: list[str]) -> list[str]:
     """Memories with repeats folded together: the same words heard five times are shown once, with a count."""
     strip = lambda m: re.sub(r"^\[[^\]]*\] ", "", m)
@@ -440,7 +462,7 @@ def decide(a: Agent, llm, prompt: str, others: list[str]) -> dict:
 
 
 def reply(a: Agent, llm, situation: str, human_msg: str, others: list[str], also_to: list[str]) -> dict:
-    raw = llm.complete(system_prompt(a, others), reply_prompt(a, situation, human_msg, also_to), model=a.model)
+    raw = llm.complete(system_prompt(a, others), reply_prompt(a, situation, human_msg, also_to), model=a.model, urgent=True)
     data = _json(raw)
     nxt = parse_action(json.dumps({"action": "wait", "next": data.get("next") or []}), others)["next"]
     return {"thought": str(data.get("thought") or "").strip(),

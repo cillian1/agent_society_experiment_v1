@@ -41,7 +41,7 @@ roughly half the speed. Or give your favourite agents Haiku/Sonnet in their prof
 | Where | What you can do |
 |---|---|
 | **Top bar** | The clock (month, day, year, hour; 🌅☀️🌇🌙), population, % explored, model calls (click for details). Pause / step one hour / speed. `?` = help. |
-| **Map** | An **isometric** world: trees, rocks, berry bushes, fields, walk-in buildings with roofs (see-through when someone is inside), construction sites that rise as people work, day and night with glowing fires. Scroll to zoom, drag to pan, click someone for their profile, double-click to follow, hover anything for details. Toggle 🌫️ fog, 💬 speech bubbles and 🎯 follow in the toolbar. Bars over heads: hunger (green→red) and task progress (gold). |
+| **Map** | A sharp **isometric** world at any zoom (labels stay readable): trees, rocks, berry bushes, fields, walk-in buildings with roofs (see-through when someone is inside), construction sites that rise as people work, day and night with glowing fires. Scroll to zoom, drag to pan, click someone for their profile, double-click to follow, hover anything for details. Toggle 🌫️ fog, 💬 speech bubbles and 🎯 follow in the toolbar. Bars over heads: hunger (green→red) and task progress (gold). |
 | **👥 People** | Everyone at a glance (hunger, food, age, what they're doing, construction progress, 💤 asleep). A **profile** has Overview, Thoughts (every decision), Memory, Relations (feelings & family) and Brain tabs, plus buttons to talk, find, follow or send a gift. |
 | **💬 Talk** | Sol's card on top (latest review, next review, Talk / Review now), the conversation in the middle, and the composer at the bottom: pick everyone, Sol, one agent or any group; each answers right away in character. Choose whether they treat you as their **leader** (they obey), an advisor, or an observer. |
 | **🌍 World** | A filterable feed of conversations, births and deaths, building, ideas, exploration and food. |
@@ -82,10 +82,11 @@ Keyboard: `Space` pause · `N` next hour · `+`/`−` zoom · `0` fit · `F` fol
 - **Helping small models:** every turn an agent gets a few good options worked out from its situation (eat, feed a baby,
   gather, craft a first tool, talk to a neighbour, explore...), is warned when its last action failed, and a reply that
   isn't valid JSON is retried once.
-- **Projects:** with `"next"` an agent lines up to 4 follow-up actions that run on the following turns without a model
+- **Projects:** with `"next"` an agent lines up to 6 follow-up actions that run on the following turns without a model
   call (faster and free); it stops and rethinks when it's spoken to, gets hungry, a baby needs it, or a step fails.
-- **Reflection & ambition:** every day each agent looks back on its life and sets itself a long-term ambition
-  (shown in its profile and the 🌍 feed) that guides its plans.
+- **Sleep & dreams:** nights cost nothing. On some nights (and at least every 3 days) an agent has one dream at a
+  random hour (🌙 on the map): it looks back on its life, sets a long-term ambition and plan, may wake up with an idea,
+  and tidies its memories into a summary - all in that single call.
 - **Thinking:** each turn an agent runs a short checklist (danger/hunger first, then its plan, then something creative),
   keeps a plan from turn to turn, and gets one idea to consider for inspiration.
 - **Society:** no roles or family at the start. Agents claim their own roles, `invent` ideas everyone hears about, build
@@ -140,6 +141,17 @@ tests/                   `python -m unittest`
 **Adding an action:** write a function in `society/actions.py` decorated with `@action("name")`, add the name to
 `ACTIONS` and a one-line description in `system_prompt` in `society/mind.py`.
 
+## Saving money and time
+- **Thinking every few hours:** ⚙️ Settings → *Agents think* (every 1, 2, 3 or 6 hours; default 2). In between, agents
+  follow the steps they planned or an obvious routine (eat, gather, tend, keep building) with no model call. Being spoken
+  to, hunger, a baby or a failed step wakes their brain immediately.
+- **Small prompts:** the rules every agent shares are one fixed text sent as the system prompt (Claude caches it, so it
+  costs a tenth after the first call; local servers reuse it); each turn adds only what that agent sees and remembers,
+  with repeated memories folded together. A 48-hour test went from 204 calls of ~2,900 tokens to 105 of ~2,000.
+- **You go first:** your messages (and Sol's answers to you) skip the queue of routine thinking and use a short prompt,
+  so replies come quickly even when everyone is busy.
+- ⚙️ Settings shows calls, tokens per call and cached tokens per model.
+
 ## Speed
 Hours don't wait for every brain. Each agent acts the moment its brain answers (at most once per hour); an hour ends
 when everyone has answered or after a short wait (`--max-wait`, or the Slow / Normal / Fast buttons), so a slow brain
@@ -149,5 +161,5 @@ To go faster still: pick **Fast**, match `OLLAMA_NUM_PARALLEL` with `--local-con
 
 ## Cost
 The top bar and ⚙️ Settings show calls and tokens per model. Local models are free. For a dollar estimate start with
-`--price claude-haiku-5-5=IN,OUT` (USD per million tokens, from Anthropic's pricing page). Each agent makes one call per
-waking hour at most (plus one per message you send it), so more agents and a shorter `--interval` cost more.
+`--price claude-haiku-5-5=IN,OUT` (USD per million tokens, from Anthropic's pricing page). Each agent makes at most one call per
+waking hour, about every 2 hours by default (plus one per message you send it), so more agents and a shorter `--interval` cost more.

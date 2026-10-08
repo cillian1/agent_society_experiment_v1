@@ -598,7 +598,7 @@ class Society:
                     slot["text"], slot["pending"] = self.rng.choice(["*gurgles happily*", "*stares at you with big eyes*",
                                                                      "*giggles*", "*yawns*"]), False
                     continue
-                situation = mind.observation(a, self.world, alive, self.tick, ideas)
+                situation = mind.situation(a, self.world, alive, self.tick)
                 others = [n for n in self.agents if n != a.name]
                 threading.Thread(target=self._reply, daemon=True,
                                  args=(a, slot, situation, message, others, [n for n in names if n != a.name])).start()

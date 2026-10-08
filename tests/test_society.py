@@ -190,6 +190,39 @@ class PlanningTests(unittest.TestCase):
         self.assertTrue(all(a.ambition and a.last_dream for a in sim.agents.values()))
 
 
+class SpeedTests(unittest.TestCase):
+    def test_the_human_skips_the_queue(self):
+        import threading
+        from society.llm import Slots
+        slots, order = Slots(1, extra=0), []
+
+        def ask(name, urgent, hold):
+            with slots.take(urgent):
+                order.append(name)
+                time.sleep(hold)
+        first = threading.Thread(target=ask, args=("busy", False, .3))
+        first.start()
+        time.sleep(.05)
+        rest = [threading.Thread(target=ask, args=(n, u, .02)) for n, u in (("a", False), ("b", False), ("human", True))]
+        for t in rest:
+            t.start()
+            time.sleep(.02)
+        for t in [first] + rest:
+            t.join()
+        self.assertEqual(order[:2], ["busy", "human"])
+
+    def test_routine_saves_calls_but_speech_wakes_the_brain(self):
+        sim = make(30)
+        ada = sim.agents["Ada"]
+        ada.queue, ada.last_think, ada.history, ada.heard, ada.task = [], sim.tick, [], [], None
+        ada.hunger, ada.food = 70, 3
+        self.assertEqual(sim.take_queued(ada)["action"], "eat")       # obvious: no model call
+        ada.heard = ['Brix says to you: "come here"']
+        self.assertIsNone(sim.take_queued(ada))                        # spoken to: think
+        ada.heard, ada.last_think = [], sim.tick - sim.think_every
+        self.assertIsNone(sim.take_queued(ada))                        # time to think again anyway
+
+
 class GameMasterTests(unittest.TestCase):
     def test_outcome_is_clamped_and_discoveries_work(self):
         from society.gm import apply_outcome
