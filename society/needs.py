@@ -50,13 +50,15 @@ def hourly(a, tick: int, *, asleep: bool, sheltered: bool, warm: bool, winter: b
            friends_near: int, in_group: bool, hungry: bool, has_food: bool, home_exists: bool):
     """Drift every need by one hour of life."""
     t = a.traits
-    if asleep:
+    if asleep:                                       # a night's sleep settles the mind a little
         nudge(a, "rest", -12)
+        for n in ("belonging", "status", "curiosity"):
+            nudge(a, n, -1.2)
     else:
         nudge(a, "rest", 3.2)
-        nudge(a, "belonging", (1.4 if not in_group else 0.8) * (0.5 + t.social) - 4 * min(friends_near, 3))
-        nudge(a, "status", 0.5 * (0.4 + t.driven))
-        nudge(a, "curiosity", 0.9 * (0.4 + t.curious))
+        nudge(a, "belonging", (0.9 if not in_group else 0.5) * (0.5 + t.social) - 3 * min(friends_near, 3))
+        nudge(a, "status", 0.35 * (0.4 + t.driven))
+        nudge(a, "curiosity", 0.6 * (0.4 + t.curious))
     target = (15 + (30 if hungry else 0) + (15 if not has_food else 0) + (10 if not home_exists else 0)
               + (30 if winter and asleep and not (sheltered or fire_near or warm) else 0) - (15 if sheltered else 0))
     a.needs["safety"] = a.needs.get("safety", 20) + (max(0, min(100, target)) - a.needs.get("safety", 20)) * 0.2
@@ -72,7 +74,10 @@ SATISFY = {"say": {"belonging": -10}, "give": {"belonging": -8, "status": -4}, "
            "rest": {"rest": -25}, "attempt": {"curiosity": -25}, "invent": {"curiosity": -20, "status": -10},
            "found": {"status": -20, "belonging": -10}, "join": {"belonging": -20}, "name": {"status": -8, "curiosity": -8},
            "hunt": {"curiosity": -6}, "explore": {"curiosity": -18}, "finished": {"status": -30}, "discovery": {"status": -35},
-           "gather": {"rest": 2}, "work": {"rest": 3}}
+           "gather": {"rest": 2, "status": -1}, "work": {"rest": 3, "status": -3}, "craft": {"status": -6, "curiosity": -5},
+           "build": {"status": -10}, "plant": {"status": -2}, "offer": {"belonging": -5}, "accept": {"belonging": -6, "status": -3},
+           "vote": {"belonging": -4}, "propose": {"status": -8}, "punish": {"status": -6}, "forgive": {"belonging": -6},
+           "procreate": {"belonging": -25}, "go": {"curiosity": -2}}
 
 
 def after_action(a, act: str):

@@ -29,6 +29,7 @@ def _brief(sim: Society, a: Agent) -> dict:
         "inside": (sim.world.building_at(a.x, a.y) or {}).get("kind", ""),
         "task": _task(sim, a),
         "mood": needs.mood(a, t), "mood_icon": needs.MOOD_ICON.get(needs.mood(a, t), ""), "people": a.people,
+        "carry": "wood" if a.wood >= 2 else "stone" if a.stone >= 2 else "food" if a.food >= 4 else "",
         "group": a.group, "anim": a.animation if a.animation and t - a.animation[0] <= 1 else [],
     }
 

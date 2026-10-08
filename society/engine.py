@@ -344,9 +344,10 @@ class Society:
         """Each morning: food rots without pots, tame goats and sheep give milk."""
         tick = self.tick
         for a in self.agents.values():
-            if a.food > 6 and not self.has("no_spoil") and season != "winter" and self.rng.random() < 0.5:
-                a.food -= 1
-                a.remember(tick, "Some of the food I was carrying went bad (pots would keep it).")
+            if a.food > 6 and not self.has("no_spoil") and season != "winter":
+                rot = max(1, (a.food - 6) // 5)                  # a fifth of what's beyond a few days' worth
+                a.food -= rot
+                a.remember(tick, f"{rot} of the food I was carrying went bad (pots would keep it; so would sharing).")
         for b in self.eco.animals.values():
             owner = self.agents.get(b["owner"]) if b["owner"] else None
             if owner and ANIMALS[b["kind"]]["milk"] and max(abs(owner.x - b["x"]), abs(owner.y - b["y"])) <= 3:

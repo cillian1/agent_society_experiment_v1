@@ -11,6 +11,7 @@
   <div class="brand">🌱 Agent Society</div>
   <div class="pills">
     <span class="pill strong clock" id="p-day" title="World time: 1 turn = 1 hour, 24 hours a day, 30 days a month, 12 months a year">–</span>
+    <span class="pill" id="p-season" title="Season and the age your society has reached">–</span>
     <span class="pill" id="p-pop" title="Agents alive / population cap">👥 –</span>
     <span class="pill" id="p-explored" title="How much of the world has been explored">🧭 –</span>
     <span class="pill" id="p-usage" title="Model usage (details in ⚙️ Settings)">💬 –</span>
@@ -49,6 +50,8 @@
           <span>🌱 Young plant (grows itself)</span><span>🌾 Ripe crop</span>
           <span>🏠 Building (walk-in)</span><span>🏗️ Construction + progress</span>
           <span><b style="color:#5cc46e">▬</b> Hunger left</span><span><b style="color:#ffd93d">▬</b> Task progress</span>
+          <span>🦌 🐇 🐗 🐑 Animals</span><span>┅ Group land (its colour)</span>
+          <span>😟 🥺 😠 🥱 Moods</span><span>❄️ 🍂 🌱 Seasons</span>
           <span>💤 Asleep (22:00–06:00)</span><span>❤️ In love · 💭 Thinking</span>
           <span>🤰 Pregnant · 🍼 Baby</span><span>🪦 Grave</span>
         </div>
@@ -63,6 +66,7 @@
       <button data-tab="talk">💬 Talk</button>
       <button data-tab="world">🌍 World</button>
       <button data-tab="stats">📈 Stats</button>
+      <button data-tab="history">📜 History</button>
       <button data-tab="settings">⚙️ Settings</button>
     </nav>
 
@@ -97,7 +101,17 @@
     </section>
 
     <section class="tab" id="tab-world" hidden>
-      <h3 style="margin-top:0">💡 Discoveries <span class="muted small" style="text-transform:none;letter-spacing:0">— ideas that became real and change the world</span></h3>
+      <h3 style="margin-top:0">🏛️ Ages &amp; breakthroughs</h3>
+      <div id="techs"></div>
+      <h3>👥 Groups &amp; laws</h3>
+      <div id="groups"></div>
+      <h3>🤝 Trade &amp; promises</h3>
+      <div id="trade"></div>
+      <h3>📖 Stories &amp; places</h3>
+      <div id="culture"></div>
+      <h3>🦌 Nature</h3>
+      <div id="nature"></div>
+      <h3>💡 Discoveries <span class="muted small" style="text-transform:none;letter-spacing:0">— ideas that became real and change the world</span></h3>
       <div id="discoveries"></div>
       <h3>📐 Blueprints <span class="muted small" style="text-transform:none;letter-spacing:0">— what each building costs and does</span></h3>
       <div id="blueprints"></div>
@@ -111,6 +125,18 @@
       <div class="charts" id="charts"></div>
       <div class="row"><label class="toggle"><input type="checkbox" id="stats-table"> Show as a table</label></div>
       <div id="table"></div>
+    </section>
+
+    <section class="tab" id="tab-history" hidden>
+      <div class="card replay">
+        <div class="row tight"><b>⏪ Replay</b><span class="muted small" id="replay-when">drag to look back in time</span>
+          <button class="btn" id="replay-live" style="margin-left:auto;padding:3px 10px" hidden>Back to live</button></div>
+        <input type="range" id="replay" min="0" max="0" value="0" style="width:100%">
+      </div>
+      <h3>📜 The Chronicle <span class="muted small" style="text-transform:none;letter-spacing:0">— written by Sol, a chapter a month</span></h3>
+      <div id="chronicle"></div>
+      <h3>🌳 Family tree</h3>
+      <div id="family"></div>
     </section>
 
     <section class="tab" id="tab-settings" hidden>
@@ -134,7 +160,7 @@
       <h3>Keyboard shortcuts</h3>
       <div class="keys">
         <kbd>Space</kbd> pause / resume · <kbd>N</kbd> next hour · <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>0</kbd> fit map ·
-        <kbd>F</kbd> follow selected · <kbd>/</kbd> talk · <kbd>Esc</kbd> close · <kbd>1</kbd>–<kbd>5</kbd> tabs · <kbd>?</kbd> help
+        <kbd>F</kbd> follow selected · <kbd>/</kbd> talk · <kbd>Esc</kbd> close · <kbd>1</kbd>–<kbd>6</kbd> tabs · <kbd>?</kbd> help
       </div>
     </section>
   </aside>

@@ -33,7 +33,7 @@ const extras = a => `${STAGE[a.stage] || ''}${a.pregnant ? '🤰' : ''}`;
 const S = {
   st: null, W: 0, H: 0, tiles: [], agents: [], sel: null, detail: null,
   tab: 'people', ptab: 'overview', to: new Set(['*']), filter: 'all',
-  zoom: 1, disp: {}, offset: {}, head: {}, inside: new Set(), dark: 0, props: [], water: [], lastEvent: null, stats: [], hover: null, brainKey: '',
+  zoom: 1, disp: {}, adisp: {}, popups: [], lastAnim: {}, offset: {}, head: {}, inside: new Set(), dark: 0, props: [], water: [], lastEvent: null, stats: [], hover: null, brainKey: '',
 };
 
 // ======================================================================= map (isometric)
@@ -43,7 +43,8 @@ const TW = 40, TH = 20, TOP = 80, PAD = 24;
 const cv = $('map'), ctx = cv.getContext('2d');
 const bg = document.createElement('canvas'), bctx = bg.getContext('2d');
 const fogc = document.createElement('canvas'), fctx = fogc.getContext('2d');
-const FOG_SCALE = 4, BG_SCALE = 2, SPRITE_SCALE = 4;   // ground cache and sprites are kept sharper than 1:1
+const FOG_SCALE = 4, SPRITE_SCALE = 4;
+let BG_SCALE = 2;                                     // the ground cache is kept sharper than 1:1 (less on huge maps)
 let WW = 0, WH = 0;                                   // world size in world pixels; the canvas itself is screen-sized
 S.cam = { x: 0, y: 0 };
 const scroller = $('mapscroll');
@@ -66,55 +67,100 @@ const shade = (hex, k) => {                                          // lighten 
   return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
 };
 
+// ---- art: CC0 sprites by Kenney (assets/LICENSES.md); everything falls back to drawn shapes until it has loaded
+const A = 'assets/';
+const LAND = n => `${A}kenney-isometric-landscape/landscapeTiles_${String(n).padStart(3, '0')}.png`;
+const NAT = n => `${A}kenney-isometric-nature/naturePack_${String(n).padStart(3, '0')}_0.png`;
+const PACK = {        // how each pack's sprites sit on our 40x20 tile: scale, and the pixel that goes on the tile centre
+  land: { k: TW / 132 }, nature: { k: TW / 182, ax: 110, ay: 304 }, mini: { k: TW / 256, ax: 128, ay: 436 },
+};
+const ART = {
+  grass: [LAND(67), LAND(75)], sand: [LAND(59)], water: [LAND(66)], dirt: [LAND(83)], stone: [LAND(81)],
+  farmland: `${A}kenney-isometric-miniature-farm/dirtFarmland_S.png`,
+  green: [62, 63, 65, 70, 72, 73, 130, 151, 161, 64, 140].map(NAT),
+  pine: [51, 53, 81, 84, 85, 87, 88, 89, 114].map(NAT),
+  autumn: [66, 67, 68, 69, 139, 162, 94, 149].map(NAT),
+  bare: [`${A}kenney-isometric-miniature-overworld/treeDeadLarge_S.png`, `${A}kenney-isometric-miniature-overworld/treeDeadSmall_S.png`],
+  rock: [23, 24, 131, 134, 135, 136, 137, 152, 153, 171, 172, 173, 174, 60].map(NAT),
+  bush: NAT(71), stump: NAT(79),
+  sprout: `${A}kenney-isometric-miniature-farm/cornYoung_S.png`, crop: `${A}kenney-isometric-miniature-farm/corn_S.png`,
+  campfire: NAT(77), tent: [NAT(75), NAT(95), NAT(107)], statue: NAT(156), obelisk: NAT(39), pillar: NAT(157),
+  fence: `${A}kenney-isometric-miniature-farm/fenceLow_S.png`, hay: `${A}kenney-isometric-miniature-farm/hayBales_S.png`,
+  sacks: `${A}kenney-isometric-miniature-farm/sacksCrate_S.png`, well: LAND(100),
+  deer: `${A}kenney-cube-pets/animal-deer.png`, rabbit: `${A}kenney-cube-pets/animal-bunny.png`, boar: `${A}kenney-cube-pets/animal-hog.png`,
+};
+const IMG = {};
+let artPending = 0;
+function img(src) {                  // the image if it has loaded, else null (and start loading it)
+  let i = IMG[src];
+  if (!i) {
+    i = IMG[src] = new Image(); artPending++;
+    i.onload = () => { i.ok = true; if (--artPending === 0) drawn.length = 0; };   // repaint the ground once all is in
+    i.onerror = () => { artPending--; };
+    i.src = src;
+  }
+  return i.ok ? i : null;
+}
+Object.values(ART).flat().forEach(img);
+const packOf = src => src.includes('landscape') ? PACK.land : src.includes('nature') ? PACK.nature : PACK.mini;
+function put(c, src, gx, gy, alpha = 1, extra = 1) {   // draw a sprite with its anchor on (gx, gy)
+  const i = img(src); if (!i) return false;
+  const p = packOf(src), k = p.k * extra;
+  const ax = p.ax ?? i.width / 2, ay = p.ay ?? i.height - 66;
+  if (alpha !== 1) c.globalAlpha = alpha;
+  c.drawImage(i, gx - ax * k, gy - ay * k, i.width * k, i.height * k);
+  if (alpha !== 1) c.globalAlpha = 1;
+  return true;
+}
+const pick = (list, x, y, k = 0) => list[Math.floor(rnd(x, y, k) * list.length) % list.length];
+
 // ---- ground
 const GROUND = { grass: '#4f9a47', food: '#4f9a47', tree: '#478f40', sprout: '#7a5634', crop: '#7a5634', water: '#2f6fb5',
   sand: '#d8c68a', rock: '#8c8a80', structure: '#8f7a55' };
+const GROUND_ART = { grass: 'grass', food: 'grass', tree: 'grass', water: 'water', sand: 'sand', rock: 'grass', structure: 'dirt' };
+const season = () => S.forceSeason || S.st?.season || 'summer';   // forceSeason: preview another season (console)
 function paintTile(x, y, c = bctx) {
-  const t = S.tiles[y][x], v = rnd(x, y), base = GROUND[t] || '#444';
-  const col = shade(base, (v - .5) * .12);
-  diamond(c, x, y); c.fillStyle = col; c.strokeStyle = col; c.lineWidth = .7; c.fill(); c.stroke();
-  const [cx, cy] = ground(x, y);
-  if (t === 'grass' || t === 'food' || t === 'tree') {
-    c.strokeStyle = 'rgba(25,80,30,.32)'; c.lineWidth = .8;
-    for (let i = 0; i < 3; i++) { const a = cx + (rnd(x, y, i + 1) - .5) * TW * .5, b = cy + (rnd(x, y, i + 9) - .5) * TH * .45; c.beginPath(); c.moveTo(a, b); c.lineTo(a - 1.5, b - 3); c.moveTo(a, b); c.lineTo(a + 1.5, b - 3); c.stroke(); }
-    if (t === 'grass' && rnd(x, y, 20) > .92) { c.fillStyle = rnd(x, y, 21) > .5 ? '#fff3a0' : '#f8c8e0'; c.beginPath(); c.arc(cx + (rnd(x, y, 22) - .5) * TW * .4, cy + (rnd(x, y, 23) - .5) * TH * .4, 1.8, 0, 7); c.fill(); }
+  const t = S.tiles[y][x], [cx, cy] = ground(x, y), sea = season();
+  const src = t === 'sprout' || t === 'crop' ? ART.farmland : ART[GROUND_ART[t]] ? pick(ART[GROUND_ART[t]], x, y, 3) : null;
+  if (!(src && put(c, src, cx, cy))) {                                   // fallback: a flat coloured diamond
+    const col = shade(GROUND[t] || '#444', (rnd(x, y) - .5) * .12);
+    diamond(c, x, y); c.fillStyle = col; c.strokeStyle = col; c.lineWidth = .7; c.fill(); c.stroke();
   }
-  if (t === 'sand') { c.fillStyle = 'rgba(120,95,40,.35)'; for (let i = 0; i < 5; i++) c.fillRect(cx + (rnd(x, y, i + 30) - .5) * TW * .5, cy + (rnd(x, y, i + 40) - .5) * TH * .5, 1.5, 1.5); }
-  if (t === 'rock') { c.fillStyle = 'rgba(60,60,60,.3)'; for (let i = 0; i < 4; i++) c.fillRect(cx + (rnd(x, y, i + 50) - .5) * TW * .5, cy + (rnd(x, y, i + 60) - .5) * TH * .5, 2, 1.5); }
-  if (t === 'sprout' || t === 'crop') {                              // tilled furrows
-    c.strokeStyle = 'rgba(50,30,15,.45)'; c.lineWidth = 1.2;
-    for (let i = 1; i < 4; i++) { const [a1, b1] = iso(x + i / 4, y + .12), [a2, b2] = iso(x + i / 4, y + .88); c.beginPath(); c.moveTo(a1, b1); c.lineTo(a2, b2); c.stroke(); }
+  if (sea === 'winter' || sea === 'autumn') {                            // the season colours the land
+    diamond(c, x, y);
+    c.fillStyle = sea === 'winter' ? (t === 'water' ? 'rgba(220,240,255,.45)' : 'rgba(245,248,255,.62)') : 'rgba(214,140,40,.16)';
+    if (t !== 'water' || sea === 'winter') c.fill();
+  } else if (sea === 'spring' && (t === 'grass' || t === 'food') && rnd(x, y, 20) > .75) {
+    c.fillStyle = rnd(x, y, 21) > .5 ? '#fff3a0' : '#f8c8e0';
+    for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(cx + (rnd(x, y, 22 + i) - .5) * TW * .5, cy + (rnd(x, y, 25 + i) - .5) * TH * .5, 1.3, 0, 7); c.fill(); }
   }
   if (t === 'water') {
-    c.fillStyle = 'rgba(10,40,90,.18)'; diamond(c, x + .15, y + .15, .7, .7); c.fill();
-    const bank = (a, b) => { c.fillStyle = '#6e5a3c'; c.beginPath(); c.moveTo(...a); c.lineTo(...b); c.lineTo(b[0], b[1] + 5); c.lineTo(a[0], a[1] + 5); c.closePath(); c.fill(); };
-    const up = S.tiles[y - 1]?.[x], left = S.tiles[y]?.[x - 1];       // land behind the water looks raised
-    if (up && up !== 'water') bank(iso(x, y), iso(x + 1, y));
-    if (left && left !== 'water') bank(iso(x, y + 1), iso(x, y));
-    c.strokeStyle = 'rgba(220,240,255,.55)'; c.lineWidth = 2;                          // foam where water meets land
-    const p = [iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)];
+    const p = [iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)].map(([a, b]) => [a, b + 4]);
+    c.strokeStyle = 'rgba(230,245,255,.6)'; c.lineWidth = 1.6;                      // foam where water meets land
     [[0, -1, 0, 1], [1, 0, 1, 2], [0, 1, 2, 3], [-1, 0, 3, 0]].forEach(([dx, dy, i, j]) => {
       const n = S.tiles[y + dy]?.[x + dx]; if (n && n !== 'water') { c.beginPath(); c.moveTo(...p[i]); c.lineTo(...p[j]); c.stroke(); } });
   }
 }
 function syncTiles(next) {
   S.tiles = next; let changed = false;
+  if (S.paintedSeason !== season()) { S.paintedSeason = season(); drawn.length = 0; }
   for (let y = 0; y < S.H; y++) for (let x = 0; x < S.W; x++) {
     if (!drawn[y]) drawn[y] = [];
     if (drawn[y][x] !== next[y][x]) { drawn[y][x] = next[y][x]; changed = true; }
   }
-  if (changed) {                                                      // repaint back to front so seams stay clean
+  if (changed) {                                                      // repaint back to front so tiles overlap correctly
+    bctx.save(); bctx.setTransform(1, 0, 0, 1, 0, 0); bctx.clearRect(0, 0, bg.width, bg.height); bctx.restore();
     for (let y = 0; y < S.H; y++) for (let x = 0; x < S.W; x++) paintTile(x, y);
     S.props = []; S.water = [];
     for (let y = 0; y < S.H; y++) for (let x = 0; x < S.W; x++) {
       const t = next[y][x];
-      if (PROP[t]) S.props.push({ x, y, t, v: Math.floor(rnd(x, y, 7) * 3) });
+      if (PROP[t]) S.props.push({ x, y, t, v: Math.floor(rnd(x, y, 7) * 3), pine: rnd(x, y, 11) < .35 });
       if (t === 'water' && rnd(x, y, 8) > .6) S.water.push({ x, y, ph: rnd(x, y, 9) * 6.3 });
     }
   }
 }
 
-// ---- props (cached sprites, anchored at the tile centre)
+// ---- props: trees by season, rocks, berry bushes, crops (drawn shapes are the fallback)
 const SPR = {};
 function sprite(key, w, h, draw) {
   if (!SPR[key]) {
@@ -129,38 +175,69 @@ const PROP = {
   tree: { w: 46, h: 64, ax: 23, ay: 56, draw(c, v) {
     shadow(c, 23, 56, 15, 6);
     c.fillStyle = '#5b3d22'; c.fillRect(21, 38, 5, 18);
-    if (v === 1) {                                                    // pine
-      [[44, 15, '#1f5a2c'], [34, 12, '#27703a'], [24, 9, '#2f8645']].forEach(([y, r, col]) => {
-        c.fillStyle = col; c.beginPath(); c.moveTo(23 - r, y); c.lineTo(23, y - 18); c.lineTo(23 + r, y); c.closePath(); c.fill(); });
-    } else {
-      const k = v === 2 ? 1.12 : 1;
-      blob(c, 23, 32, 15 * k, '#245c2a'); blob(c, 18, 27, 11 * k, '#2e7a35'); blob(c, 28, 24, 9 * k, '#3c9744'); blob(c, 21, 20, 5 * k, '#4fae55');
-    }
+    blob(c, 23, 32, 15, '#245c2a'); blob(c, 18, 27, 11, '#2e7a35'); blob(c, 28, 24, 9, '#3c9744');
   } },
-  rock: { w: 42, h: 36, ax: 21, ay: 28, draw(c, v) {
+  rock: { w: 42, h: 36, ax: 21, ay: 28, draw(c) {
     shadow(c, 21, 28, 16, 6);
-    c.fillStyle = '#7f848c'; c.beginPath(); c.moveTo(5, 27); c.lineTo(9, 13); c.lineTo(19, 6 + v * 2); c.lineTo(31, 10); c.lineTo(37, 26); c.closePath(); c.fill();
-    c.fillStyle = '#a5aab2'; c.beginPath(); c.moveTo(9, 13); c.lineTo(19, 6 + v * 2); c.lineTo(22, 16); c.lineTo(12, 20); c.closePath(); c.fill();
-    c.fillStyle = '#62666d'; c.beginPath(); c.moveTo(22, 16); c.lineTo(31, 10); c.lineTo(37, 26); c.lineTo(24, 28); c.closePath(); c.fill();
+    c.fillStyle = '#7f848c'; c.beginPath(); c.moveTo(5, 27); c.lineTo(9, 13); c.lineTo(19, 6); c.lineTo(31, 10); c.lineTo(37, 26); c.closePath(); c.fill();
   } },
-  food: { w: 36, h: 32, ax: 18, ay: 25, draw(c) {
-    shadow(c, 18, 25, 13, 5);
-    blob(c, 18, 17, 11, '#2b6a2f'); blob(c, 14, 14, 7, '#37803b'); blob(c, 22, 13, 6, '#3f8f44');
-    c.fillStyle = '#e0334e'; [[-6, 3], [5, 0], [0, 6], [-1, -4], [7, 6], [-7, -2]].forEach(([a, b]) => blob(c, 18 + a, 16 + b, 2.3, '#e0334e'));
-  } },
-  sprout: { w: 30, h: 22, ax: 15, ay: 17, draw(c) {
-    c.strokeStyle = '#8fe36b'; c.lineWidth = 2;
-    [[-6, 0], [0, -3], [6, 0]].forEach(([a, b]) => { c.beginPath(); c.moveTo(15 + a * .5, 17); c.quadraticCurveTo(15 + a, 11 + b, 15 + a * 1.3, 7 + b); c.stroke(); });
-  } },
-  crop: { w: 34, h: 36, ax: 17, ay: 28, draw(c) {
-    for (let i = 0; i < 6; i++) { const a = 6 + i * 4.4, b = 28 - (i % 2) * 3; c.strokeStyle = '#c9a63a'; c.lineWidth = 1.6; c.beginPath(); c.moveTo(a, b); c.lineTo(a - 1, b - 18); c.stroke(); c.fillStyle = '#f3d35a'; c.beginPath(); c.ellipse(a - 1, b - 19, 2, 4, 0, 0, 7); c.fill(); }
-  } },
+  food: { w: 36, h: 32, ax: 18, ay: 25, draw(c) { shadow(c, 18, 25, 13, 5); blob(c, 18, 17, 11, '#2b6a2f'); } },
+  sprout: { w: 30, h: 22, ax: 15, ay: 17, draw(c) { c.strokeStyle = '#8fe36b'; c.lineWidth = 2; c.beginPath(); c.moveTo(15, 17); c.lineTo(15, 7); c.stroke(); } },
+  crop: { w: 34, h: 36, ax: 17, ay: 28, draw(c) { c.fillStyle = '#f3d35a'; c.fillRect(8, 8, 18, 20); } },
 };
-function drawProp(p, fade) {
-  const P = PROP[p.t], img = sprite(p.t + p.v, P.w, P.h, c => P.draw(c, p.v)), [gx, gy] = ground(p.x, p.y);
-  if (fade) ctx.globalAlpha = .45;
-  ctx.drawImage(img, gx - P.ax, gy - P.ay, P.w, P.h);
+const BERRIES = [[-6, -9], [5, -12], [0, -6], [-2, -15], [7, -7], [-8, -13]];
+function drawProp(p, fade, t) {
+  const [gx, gy] = ground(p.x, p.y), sea = season(), alpha = fade ? .45 : 1;
+  let src = null;
+  if (p.t === 'tree') src = p.pine ? pick(ART.pine, p.x, p.y, 4) : pick(sea === 'autumn' ? ART.autumn : sea === 'winter' ? ART.bare : ART.green, p.x, p.y, 5);
+  else if (p.t === 'rock') src = pick(ART.rock, p.x, p.y, 6);
+  else if (p.t === 'food') src = ART.bush;
+  else if (p.t === 'sprout' || p.t === 'crop') src = ART[p.t];
+  const burning = S.burning?.has(p.x + ',' + p.y);
+  const ok = src && put(ctx, src, gx, gy, alpha, p.t === 'tree' ? .9 + p.v * .08 : p.t === 'food' ? .55 : 1);
+  if (!ok) {
+    const P = PROP[p.t], spr = sprite(p.t, P.w, P.h, c => P.draw(c, p.v));
+    ctx.globalAlpha = alpha; ctx.drawImage(spr, gx - P.ax, gy - P.ay, P.w, P.h); ctx.globalAlpha = 1;
+  }
+  if (p.t === 'tree' && sea === 'winter' && p.pine) {                  // snow on the pines
+    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.beginPath(); ctx.ellipse(gx, gy - 30, 7, 3, 0, 0, 7); ctx.fill();
+  }
+  if (p.t === 'food' && sea !== 'winter') BERRIES.forEach(([a, b]) => blob(ctx, gx + a, gy + b, 1.9, '#e0334e'));
+  if (burning) drawFlames(gx, gy - 14, t, 1.4);
+}
+function drawFlames(x, y, t, s = 1) {
+  for (let i = 0; i < 4; i++) {
+    const f = Math.sin(t * 9 + i * 1.7) * 2, h = (10 + f + (i % 2) * 6) * s, x0 = x + (i - 1.5) * 4 * s;
+    ctx.fillStyle = ['#ff6a1a', '#ffd23f', '#ff8a2a', '#ffb02e'][i]; ctx.globalAlpha = .9;
+    ctx.beginPath(); ctx.moveTo(x0 - 4 * s, y + 6); ctx.quadraticCurveTo(x0 - 3 * s, y - h * .4, x0 + f * .4, y - h); ctx.quadraticCurveTo(x0 + 3 * s, y - h * .4, x0 + 4 * s, y + 6); ctx.fill();
+  }
   ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(80,80,80,.25)';
+  for (let i = 0; i < 3; i++) blob(ctx, x + Math.sin(t + i) * 4, y - 22 * s - ((t * 12 + i * 9) % 26), 4 + i, 'rgba(90,90,90,.22)');
+}
+
+// ---- animals
+const ANIMAL_TINT = { goat: '#e8e2d6', sheep: '#f4f2ee' };
+function drawAnimal(b, t) {
+  const d = S.adisp[b[0]] || (S.adisp[b[0]] = { x: b[2], y: b[3] });
+  d.x += (b[2] - d.x) * .06; d.y += (b[3] - d.y) * .06;
+  const moving = Math.abs(b[2] - d.x) + Math.abs(b[3] - d.y) > .04;
+  const [gx, gy] = ground(d.x, d.y), hop = moving ? Math.abs(Math.sin(t * 10 + b[0])) * 2.5 : 0;
+  shadow(ctx, gx, gy, 7, 3, .25);
+  const src = ART[b[1]];
+  if (src && img(src)) {
+    const i = img(src), w = b[1] === 'rabbit' ? 20 : 28;
+    ctx.drawImage(i, gx - w / 2, gy - w * .85 - hop, w, w);
+  } else {                                                              // sheep and goats: a woolly body, a head, legs
+    const col = ANIMAL_TINT[b[1]] || '#a07850';
+    ctx.strokeStyle = '#3a3a3a'; ctx.lineWidth = 1.6;
+    for (const lx of [-4, -1, 2, 5]) { ctx.beginPath(); ctx.moveTo(gx + lx, gy - 5 - hop); ctx.lineTo(gx + lx, gy - hop * .3); ctx.stroke(); }
+    if (b[1] === 'sheep') for (let i = 0; i < 5; i++) blob(ctx, gx - 5 + i * 2.6, gy - 9 - (i % 2) * 2 - hop, 4, col);
+    else { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(gx, gy - 9 - hop, 8, 4.5, 0, 0, 7); ctx.fill(); }
+    blob(ctx, gx + 8, gy - 12 - hop, 3.2, b[1] === 'sheep' ? '#3a3a3a' : col);
+    if (b[1] === 'goat') { ctx.strokeStyle = '#6b5a45'; ctx.beginPath(); ctx.moveTo(gx + 8, gy - 15 - hop); ctx.lineTo(gx + 6, gy - 19 - hop); ctx.stroke(); }
+  }
+  if (b[4]) { const o = S.agents.find(a => a.name === b[4]); if (o) blob(ctx, gx, gy - 2, 2, o.color); }   // a collar: it's tame
 }
 
 // ---- buildings
@@ -212,9 +289,17 @@ function drawBuilding(s, t) {
     ctx.stroke();
     return;
   }
+  const kind = s.kind.toLowerCase(), [gx, gy] = ground(s.x + (s.w - 1) / 2, s.y + (s.h - 1) / 2);
+  if (s.w * s.h === 1) {                                                // small things drawn from the art packs
+    const art = /tent/.test(kind) ? pick(ART.tent, s.x, s.y) : /statue|monument|idol|totem/.test(kind) ? ART.statue
+      : /obelisk|marker|stone circle/.test(kind) ? ART.obelisk : /pillar|column/.test(kind) ? ART.pillar
+      : /fence|pen|corral/.test(kind) ? ART.fence : /hay|stack/.test(kind) ? ART.hay : /crate|sack|supply/.test(kind) ? ART.sacks : null;
+    if (art && put(ctx, art, gx, gy)) return;
+  }
+  if (func === 'well' && s.w * s.h === 1 && put(ctx, ART.well, gx, gy)) return;
   if (func === 'fire' && s.w * s.h === 1) {                           // camp fire: stone ring and flickering flames
     shadow(ctx, cx, cy, 13, 6, .3);
-    for (let i = 0; i < 8; i++) { const a = i / 8 * 6.28; blob(ctx, cx + Math.cos(a) * 9, cy + Math.sin(a) * 4.5, 2.8, i % 2 ? '#8a8f96' : '#a3a8af'); }
+    if (!put(ctx, ART.campfire, gx, gy)) for (let i = 0; i < 8; i++) { const a = i / 8 * 6.28; blob(ctx, cx + Math.cos(a) * 9, cy + Math.sin(a) * 4.5, 2.8, i % 2 ? '#8a8f96' : '#a3a8af'); }
     for (let i = 0; i < 3; i++) {
       const f = Math.sin(t * 9 + i * 2) * 2, hgt = 12 + f + (i === 1 ? 5 : 0), x0 = cx + (i - 1) * 4;
       ctx.fillStyle = ['#ff8a2a', '#ffd23f', '#ff6a1a'][i]; ctx.beginPath(); ctx.moveTo(x0 - 4, cy); ctx.quadraticCurveTo(x0 - 3, cy - hgt * .6, x0 + f * .3, cy - hgt); ctx.quadraticCurveTo(x0 + 3, cy - hgt * .6, x0 + 4, cy); ctx.fill();
@@ -323,25 +408,106 @@ function drawPerson(a, t) {
     blob(ctx, gx - 9 * s, gy - 5 * s, 4.5 * s, skin); blob(ctx, gx - 10 * s, gy - 7 * s, 3.5 * s, hair);
     head = [gx, gy - 16 * s];
   } else {
-    const busy = !d.moving && /^(gather|work|tend|build|plant|craft|care)/.test(a.doing || '');
-    const ph = h % 7, step = d.moving ? Math.sin(t * 9 + ph) : 0, bob = Math.abs(step) * 1.8 * s + (busy ? (Math.sin(t * 7 + ph) + 1) * 1.4 * s : 0);
-    ctx.strokeStyle = '#2a2a35'; ctx.lineWidth = 2.6 * s; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(gx - 2.5 * s, gy - 8 * s - bob); ctx.lineTo(gx - 2.5 * s + step * 2.5 * s, gy - 1);
-    ctx.moveTo(gx + 2.5 * s, gy - 8 * s - bob); ctx.lineTo(gx + 2.5 * s - step * 2.5 * s, gy - 1); ctx.stroke(); ctx.lineCap = 'butt';
-    const by = gy - 21 * s - bob;
-    ctx.fillStyle = a.color; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.roundRect(gx - 6 * s, by, 12 * s, 14 * s, 4 * s); ctx.fill(); ctx.stroke();
-    if (a.pregnant) { ctx.beginPath(); ctx.arc(gx + 4 * s, by + 9 * s, 4.5 * s, 0, 7); ctx.fill(); ctx.stroke(); }
-    ctx.strokeStyle = shade(a.color, -.25); ctx.lineWidth = 2.4 * s; ctx.lineCap = 'round';      // arms
-    ctx.beginPath(); ctx.moveTo(gx - 6 * s, by + 3 * s); ctx.lineTo(gx - 7.5 * s - step * 2 * s, by + 10 * s);
-    ctx.moveTo(gx + 6 * s, by + 3 * s); ctx.lineTo(gx + 7.5 * s + step * 2 * s, by + 10 * s); ctx.stroke(); ctx.lineCap = 'butt';
-    const hy = by - 5 * s;
-    blob(ctx, gx, hy, 6 * s, skin);
-    ctx.fillStyle = hair; ctx.beginPath(); ctx.arc(gx, hy - 1 * s, 6.2 * s, Math.PI * 1.05, Math.PI * 1.95); ctx.fill();
-    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(gx - 2.6 * s, hy, 1.4 * s, 1.6 * s); ctx.fillRect(gx + 1.3 * s, hy, 1.4 * s, 1.6 * s);
-    head = [gx, hy - 7 * s];
+    head = drawBody(a, d, gx, gy, s, t, skin, hair, h);
   }
   S.head[a.name] = { x: gx, y: head[1], gy, s };
+}
+// ---- people at work: a tool for each job, swung toward what they're working on
+const TOOL_KIND = { chop: 'axe', mine: 'pick', hammer: 'hammer', hoe: 'hoe', hunt: 'spear', fish: 'rod' };
+function drawBody(a, d, gx, gy, s, t, skin, hair, h) {
+  const an = a.anim?.length && !d.moving && (S.st?.day ?? 0) - a.anim[0] <= 1 ? a.anim : null;
+  const kind = an?.[1] || '', ph = h % 7;
+  if (an && S.lastAnim[a.name] !== an[0] + kind) {                     // something new got done: a little popup
+    S.lastAnim[a.name] = an[0] + kind;
+    if (POP[kind]) S.popups.push({ name: a.name, icon: POP[kind], born: performance.now() });
+  }
+  const side = an ? ((an[2] - an[3]) > 0 ? 1 : (an[2] - an[3]) < 0 ? -1 : (an[2] + an[3]) >= 0 ? 1 : -1) : 1;
+  const swing = (Math.sin(t * 7 + ph) + 1) / 2;                        // 0..1, the rhythm of work
+  const sitting = kind === 'rest';
+  const bend = ['chop', 'mine', 'hoe', 'pick', 'hammer'].includes(kind) ? swing * 2.2 * s : 0;
+  const step = d.moving ? Math.sin(t * 9 + ph) : 0, bob = Math.abs(step) * 1.8 * s + bend + (sitting ? 6 * s : 0);
+  ctx.strokeStyle = '#2a2a35'; ctx.lineWidth = 2.6 * s; ctx.lineCap = 'round';      // legs
+  ctx.beginPath();
+  if (sitting) { ctx.moveTo(gx - 2.5 * s, gy - 3 * s); ctx.lineTo(gx + 5 * s, gy - 1); ctx.moveTo(gx + 2.5 * s, gy - 3 * s); ctx.lineTo(gx + 8 * s, gy - 1); }
+  else { ctx.moveTo(gx - 2.5 * s, gy - 8 * s - bob); ctx.lineTo(gx - 2.5 * s + step * 2.5 * s, gy - 1);
+         ctx.moveTo(gx + 2.5 * s, gy - 8 * s - bob); ctx.lineTo(gx + 2.5 * s - step * 2.5 * s, gy - 1); }
+  ctx.stroke(); ctx.lineCap = 'butt';
+  const by = gy - 21 * s - bob;
+  ctx.fillStyle = a.color; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.roundRect(gx - 6 * s, by, 12 * s, 14 * s, 4 * s); ctx.fill(); ctx.stroke();
+  if (a.pregnant) { ctx.beginPath(); ctx.arc(gx + 4 * s, by + 9 * s, 4.5 * s, 0, 7); ctx.fill(); ctx.stroke(); }
+  const hy = by - 5 * s;
+  // the free arm, then the working arm
+  const sh = [gx + side * 6 * s, by + 3 * s], other = [gx - side * 6 * s, by + 3 * s];
+  ctx.strokeStyle = shade(a.color, -.25); ctx.lineWidth = 2.4 * s; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(...other); ctx.lineTo(other[0] - side * 1.5 * s - step * 2 * s, other[1] + 7 * s); ctx.stroke();
+  let ang = Math.PI / 2 - side * 0.25 - step * .3;                     // arm angle (0 = pointing right, down is +)
+  if (['chop', 'mine', 'hammer'].includes(kind)) ang = side > 0 ? -2.3 + swing * 2.6 : Math.PI + 2.3 - swing * 2.6;
+  else if (kind === 'hoe') ang = side > 0 ? .2 + swing * .7 : Math.PI - .2 - swing * .7;
+  else if (kind === 'pick') ang = side > 0 ? .5 + swing * .4 : Math.PI - .5 - swing * .4;
+  else if (kind === 'fish') ang = side > 0 ? -.25 : Math.PI + .25;
+  else if (kind === 'hunt') ang = side > 0 ? -.1 : Math.PI + .1;
+  else if (kind === 'eat') ang = side > 0 ? -1.9 : Math.PI + 1.9;
+  else if (['talk', 'give', 'tame', 'craft', 'care', 'love'].includes(kind)) ang = side > 0 ? -.2 - Math.sin(t * 5) * .5 : Math.PI + .2 + Math.sin(t * 5) * .5;
+  const reach = (kind === 'hunt' ? 8 + Math.max(0, Math.sin(t * 6)) * 4 : 8) * s;
+  const hand = [sh[0] + Math.cos(ang) * reach, sh[1] + Math.sin(ang) * reach];
+  ctx.beginPath(); ctx.moveTo(...sh); ctx.lineTo(...hand); ctx.stroke(); ctx.lineCap = 'butt';
+  drawTool(TOOL_KIND[kind], hand, ang, s, t, an, gx, gy, side);
+  if (kind === 'pick' || kind === 'eat') blob(ctx, hand[0], hand[1], 1.8 * s, '#e0334e');
+  if (kind === 'craft' && Math.sin(t * 9) > .6) blob(ctx, hand[0] + side * 3, hand[1] - 2, 1.5, '#ffe9a0');
+  if ((kind === 'love' || kind === 'care') && Math.sin(t * 3) > 0) { ctx.font = `${9 * s}px system-ui`; ctx.fillText('❤', gx + side * 9 * s, hy - 8 * s - (t * 8 % 8)); }
+  if (['chop', 'mine', 'hammer'].includes(kind) && swing > .93 && Math.random() < .5) spark(an, gx, gy, kind);
+  if (d.moving && a.carry) carry(a.carry, gx, by, s, side);             // carrying a load home
+  blob(ctx, gx, hy, 6 * s, skin);
+  ctx.fillStyle = hair; ctx.beginPath(); ctx.arc(gx, hy - 1 * s, 6.2 * s, Math.PI * 1.05, Math.PI * 1.95); ctx.fill();
+  ctx.fillStyle = '#1a1a1a';
+  if (kind === 'rest' || a.mood === 'exhausted') { ctx.fillRect(gx - 2.8 * s, hy + .6 * s, 1.8 * s, .7 * s); ctx.fillRect(gx + 1.1 * s, hy + .6 * s, 1.8 * s, .7 * s); }
+  else { ctx.fillRect(gx - 2.6 * s, hy, 1.4 * s, 1.6 * s); ctx.fillRect(gx + 1.3 * s, hy, 1.4 * s, 1.6 * s); }
+  if (kind === 'talk' && Math.sin(t * 12) > 0) { ctx.fillStyle = '#5a2a2a'; ctx.fillRect(gx - 1 * s, hy + 3 * s, 2 * s, 1.2 * s); }
+  return [gx, hy - 7 * s];
+}
+function drawTool(tool, hand, ang, s, t, an, gx, gy, side) {
+  if (!tool) return;
+  const dx = Math.cos(ang), dy = Math.sin(ang), at = l => [hand[0] + dx * l * s, hand[1] + dy * l * s];
+  ctx.lineCap = 'round';
+  if (tool === 'rod') {                                                 // a fishing rod, line and bobbing float
+    const tip = [hand[0] + side * 12 * s, hand[1] - 12 * s];
+    ctx.strokeStyle = '#7a5530'; ctx.lineWidth = 1.4 * s; ctx.beginPath(); ctx.moveTo(...hand); ctx.lineTo(...tip); ctx.stroke();
+    const fx = gx + (an[2] - an[3]) * TW / 2 * .9, fy = gy + (an[2] + an[3]) * TH / 2 * .9 + Math.sin(t * 4) * 1.2;
+    ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = .7; ctx.beginPath(); ctx.moveTo(...tip); ctx.quadraticCurveTo(tip[0], fy - 4, fx, fy); ctx.stroke();
+    blob(ctx, fx, fy, 1.8, '#e23b3b');
+    return;
+  }
+  const len = { axe: 10, pick: 10, hammer: 8, hoe: 15, spear: 18 }[tool];
+  const end = at(len), start = tool === 'spear' ? at(-6) : hand;
+  ctx.strokeStyle = '#7a5530'; ctx.lineWidth = 1.8 * s; ctx.beginPath(); ctx.moveTo(...start); ctx.lineTo(...end); ctx.stroke();
+  const nx = -dy, ny = dx;                                              // across the handle
+  ctx.fillStyle = '#9aa1aa'; ctx.strokeStyle = '#9aa1aa'; ctx.lineWidth = 2 * s;
+  if (tool === 'axe') { ctx.beginPath(); ctx.moveTo(end[0], end[1]); ctx.lineTo(end[0] + nx * 4 * s - dx * 2 * s, end[1] + ny * 4 * s - dy * 2 * s); ctx.lineTo(end[0] + nx * 4 * s + dx * 2 * s, end[1] + ny * 4 * s + dy * 2 * s); ctx.closePath(); ctx.fill(); }
+  if (tool === 'pick') { ctx.beginPath(); ctx.moveTo(end[0] - nx * 4 * s, end[1] - ny * 4 * s); ctx.quadraticCurveTo(end[0] + dx * 2 * s, end[1] + dy * 2 * s, end[0] + nx * 4 * s, end[1] + ny * 4 * s); ctx.stroke(); }
+  if (tool === 'hammer') { ctx.fillRect(end[0] - 2.5 * s, end[1] - 2.5 * s, 5 * s, 5 * s); }
+  if (tool === 'hoe') { ctx.beginPath(); ctx.moveTo(...end); ctx.lineTo(end[0] + nx * 3 * s, end[1] + ny * 3 * s + 2 * s); ctx.stroke(); }
+  if (tool === 'spear') { ctx.beginPath(); ctx.moveTo(...end); ctx.lineTo(...at(len + 3)); ctx.stroke(); }
+  ctx.lineCap = 'butt';
+}
+function carry(what, gx, by, s, side) {
+  if (what === 'wood') { ctx.save(); ctx.translate(gx, by); ctx.rotate(-.35 * side); ctx.fillStyle = '#8a5a2b'; ctx.fillRect(-9 * s, -3 * s, 18 * s, 4 * s);
+    ctx.fillStyle = '#c8a06a'; ctx.beginPath(); ctx.arc(9 * s, -1 * s, 2 * s, 0, 7); ctx.fill(); ctx.restore(); }
+  else if (what === 'stone') blob(ctx, gx + side * 7 * s, by + 9 * s, 3.2 * s, '#9aa0a8');
+  else if (what === 'food') { ctx.fillStyle = '#b07c3c'; ctx.fillRect(gx + side * 5 * s, by + 7 * s, 6 * s, 4 * s);
+    blob(ctx, gx + side * 7 * s, by + 7 * s, 1.5 * s, '#e0334e'); blob(ctx, gx + side * 9 * s, by + 7 * s, 1.5 * s, '#e0334e'); }
+}
+// wood chips and sparks fly from whatever is being worked on
+S.parts = [];
+function spark(an, gx, gy, kind) {
+  const x = gx + an[2] * TW / 2 - an[3] * TW / 2, y = gy + (an[2] + an[3]) * TH / 2 - 8;
+  for (let i = 0; i < 3; i++) S.parts.push({ x, y, vx: (Math.random() - .5) * 40, vy: -20 - Math.random() * 30, life: .6,
+    c: kind === 'chop' ? '#c8954f' : kind === 'mine' ? '#ffe27a' : '#d8c8a8' });
+}
+function drawParts(dt) {
+  S.parts = S.parts.filter(p => (p.life -= dt) > 0);
+  for (const p of S.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 80 * dt; ctx.globalAlpha = Math.min(1, p.life * 2); ctx.fillStyle = p.c; ctx.fillRect(p.x, p.y, 1.8, 1.8); }
+  ctx.globalAlpha = 1;
 }
 function personOverlay(a) {
   const H = S.head[a.name]; if (!H) return;
@@ -352,6 +518,7 @@ function personOverlay(a) {
   bar(x, top - 4, 20, 1 - a.hunger / 100, a.hunger > 70 ? '#e0525e' : a.hunger > 40 ? '#e0a252' : '#5cc46e');
   ctx.font = '12px system-ui';
   if (a.heart) ctx.fillText('❤️', x + 14, top - 8);
+  else if (a.mood_icon && !a.asleep && !['🙂', '😊'].includes(a.mood_icon)) { ctx.font = '11px system-ui'; ctx.fillText(a.mood_icon, x + 15, top - 2); ctx.font = '12px system-ui'; }
   if (a.slow) ctx.fillText('💭', x - 14, top - 8);
   if (a.asleep && a.stage !== 'baby') { ctx.globalAlpha = .9; ctx.fillText(a.dreaming ? '🌙' : '💤', x + 10 + Math.sin(performance.now() / 600) * 2, top - 10); ctx.globalAlpha = 1; }
   if (a.stage === 'baby') return;
@@ -419,7 +586,7 @@ function resize() {
 }
 let lastFrame = 0;
 function drawFrame(now) {
-  const t = now / 1000, st = S.st, dpr = devicePixelRatio || 1;
+  const t = now / 1000, st = S.mapst || S.st, agents = S.mapst ? S.mapst.agents : S.agents, dpr = devicePixelRatio || 1;
   S.dt = Math.min(.1, (now - lastFrame) / 1000 || .016); lastFrame = now;
   resize();
   if (S.camTo) {                                       // smooth camera moves (find / follow)
@@ -437,6 +604,13 @@ function drawFrame(now) {
     else for (let y = 0; y < S.H; y++) for (let x = 0; x < S.W; x++) if (vis(x, y)) paintTile(x, y, ctx);   // close up: draw sharp
   }
   if (st) {
+    S.burning = new Set((st.burning || []).map(([x, y]) => x + ',' + y));
+    drawTerritory(st);
+    for (const f of st.floods || []) {                                // recent floods: water over the fields
+      ctx.fillStyle = `rgba(70,140,220,${.25 + Math.sin(t * 2) * .08})`;
+      for (let y = f.y - f.r; y <= f.y + f.r; y++) for (let x = f.x - f.r; x <= f.x + f.r; x++)
+        if (S.tiles[y]?.[x] && S.tiles[y][x] !== 'water' && vis(x, y)) { diamond(ctx, x, y); ctx.fill(); }
+    }
     // water shimmer
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.3;
     for (const w of S.water || []) {
@@ -447,20 +621,22 @@ function drawFrame(now) {
     ctx.globalAlpha = 1;
     // everything that stands up, back to front
     S.inside = new Set(); const items = [], spots = new Set();
-    for (const a of S.agents) { const d = S.disp[a.name] || a; spots.add(Math.round(d.x) + ',' + Math.round(d.y)); }
+    for (const a of agents) { const d = S.disp[a.name] || a; spots.add(Math.round(d.x) + ',' + Math.round(d.y)); }
     const byTile = {};
     for (const s of st.structures) for (let i = 0; i < s.w; i++) for (let j = 0; j < s.h; j++) byTile[(s.x + i) + ',' + (s.y + j)] = s;
-    for (const a of S.agents) {
+    for (const a of agents) {
       const b = a.inside && byTile[a.x + ',' + a.y];
       if (b) S.inside.add(b.x + ',' + b.y);
       const d = S.disp[a.name] || a;
       if (vis(d.x, d.y)) items.push([b && b.done && !isFlat(b) ? b.x + b.y + b.w + b.h - 1.4 : d.x + d.y + .5, () => drawPerson(a, t)]);
       else S.head[a.name] = null;
     }
-    for (const p of S.props || []) if (vis(p.x, p.y)) items.push([p.x + p.y, () => drawProp(p, spots.has((p.x - 1) + ',' + (p.y - 1)) || spots.has(p.x + ',' + (p.y - 1)) || spots.has((p.x - 1) + ',' + p.y))]);
+    for (const p of S.props || []) if (vis(p.x, p.y)) items.push([p.x + p.y, () => drawProp(p, spots.has((p.x - 1) + ',' + (p.y - 1)) || spots.has(p.x + ',' + (p.y - 1)) || spots.has((p.x - 1) + ',' + p.y), t)]);
+    for (const b of st.animals || []) { const d = S.adisp[b[0]] || { x: b[2], y: b[3] }; if (vis(d.x, d.y)) items.push([d.x + d.y + .45, () => drawAnimal(b, t)]); }
     for (const s of st.structures) if (vis(s.x + s.w / 2, s.y + s.h / 2)) items.push([isFlat(s) ? -1e6 + s.x + s.y : s.x + s.y + s.w + s.h - 1.5, () => drawBuilding(s, t)]);
     for (const g of st.dead) if (vis(g.x, g.y)) items.push([g.x + g.y + .2, () => drawGrave(g)]);
     items.sort((p, q) => p[0] - q[0]).forEach(([, f]) => f());
+    drawParts(S.dt);
     // fog of war
     if ($('fog').checked && st.fog && vw > 0 && vh > 0) { syncFog(st.fog); ctx.globalAlpha = .62; ctx.drawImage(fogc, vx / FOG_SCALE, vy / FOG_SCALE, vw / FOG_SCALE, vh / FOG_SCALE, vx, vy, vw, vh); ctx.globalAlpha = 1; }
     // time of day: darken, warm dawn/dusk, and let fires and homes glow
@@ -482,13 +658,74 @@ function drawFrame(now) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const s of st.structures) if (vis(s.x + s.w / 2, s.y + s.h / 2)) buildingOverlay(s);
-    for (const a of S.agents) personOverlay(a);
+    for (const a of agents) personOverlay(a);
+    drawPlaces(st);
+    drawPopups(t);
     if ($('bubbles').checked) {
-      for (const a of S.agents) if (a.say) drawTalkLine(a);
-      for (const a of S.agents) if (a.say && S.head[a.name]) drawBubble(a);
+      for (const a of agents) if (a.say) drawTalkLine(a);
+      for (const a of agents) if (a.say && S.head[a.name]) drawBubble(a);
     }
   }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawWeather(t);
   requestAnimationFrame(drawFrame);
+}
+
+// territory: each group's land, outlined in its colour (cached as a path per group)
+const TERR = {};
+function drawTerritory(st) {
+  for (const g of st.groups || []) {
+    const tiles = st.territory?.[g.id] || [], key = tiles.length + ':' + (tiles[0] || '') + (tiles[tiles.length - 1] || '');
+    if (!tiles.length) continue;
+    if (!TERR[g.id] || TERR[g.id].key !== key) {
+      const set = new Set(tiles.map(([x, y]) => x + ',' + y)), edge = new Path2D(), fill = new Path2D();
+      for (const [x, y] of tiles) {
+        const p = [iso(x, y), iso(x + 1, y), iso(x + 1, y + 1), iso(x, y + 1)];
+        fill.moveTo(...p[0]); p.slice(1).forEach(q => fill.lineTo(...q)); fill.closePath();
+        [[0, -1, 0, 1], [1, 0, 1, 2], [0, 1, 2, 3], [-1, 0, 3, 0]].forEach(([dx, dy, i, j]) => {
+          if (!set.has((x + dx) + ',' + (y + dy))) { edge.moveTo(...p[i]); edge.lineTo(...p[j]); } });
+      }
+      TERR[g.id] = { key, edge, fill };
+    }
+    ctx.globalAlpha = .1; ctx.fillStyle = g.color; ctx.fill(TERR[g.id].fill);
+    ctx.globalAlpha = .75; ctx.strokeStyle = g.color; ctx.lineWidth = 1.6; ctx.setLineDash([6, 4]); ctx.stroke(TERR[g.id].edge);
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+}
+function drawPlaces(st) {
+  ctx.font = 'italic 600 13px Georgia, serif'; ctx.textAlign = 'center';
+  for (const p of st.places || []) {
+    const [x, y] = scr(...ground(p.x, p.y));
+    if (x < -80 || y < -20 || x > scroller.clientWidth + 80 || y > scroller.clientHeight + 20) continue;
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(20,20,30,.6)'; ctx.strokeText(p.name, x, y - 28);
+    ctx.fillStyle = '#fff4d6'; ctx.fillText(p.name, x, y - 28);
+  }
+}
+// "+wood" popups when someone gets something done, floating up and fading
+const POP = { chop: '🪵', mine: '🪨', pick: '🫐', fish: '🐟', hunt: '🍖', hammer: '🔨', hoe: '🌱', craft: '🔧', care: '🍼', love: '❤️', tame: '🐐', give: '🎁' };
+function drawPopups(t) {
+  const now = performance.now();
+  S.popups = S.popups.filter(p => now - p.born < 1600);
+  ctx.font = '15px system-ui'; ctx.textAlign = 'center';
+  for (const p of S.popups) {
+    const H = S.head[p.name]; if (!H) continue;
+    const k = (now - p.born) / 1600, [x, y] = scr(H.x, H.y);
+    ctx.globalAlpha = 1 - k; ctx.fillText(p.icon, x + 14, y - 12 - k * 26); ctx.globalAlpha = 1;
+  }
+}
+// weather: snow in winter, falling leaves in autumn, petals in spring
+const FLAKES = Array.from({ length: 90 }, () => ({ x: Math.random(), y: Math.random(), s: .5 + Math.random(), p: Math.random() * 6 }));
+function drawWeather(t) {
+  const sea = season(), w = scroller.clientWidth, h = scroller.clientHeight;
+  if (sea === 'summer') return;
+  const n = sea === 'winter' ? 90 : sea === 'autumn' ? 30 : 14;
+  for (let i = 0; i < n; i++) {
+    const f = FLAKES[i], fall = sea === 'winter' ? 22 : 34;
+    const y = ((f.y * h + t * fall * f.s) % (h + 20)) - 10, x = ((f.x * w + Math.sin(t * .7 + f.p) * 18 + (sea === 'autumn' ? t * 12 : 0)) % (w + 20)) - 10;
+    if (sea === 'winter') blob(ctx, x, y, 1.2 + f.s, 'rgba(255,255,255,.8)');
+    else { ctx.save(); ctx.translate(x, y); ctx.rotate(t * f.s + f.p); ctx.fillStyle = sea === 'autumn' ? ['#d9822b', '#c4492c', '#e0b03a'][i % 3] : '#f8c8e0';
+      ctx.beginPath(); ctx.ellipse(0, 0, 3.5, 1.8, 0, 0, 7); ctx.fill(); ctx.restore(); }
+  }
 }
 
 // zoom & pan: a camera over the world
@@ -574,6 +811,8 @@ function renderTop(st) {
   const tm = st.time || {}, PART = { morning: '🌅', afternoon: '☀️', evening: '🌇', night: '🌙' };
   $('p-day').textContent = `${PART[tm.part] || '☀️'} ${tm.stamp || ts(st.day, true)}`;
   const B = st.backends || {};
+  const SE = { spring: '🌱', summer: '☀️', autumn: '🍂', winter: '❄️' };
+  if (st.season) $('p-season').textContent = `${SE[st.season]} ${st.season[0].toUpperCase() + st.season.slice(1)} · 🏛️ ${st.age_name}`;
   $('p-pop').textContent = `👥 ${st.agents.length} / ${st.limits.max_agents}` + (st.dead.length ? ` · 🪦 ${st.dead.length}` : '');
   $('p-explored').textContent = `🧭 ${st.explored}% explored`;
   $('p-speed').hidden = !st.thinking;
@@ -605,6 +844,8 @@ function showTab(name) {
   for (const s of document.querySelectorAll('.tab')) s.hidden = s.id !== 'tab-' + name;
   if (name === 'stats') loadStats();
   if (name === 'settings') loadSaves();
+  if (name === 'history') loadHistory();
+  if (name === 'world') renderWorld(S.st, true);
   if (name === 'talk') renderChat(true);
   store.set('tab', name);
 }
@@ -622,7 +863,7 @@ function renderList(st) {
       <div class="right">${TIER[st.sol.model === 'local' ? 'local' : st.sol.model.startsWith('local:') ? 'smart' : 'haiku'] || ''}</div></div>` + rows.map(a => `
     <div class="person ${S.sel === a.name ? 'sel' : ''}" data-name="${esc(a.name)}">
       <div class="avatar" style="background:${a.color}">${esc(a.name[0])}</div>
-      <div><div class="name">${esc(a.name)} <span class="muted" title="${a.sex}">${SEX[a.sex]}</span> <span title="${a.stage === 'baby' ? 'babies don\'t use a brain' : a.tier}">${a.stage === 'baby' ? '' : TIER[a.tier]}</span> ${extras(a)}${a.asleep && a.stage !== 'baby' ? ' 💤' : ''}${a.slow ? ' 💭' : ''}</div>
+      <div><div class="name">${esc(a.name)} <span class="muted" title="${a.sex}">${SEX[a.sex]}</span> <span title="${a.stage === 'baby' ? 'babies don\'t use a brain' : a.tier}">${a.stage === 'baby' ? '' : TIER[a.tier]}</span> ${extras(a)}${a.asleep && a.stage !== 'baby' ? ' 💤' : ` <span title="${esc(a.mood || '')}">${a.mood_icon || ''}</span>`}${a.slow ? ' 💭' : ''}${groupDot(st, a)}</div>
         <div class="sub">${a.role ? esc(a.role) : '<i>no role yet</i>'} · ${a.task ? '🏗️ ' + esc(a.task.label) : a.asleep ? 'asleep' : a.inside ? 'in the ' + esc(a.inside) + ' · ' + esc(a.doing) : esc(a.doing) || 'getting started'}</div></div>
       <div class="right">🎂 ${a.age_text}<br>🍎 ${a.food}</div>
       <div class="bar" title="Hunger ${a.hunger}/100"><div style="width:${a.hunger}%;background:${hungerColor(a.hunger)}"></div></div>
@@ -716,6 +957,7 @@ function overview(a) {
     ${a.ambition ? `<div class="card" style="border-left:3px solid var(--gold)">🎯 <b>Ambition:</b> ${esc(a.ambition)}</div>` : ''}
     ${a.plan ? `<div class="card" style="border-left:3px solid var(--accent)">🗺️ <b>Plan:</b> ${esc(a.plan)}</div>` : ''}
     ${a.queue.length ? `<div class="card">⏭️ <b>Next up</b> (runs automatically): ${a.queue.map(q => esc(q.action + (q.target ? ' → ' + q.target : q.title ? ' ' + q.title : q.to && q.to !== 'all' ? ' → ' + q.to : ''))).join(' · ')}</div>` : ''}
+    ${society(a)}
     <h3>Abilities</h3>${Object.entries(a.abilities).map(([k, v]) => `<div title="${esc(a.ability_info[k])}">${meter(k[0].toUpperCase() + k.slice(1), v * 10, v >= 7 ? 'var(--good)' : v <= 3 ? 'var(--warn)' : 'var(--accent)').replace(`<span>${v * 10}</span></div>`, `<span>${v}/10</span></div>`)}</div>`).join('')}
     <p class="muted small">Expected lifespan: about ${esc(a.lifespan_text || a.lifespan + ' days')}.</p>
     ${a.orders.length ? `<h3>You asked</h3>${a.orders.map(o => `<div class="card">“${esc(o[1])}” <span class="tag">${ts(o[0])}</span></div>`).join('')}` : ''}
@@ -811,10 +1053,10 @@ $('thinkev').onchange = e => api.post('/api/control', { think_every: +e.target.v
 $('discoveries').onclick = e => { const g = e.target.closest('[data-goto]'); if (g) select(g.dataset.goto); };
 
 // ======================================================================= world feed
-const FILTERS = { all: 'All', sol: '🧙 Sol', talk: '💬 Talk', life: '❤️ Life', making: '🔨 Making', ideas: '💡 Ideas', explore: '🧭 Exploring', survival: '🍎 Food' };
-const KIND_FILTER = { dream: 'ideas', sol: 'sol', discovery: 'ideas', attempt: 'ideas', goal: 'ideas', care: 'life', birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
+const FILTERS = { all: 'All', sol: '🧙 Sol', talk: '💬 Talk', life: '❤️ Life', society: '🤝 Society', culture: '📖 Culture', making: '🔨 Making', ideas: '💡 Ideas', nature: '🌿 Nature', explore: '🧭 Exploring', survival: '🍎 Food' };
+const KIND_FILTER = { trade: 'society', group: 'society', law: 'society', contact: 'society', story: 'culture', nature: 'nature', dream: 'ideas', sol: 'sol', discovery: 'ideas', attempt: 'ideas', goal: 'ideas', care: 'life', birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
   idea: 'ideas', explore: 'explore', food: 'survival', role: 'life', brain: 'life' };
-const KIND_ICON = { dream: '🌙', sol: '🧙', discovery: '💡', attempt: '✨', goal: '🎯', care: '🍼', birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
+const KIND_ICON = { trade: '🤝', group: '👥', law: '⚖️', contact: '🌍', story: '📖', nature: '🌿', dream: '🌙', sol: '🧙', discovery: '💡', attempt: '✨', goal: '🎯', care: '🍼', birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
 $('filters').innerHTML = Object.entries(FILTERS).map(([k, l]) => `<span class="chip ${k === 'all' ? 'on' : ''}" data-f="${k}">${l}</span>`).join('');
 $('filters').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; S.filter = c.dataset.f; for (const x of $('filters').children) x.classList.toggle('on', x === c); renderFeed(S.st, true); };
 let feedKey = '';
@@ -833,7 +1075,7 @@ $('feed').onclick = e => { const g = e.target.closest('[data-goto]'); if (g) sel
 
 // ======================================================================= stats (small multiples, one measure each, shared crosshair)
 const METRICS = [['population', 'Population'], ['hunger', 'Average hunger'], ['food', 'Food carried'], ['explored', 'Explored %'],
-  ['structures', 'Structures'], ['farms', 'Farm plots'], ['objects', 'Objects'], ['ideas', 'Ideas'], ['discoveries', 'Discoveries']];
+  ['structures', 'Structures'], ['farms', 'Farm plots'], ['objects', 'Objects'], ['ideas', 'Ideas'], ['discoveries', 'Discoveries'], ['techs', 'Breakthroughs'], ['animals', 'Wild animals'], ['groups', 'Groups']];
 $('charts').innerHTML = METRICS.map(([k, l]) => `<div class="chart"><div class="title"><span>${l}</span><b id="v-${k}">–</b></div><canvas id="c-${k}" data-k="${k}"></canvas></div>`).join('');
 async function loadStats() { S.stats = await api.get('/api/stats'); drawCharts(); }
 function drawCharts() {
@@ -843,7 +1085,7 @@ function drawCharts() {
     const c = $('c-' + k), dpr = devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
     c.width = w * dpr; c.height = h * dpr;
     const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-    const ys = data.map(d => d[k]), max = Math.max(1, ...ys), padL = 26, padB = 14, pw = w - padL - 6, ph = h - padB - 6;
+    const ys = data.map(d => d[k] ?? 0), max = Math.max(1, ...ys), padL = 26, padB = 14, pw = w - padL - 6, ph = h - padB - 6;
     const X = i => padL + (data.length === 1 ? pw : i / (data.length - 1) * pw), Y = v => 6 + ph - v / max * ph;
     g.font = '10px system-ui'; g.fillStyle = ink; g.strokeStyle = grid; g.lineWidth = 1;
     (max >= 4 ? [0, .5, 1] : [0, 1]).forEach(f => { const y = Y(max * f); g.beginPath(); g.moveTo(padL, y); g.lineTo(w - 6, y); g.stroke(); g.textAlign = 'right'; g.fillText(fmt(Math.round(max * f)), padL - 4, y + 3); });
@@ -856,11 +1098,11 @@ function drawCharts() {
     $('v-' + k).textContent = fmt(ys[i]) + (k === 'explored' ? '%' : '');
   }
   const d = data[S.hover ?? data.length - 1];
-  $('readout').innerHTML = `<b>${ts(d.day, true)}</b> — ` + METRICS.map(([k, l]) => `${l}: <b>${fmt(d[k])}${k === 'explored' ? '%' : ''}</b>`).join(' · ') + ` · Deaths so far: <b>${d.deaths}</b>`;
+  $('readout').innerHTML = `<b>${ts(d.day, true)}</b> — ` + METRICS.map(([k, l]) => `${l}: <b>${fmt(d[k] ?? 0)}${k === 'explored' ? '%' : ''}</b>`).join(' · ') + ` · Deaths so far: <b>${d.deaths}</b>`;
   if ($('stats-table').checked) {
     const step = Math.max(1, Math.ceil(data.length / 30)), rows = data.filter((_, i) => i % step === 0 || i === data.length - 1).reverse();
     $('table').innerHTML = `<table><tr><th>When</th>${METRICS.map(([, l]) => `<th>${l}</th>`).join('')}</tr>` +
-      rows.map(r => `<tr><td>${ts(r.day)}</td>${METRICS.map(([k]) => `<td>${fmt(r[k])}</td>`).join('')}</tr>`).join('') + '</table>';
+      rows.map(r => `<tr><td>${ts(r.day)}</td>${METRICS.map(([k]) => `<td>${fmt(r[k] ?? 0)}</td>`).join('')}</tr>`).join('') + '</table>';
   } else $('table').innerHTML = '';
 }
 $('charts').addEventListener('pointermove', e => {
@@ -946,7 +1188,7 @@ document.addEventListener('keydown', e => {
   else if (k === '/') { e.preventDefault(); showTab('talk'); $('msg').focus(); }
   else if (k === '?') help(true);
   else if (k === 'Escape') { if (!$('help').hidden) help(false); else if (S.sel) closeProfile(); }
-  else if ('12345'.includes(k) && k.length === 1) showTab(['people', 'talk', 'world', 'stats', 'settings'][+k - 1]);
+  else if ('123456'.includes(k) && k.length === 1) showTab(['people', 'talk', 'world', 'stats', 'history', 'settings'][+k - 1]);
 });
 
 // ======================================================================= main loop
@@ -988,6 +1230,8 @@ async function poll() {
       <span class="eff" style="color:var(--text-2)">needs ${Object.entries(b.cost).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing'}</span></div>`).join('')
       : '<p class="muted small">No blueprints yet. The first time someone builds a new kind of building, its cost and purpose are worked out and shared here.</p>';
     if (S.tab === 'settings') renderUsage();
+    if (S.tab === 'world') renderWorld(st);
+    S.mapst = S.replay ? replayState(S.replay, st) : null;
   } catch (e) { console.error(e); }
   polling = false;
   if (pollAgain) { pollAgain = false; poll(); }
@@ -996,6 +1240,7 @@ async function loadWorld() {
   const w = await api.get('/api/world');
   S.W = w.width; S.H = w.height; S.tiles = w.tiles;
   WW = (S.W + S.H) * TW / 2 + PAD * 2; WH = (S.W + S.H) * TH / 2 + TOP + PAD;
+  BG_SCALE = Math.min(2, 4600 / WW);
   bg.width = WW * BG_SCALE; bg.height = WH * BG_SCALE; bctx.setTransform(BG_SCALE, 0, 0, BG_SCALE, 0, 0);
   fogc.width = Math.ceil(WW / FOG_SCALE); fogc.height = Math.ceil(WH / FOG_SCALE); fogKey = '';
   drawn.length = 0; resize();
@@ -1014,3 +1259,112 @@ async function loadWorld() {
   setInterval(() => { if (S.tab === 'stats') loadStats(); }, 4000);
   if (!store.get('seenHelp', false)) help(true);
 })();
+
+
+// ======================================================================= world: ages, groups, trade, culture, nature
+const groupDot = (st, a) => { const g = (st.groups || []).find(g => g.id === a.group); return g ? ` <span class="dot" title="${esc(g.name)}" style="background:${g.color};margin:0 0 0 4px"></span>` : ''; };
+let worldKey = '';
+function renderWorld(st, force) {
+  if (!st) return;
+  const key = JSON.stringify([st.techs, st.groups, st.deals, st.promises, st.stories?.length, st.places, st.animals?.length, st.burning?.length, st.season]);
+  if (key === worldKey && !force) return;
+  worldKey = key;
+  const left = st.tech_total - st.techs.length;
+  $('techs').innerHTML = `<div class="card"><b>${esc(st.age_name)}</b> · ${st.techs.length} of ${st.tech_total} breakthroughs
+      <div class="techs">${st.techs.map(x => `<span class="tech" title="${esc(x.what)}">✨ ${esc(x.name)}</span>`).join('')}${'<span class="tech locked" title="Undiscovered - agents find these by attempting things">❔</span>'.repeat(left)}</div>
+      <div class="muted small">Nobody is told what's possible: breakthroughs are found by attempting things (fire, tools, farming, pottery, weaving, bronze…). Hover one to see what it does.</div></div>`;
+  $('groups').innerHTML = (st.groups || []).map(g => `<div class="card" style="border-left:4px solid ${g.color}">
+      <b style="color:${g.color}">${esc(g.name)}</b> <span class="muted small">led by ${esc(g.leader || 'nobody')}${g.purpose ? ' · ' + esc(g.purpose) : ''}</span>
+      <div class="chips" style="margin:6px 0">${g.members.map(m => `<span class="chip" data-goto="${esc(m)}">${esc(m)}${m === g.leader ? ' 👑' : ''}</span>`).join('')}</div>
+      ${g.plan ? `<div class="small">🗺️ ${esc(g.plan)}</div>` : ''}
+      ${g.laws.length ? `<div class="small" style="margin-top:4px">⚖️ ${g.laws.map(l => `<div>“${esc(l.text)}”${l.rule ? '' : ' <span class="muted">(unwritten)</span>'}</div>`).join('')}</div>` : ''}
+      ${g.proposals.length ? `<div class="small muted">Proposed: ${g.proposals.map(p => `“${esc(p.text)}” (${p.support.length}/${g.members.length})`).join(', ')}</div>` : ''}
+      ${g.banned.length ? `<div class="small muted">Exiled: ${g.banned.map(esc).join(', ')}</div>` : ''}</div>`).join('')
+    || '<p class="muted small">No groups yet. Agents can found a group, choose a leader, make laws and claim land.</p>';
+  const bundle = b => Object.entries(b || {}).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing';
+  const deals = (st.deals || []).slice().reverse().slice(0, 8).map(d => `<div class="small">🤝 ${esc(d.from)} → ${esc(d.to)}: ${bundle(d.give)} for ${bundle(d.want)} <span class="tag">${d.status}</span></div>`).join('');
+  const proms = (st.promises || []).slice().reverse().slice(0, 8).map(p => `<div class="small">${p.status === 'broken' ? '💔' : p.status === 'kept' ? '✅' : '⏳'} ${esc(p.from)} promised ${esc(p.to)} ${bundle(p.what)} <span class="tag">${p.status}</span></div>`).join('');
+  $('trade').innerHTML = deals || proms ? `<div class="card">${deals}${proms ? '<div style="margin-top:6px"></div>' + proms : ''}</div>` : '<p class="muted small">No trades yet. Agents can offer deals and make promises; broken promises cost trust.</p>';
+  $('culture').innerHTML = ((st.stories || []).slice().reverse().map(x => `<div class="disc"><b>📖 ${esc(x.title)}</b>${x.version > 1 ? ` <span class="tag">retold ${x.version}×</span>` : ''}<div>${esc(x.text)}</div></div>`).join('')
+    || '<p class="muted small">No stories yet. Sol turns memorable events into stories that spread around the fire.</p>')
+    + ((st.places || []).length ? `<div class="small" style="margin-top:6px">📍 ${st.places.map(p => `<b>${esc(p.name)}</b> <span class="muted">(${p.x}, ${p.y}, named by ${esc(p.by)})</span>`).join(' · ')}</div>` : '');
+  const count = {};
+  for (const b of st.animals || []) { const k = b[1] + (b[4] ? ' (tame)' : ''); count[k] = (count[k] || 0) + 1; }
+  $('nature').innerHTML = `<div class="card small">${Object.entries(count).map(([k, v]) => `${{ deer: '🦌', rabbit: '🐇', boar: '🐗', goat: '🐐', sheep: '🐑' }[k.split(' ')[0]] || '🐾'} ${v} ${k}`).join(' · ') || 'No animals left nearby.'}
+    ${st.burning?.length ? `<div>🔥 A wildfire is burning (${st.burning.length} trees)</div>` : ''}${st.floods?.length ? '<div>🌊 Recent flooding</div>' : ''}
+    <div class="muted">It is ${st.season}. ${{ winter: 'Bushes are bare, crops don’t grow, nights are freezing outside.', autumn: 'Winter is coming: time to store food.', spring: 'Crops grow fast; rivers may flood.', summer: 'Long days; dry woods can burn.' }[st.season] || ''}</div></div>`;
+}
+$('tab-world').addEventListener('click', e => { const g = e.target.closest('[data-goto]'); if (g) { showTab('people'); select(g.dataset.goto); } });
+
+// ======================================================================= profile: feelings, skills, beliefs, society
+function society(a) {
+  if (!a.needs) return '';
+  const NI = { rest: '😴 Rest', belonging: '🤝 Company', safety: '🛡️ Safety', status: '🏆 Respect', curiosity: '🔭 Curiosity' };
+  const st = S.st || {}, g = (st.groups || []).find(g => g.id === a.group);
+  const bundle = b => Object.entries(b || {}).map(([k, v]) => `${v} ${k}`).join(', ');
+  return `<h3>Feelings</h3><div class="card">${a.mood_icon || ''} Feels <b>${esc(a.mood || 'content')}</b>${a.grief ? ' · grieving' : ''}${a.anger ? ' · angry' : ''}
+      <div class="muted small">Each need rises over time; the strongest one (weighted by personality) sets the mood. Higher = wants it more.</div></div>
+    ${Object.entries(a.needs).map(([k, v]) => `<div title="${esc(a.need_info?.[k] || '')}">${meter(NI[k] || k, v, v >= 70 ? 'var(--bad)' : v >= 45 ? 'var(--warn)' : 'var(--good)')}</div>`).join('')}
+    <h3>Skills</h3>${Object.entries(a.skills).map(([k, v]) => `<div title="${esc(a.skill_info?.[k] || '')}">${meter(k[0].toUpperCase() + k.slice(1), v * 10, 'var(--accent)').replace(`<span>${v * 10}</span></div>`, `<span>${v}/10</span></div>`)}</div>`).join('')}
+    <p class="muted small">Skills grow by doing (children learn twice as fast) and can be taught.</p>
+    ${a.beliefs?.length ? `<h3>Beliefs <span class="muted small" style="text-transform:none;letter-spacing:0">— may be wrong</span></h3>${a.beliefs.map(b => `<div class="card small">💭 ${esc(b.text)} <span class="tag">${b.src || ''}</span></div>`).join('')}` : ''}
+    <h3>In society</h3><div class="kv">
+      <span>People</span><span>${esc(a.people || '—')}${Object.keys(a.fluency || {}).length ? ` · speaks some ${Object.entries(a.fluency).map(([p, n]) => `${esc(p)} (${Math.min(100, Math.round(n / 8 * 100))}%)`).join(', ')}` : ''}</span>
+      <span>Group</span><span>${g ? `<b style="color:${g.color}">${esc(g.name)}</b>${g.leader === a.name ? ' 👑 leader' : ''}` : 'none'}</span>
+      <span>Reputation</span><span>${esc(a.reputation || 'unknown')} <span class="muted">(kept ${a.kept}, broken ${a.broken})</span></span>
+      ${a.promises?.length ? `<span>Promises</span><span>${a.promises.map(p => p.from === a.name ? `owes ${esc(p.to)} ${bundle(p.left)}` : `${esc(p.from)} owes ${bundle(p.left)}`).join('; ')}</span>` : ''}
+      ${a.offenses?.length ? `<span>Offences</span><span>${a.offenses.map(o => `“${esc(o.law)}”${o.dealt ? ` (${o.dealt})` : o.seen.length ? ' (seen)' : ' (unseen)'}`).join('; ')}</span>` : ''}
+      ${a.known_stories?.length ? `<span>Knows</span><span>${a.known_stories.map(t => `📖 ${esc(t)}`).join(', ')}</span>` : ''}
+    </div>`;
+}
+
+// ======================================================================= history: chronicle, family tree, replay
+async function loadHistory() {
+  S.history = await api.get('/api/history');
+  const H = S.history;
+  $('chronicle').innerHTML = H.chronicle.length ? H.chronicle.slice().reverse().map(c => `<div class="chapter"><div class="tag">${esc(c.when)}</div><b>${esc(c.title)}</b><p>${esc(c.text)}</p></div>`).join('')
+    : '<p class="muted small">Sol writes a chapter of the history book at the first review of each month.</p>';
+  const kids = {};
+  for (const p of H.family) for (const par of p.parents) (kids[par] ||= []).push(p);
+  const known = new Set(H.family.map(p => p.name));
+  const node = (p, depth) => `<div class="fam" style="margin-left:${depth * 16}px"><span class="dot" style="background:${p.color}"></span>
+      <a href="#" data-goto="${esc(p.name)}" class="${p.alive ? '' : 'muted'}">${esc(p.name)}</a> ${p.sex === 'female' ? '♀' : '♂'}${p.alive ? '' : ' 🪦'}
+      ${p.parents.length > 1 ? `<span class="muted small">(${esc(p.parents.join(' + '))})</span>` : ''} <span class="muted small">${esc(p.people || '')}</span></div>`
+    + (kids[p.name] || []).filter(c => c.parents[0] === p.name || !known.has(c.parents[0])).map(c => node(c, depth + 1)).join('');
+  $('family').innerHTML = H.family.filter(p => !p.parents.some(n => known.has(n))).map(p => node(p, 0)).join('') || '<p class="muted small">Nobody yet.</p>';
+  const r = $('replay');
+  r.max = Math.max(0, H.snapshots.length - 1);
+  if (!S.replay) r.value = r.max;
+}
+$('family').onclick = e => { const g = e.target.closest('[data-goto]'); if (g) { e.preventDefault(); showTab('people'); select(g.dataset.goto); } };
+$('replay').oninput = e => {
+  const snap = S.history?.snapshots[+e.target.value];
+  if (!snap) return;
+  if (+e.target.value >= S.history.snapshots.length - 1) return backToLive();
+  S.replay = snap; S.mapst = replayState(snap, S.st);
+  $('replay-when').textContent = `${ts(snap.t, true)} · ${snap.pop} alive`;
+  $('replay-live').hidden = false;
+  document.body.classList.add('replaying');
+};
+function backToLive() {
+  S.replay = null; S.mapst = null; $('replay-live').hidden = true; $('replay-when').textContent = 'drag to look back in time';
+  document.body.classList.remove('replaying');
+  if (S.history) $('replay').value = $('replay').max;
+}
+$('replay-live').onclick = backToLive;
+function replayState(snap, live) {
+  return { ...live, agents: snap.a.map(([name, x, y, color, stage]) => ({ name, x, y, color, stage, adult: stage !== 'child' && stage !== 'baby',
+    hunger: 0, say: '', anim: [], asleep: false, mood_icon: '', task: null, inside: '', doing: '' })),
+    structures: snap.b.map(([x, y, w, h, kind, func, done, group]) => ({ x, y, w, h, kind, func, done: !!done, progress: 0, work: 1, walkable: true, group })),
+    animals: [], burning: [], floods: [], territory: {}, groups: [], dead: [] };
+}
+setInterval(() => { if (S.tab === 'history' && !S.replay) loadHistory(); }, 10000);
+
+// where the Human is looking: agents far from it think less often (cheaper), see society/engine.py
+let lastFocus = '';
+setInterval(() => {
+  if (!S.W) return;
+  const { fx, fy } = unIso(S.cam.x + scroller.clientWidth / 2 / S.zoom, S.cam.y + scroller.clientHeight / 2 / S.zoom);
+  const f = [Math.round(Math.max(0, Math.min(S.W - 1, fx))), Math.round(Math.max(0, Math.min(S.H - 1, fy)))], k = f.join(',');
+  if (k !== lastFocus) { lastFocus = k; api.post('/api/control', { focus: f }); }
+}, 4000);

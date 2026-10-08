@@ -23,7 +23,7 @@ def snapshot(sim):
 
 def chapter_due(sim) -> bool:
     """A new chapter at each review once a month has passed since the last one."""
-    last = sim.chronicle[-1]["tick"] if sim.chronicle else -10 ** 9
+    last = sim.chronicle[-1]["tick"] if sim.chronicle else 0     # the first chapter after the first month
     return sim.tick - last >= clock.DAYS_PER_MONTH * clock.DAY
 
 

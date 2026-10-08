@@ -12,7 +12,8 @@ from society import persistence, sol, views
 from society.config import AUTOSAVE_EVERY, THINK_CHOICES
 
 STATIC = Path(__file__).parent / "static"
-TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
+TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+         ".png": "image/png", ".json": "application/json", ".md": "text/plain; charset=utf-8"}
 
 
 class Hub:
@@ -171,11 +172,11 @@ class Hub:
 
 def serve(hub: Hub, host: str, port: int):
     class Handler(BaseHTTPRequestHandler):
-        def _send(self, code: int, body: bytes, ctype: str):
+        def _send(self, code: int, body: bytes, ctype: str, cache: bool = False):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", "max-age=86400" if cache else "no-store")   # art never changes
             self.end_headers()
             self.wfile.write(body)
 
@@ -195,9 +196,10 @@ def serve(hub: Hub, host: str, port: int):
         def do_GET(self):
             url = urlparse(self.path)
             name = "index.html" if url.path == "/" else url.path.lstrip("/")
-            static = {p.name: p for p in STATIC.iterdir()}
-            if name in static:                       # only files that really are in static/ (no path tricks)
-                return self._send(200, static[name].read_bytes(), TYPES.get(static[name].suffix, "application/octet-stream"))
+            file = (STATIC / name).resolve()
+            if file.is_file() and file.is_relative_to(STATIC.resolve()):    # only files inside static/ (no path tricks)
+                return self._send(200, file.read_bytes(), TYPES.get(file.suffix, "application/octet-stream"),
+                                  cache=file.suffix == ".png")
             if url.path == "/favicon.ico":
                 return self._send(204, b"", "image/x-icon")
             self._handle(lambda: hub.get(url.path, parse_qs(url.query)))

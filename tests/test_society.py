@@ -38,7 +38,7 @@ class SimulationTests(unittest.TestCase):
     def test_long_run_does_things(self):
         sim = make(250)
         actions = {h["action"] for a in list(sim.agents.values()) + [d["agent"] for d in sim.dead.values()] for h in a.history}
-        self.assertTrue({"move", "gather", "eat", "say", "build", "craft"} <= actions, actions)
+        self.assertTrue({"gather", "eat", "say", "build", "craft"} <= actions and actions & {"go", "move"}, actions)
         self.assertGreater(sim.world.explored_pct(), 10)
         self.assertEqual(len(sim.stats), 251)
 
@@ -334,3 +334,82 @@ class SaveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorldSystemTests(unittest.TestCase):
+    def test_breakthroughs_come_from_attempts(self):
+        sim = make()
+        ada = sim.agents["Ada"]
+        act = parse_action('{"action": "attempt", "what": "strike flint stones together to make fire"}', [])
+        act["gm"] = {"success": False, "story": "Only smoke."}
+        for _ in range(3):                                     # honest failures add up
+            sim._act(ada, dict(act), sim.tick, [])
+        self.assertIn("fire", sim.techs)
+        self.assertEqual(sim.has("fire"), True)
+        self.assertEqual(views.state(sim)["age_name"], "Age of Fire")
+
+    def test_winter_is_hard(self):
+        from society import clock
+        sim = make()
+        winter = next(t for t in range(0, 3000, 24) if clock.season(t) == "winter")
+        sim.tick = winter + 17                                 # 23:00 on a winter night, nobody sheltered
+        ada = sim.agents["Ada"]
+        ada.health, ada.items = 100.0, []
+        sim._live_a_day(ada, sim.tick)
+        self.assertLess(ada.health, 100)
+        x, y = next((x, y) for y in range(sim.world.height) for x in range(sim.world.width) if sim.world.tiles[y][x] == "food")
+        ada.x, ada.y = x, y
+        from society.actions import apply
+        self.assertIn("bare", apply(sim, ada, parse_action('{"action": "gather"}', []), sim.tick))
+
+    def test_trade_promises_and_reputation(self):
+        from society.actions import apply
+        sim = make()
+        ada, brix = sim.agents["Ada"], sim.agents["Brix"]
+        brix.x, brix.y = ada.x, ada.y
+        ada.food, brix.food, brix.wood = 5, 0, 0
+        do = lambda a, j: apply(sim, a, parse_action(j, list(sim.agents)), sim.tick)
+        self.assertIn("offered", do(ada, '{"action": "offer", "to": "Brix", "give": "2 food", "want": "3 wood", "within": 5}'))
+        self.assertIn("deal done", do(brix, '{"action": "accept", "target": "Ada"}'))
+        self.assertEqual(brix.food, 2)                        # Ada's food handed over now; Brix owes wood
+        for _ in range(6):
+            sim.begin_day()
+        self.assertEqual(brix.broken, 1)                      # ...and never delivered
+        self.assertLess(ada.bonds.get("Brix", 0), 0)
+
+    def test_laws_are_seen_and_punished(self):
+        from society.actions import apply
+        sim = make()
+        ada, brix, cleo = sim.agents["Ada"], sim.agents["Brix"], sim.agents["Cleo"]
+        for o in (brix, cleo):
+            o.x, o.y = ada.x, ada.y
+        do = lambda a, j: apply(sim, a, parse_action(j, list(sim.agents)), sim.tick)
+        do(ada, '{"action": "found", "title": "Camp", "message": "together"}')
+        self.assertIn("joined", do(brix, '{"action": "join", "title": "Camp"}'))
+        self.assertIn("now law", do(ada, '{"action": "propose", "title": "No stealing"}'))
+        cleo.food = 3
+        sim._act(brix, parse_action('{"action": "steal", "to": "Cleo", "title": "food"}', list(sim.agents)), sim.tick, [])
+        self.assertEqual(brix.offenses[-1]["seen"], ["Ada"])
+        self.assertIn("punished", do(ada, '{"action": "punish", "to": "Brix", "message": "we do not steal"}'))
+        self.assertIn("exiled", do(ada, '{"action": "exile", "to": "Brix"}'))
+        self.assertIn("exiled", do(brix, '{"action": "join", "title": "Camp"}'))
+
+    def test_strangers_dont_understand_each_other(self):
+        from society.actions import apply
+        sim = make()
+        ada, dov = sim.agents["Ada"], sim.agents["Dov"]
+        dov.x, dov.y = ada.x, ada.y
+        apply(sim, ada, parse_action('{"action": "say", "to": "Dov", "message": "do you have food, friend?"}', list(sim.agents)), sim.tick)
+        self.assertIn("strange tongue", dov.heard[-1])
+        self.assertIn("food", dov.heard[-1])
+
+    def test_everything_survives_a_save(self):
+        sim = make(60)
+        with tempfile.TemporaryDirectory() as d:
+            persistence.SAVE_DIR = Path(d)
+            persistence.save(sim, "t")
+            again = persistence.load("t", sim.llm)
+        for k in ("techs", "groups", "stories", "places", "contacts", "snapshots"):
+            self.assertEqual(json.loads(json.dumps(getattr(again, k), default=str)), json.loads(json.dumps(getattr(sim, k), default=str)), k)
+        self.assertEqual(len(again.eco.animals), len(sim.eco.animals))
+        self.assertEqual(again.agents["Ada"].needs, sim.agents["Ada"].needs)

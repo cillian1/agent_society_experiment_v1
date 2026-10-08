@@ -1,8 +1,9 @@
 # Agent Society 🌱
 
-A small world of AI agents that start with nothing but a personality. They explore, talk, make friends, farm,
-build, craft tools, invent customs, fall in love, have children and grow old — and you can watch, talk to them,
-lead them, and save their world to continue later.
+A small world of AI agents that start with nothing but a personality. Two peoples who don't speak each other's
+language explore, hunt, farm, build, trade, make promises (and break them), form groups, elect leaders, pass laws,
+tell stories, discover fire and bronze, survive winters, fall in love, have children and grow old — and you can
+watch, talk to them, lead them, scrub back through their history, and save their world to continue later.
 
 ## Quick start (Windows)
 ```
@@ -44,19 +45,70 @@ roughly half the speed. Or give your favourite agents Haiku/Sonnet in their prof
 | **Map** | A sharp **isometric** world at any zoom (labels stay readable): trees, rocks, berry bushes, fields, walk-in buildings with roofs (see-through when someone is inside), construction sites that rise as people work, day and night with glowing fires. Scroll to zoom, drag to pan, click someone for their profile, double-click to follow, hover anything for details. Toggle 🌫️ fog, 💬 speech bubbles and 🎯 follow in the toolbar. Bars over heads: hunger (green→red) and task progress (gold). |
 | **👥 People** | Everyone at a glance (hunger, food, age, what they're doing, construction progress, 💤 asleep). A **profile** has Overview, Thoughts (every decision), Memory, Relations (feelings & family) and Brain tabs, plus buttons to talk, find, follow or send a gift. |
 | **💬 Talk** | Sol's card on top (latest review, next review, Talk / Review now), the conversation in the middle, and the composer at the bottom: pick everyone, Sol, one agent or any group; each answers right away in character. Choose whether they treat you as their **leader** (they obey), an advisor, or an observer. |
-| **🌍 World** | A filterable feed of conversations, births and deaths, building, ideas, exploration and food. |
+| **🌍 World** | The age and breakthroughs, groups with their leaders and laws, trades and promises, stories and place names, the animals, then discoveries, blueprints and a filterable feed of everything that happens. |
+| **📜 History** | Sol's chronicle (a chapter a month), the family tree of everyone who ever lived, and a ⏪ replay slider that shows the map at any moment in the past. |
 | **📈 Stats** | Population, hunger, food, exploration, structures, farms, objects and ideas over time (hover to read a day; table view available). |
 | **⚙️ Settings** | Save / load worlds (also autosaved every day), start a new world, Sol's brain, available brains and usage per model, keyboard shortcuts. |
 
-Keyboard: `Space` pause · `N` next hour · `+`/`−` zoom · `0` fit · `F` follow · `/` talk · `Esc` close · `1`–`5` tabs · `?` help.
+Keyboard: `Space` pause · `N` next hour · `+`/`−` zoom · `0` fit · `F` follow · `/` talk · `Esc` close · `1`–`6` tabs · `?` help.
+
+**Art:** ground tiles, trees (green, autumn and bare), rocks, crops, tents, campfires and animals are CC0 sprites by
+[Kenney](https://kenney.nl) (see `hub/static/assets/LICENSES.md`); people, buildings and effects are drawn in code.
+People animate what they do: swinging an axe at a tree, a pickaxe at rock, hoeing, hammering at a building site,
+fishing with a rod and float, hunting with a spear, picking berries, eating, talking, resting; they carry logs and
+stones home, and little icons pop up when they get something done. Snow falls in winter and leaves in autumn.
 
 ## How the world works
+### The living world
+- **Seasons** (10-day months, 3 months each): spring grows crops fastest (rivers may flood fields), summer is long
+  (dry woods can catch fire), autumn is harvest time, and in **winter** wild bushes are bare, crops stop growing,
+  hunger rises faster and nights outside a home or away from a fire are freezing. Agents are warned as it approaches.
+- **Animals** (deer, rabbits, boar, goats, sheep) roam, flee from people, breed in spring and summer and die back in
+  winter. `hunt` them (spears and bows reach further; boar fight back) or `tame` goats and sheep, which follow their
+  keeper and give food every day. Hunt an area out and it stays empty until animals wander back in.
+- **Soil** tires with every harvest and recovers when rested, so farms have to move or rotate.
+- **The tech tree is hidden**: 17 breakthroughs (fire, stone tools, agriculture, weaving, cooking, pottery, spears
+  and bows, herbal medicine, irrigation, animal husbandry, masonry, boats, writing, the wheel, bronze, the calendar,
+  iron) through five ages (Stone Age → Age of Fire → Farming Age → Bronze Age → Iron Age). Nobody is told what's
+  possible: an `attempt` that clearly aims at something within reach unlocks it (Sol, as referee, knows the list), and
+  three honest failures at the same thing get there anyway. Each one changes the rules (fires need fire; pots stop
+  food rotting; weaving keeps you warm; masonry builds faster; writing lengthens memory...).
+
+### Minds
+- **Memory**: the whole life is kept; each turn the agent recalls the older memories that matter right now
+  (promises, betrayals, births, deaths, laws, the people in front of them), not just the latest ones.
+- **Beliefs**: short conclusions an agent holds ("the river floods in spring", "Dov can't be trusted"). They come
+  from its decisions and dreams, can be wrong, and only spread through what people say.
+- **Needs and moods**: rest, company, safety, respect and curiosity rise and fall with what happens; personality
+  decides which is loudest, and that (or grief, or anger) sets the mood the agent is told about. Lonely agents seek
+  company; humiliated ones hold grudges; exhausted ones work badly until they `rest`.
+- **Skills** (farming, gathering, building, crafting, hunting) grow by doing, children learn twice as fast, and an
+  expert can `teach` someone next to them.
+
+### Society
+- **Two peoples**, the Riverfolk and the Hillfolk, start on opposite sides of the map. Until someone has talked with
+  the other people enough, their words come across as a few recognisable words and gestures. First contact is an
+  event (and a story). Children of both peoples speak both.
+- **Trade and promises**: `offer` a deal (give / want / within N hours), `accept` or `decline`, `promise`, and
+  deliver with `give`. Kept promises build trust; broken ones turn feelings into grudges and get talked about.
+  Everyone's reputation is visible. `steal` exists, and it's a crime.
+- **Groups**: `found` one, `join`, `leave`, `vote` for a leader. Leaders set a shared plan, buildings belong to their
+  builders' group, and the land around them is the group's territory (outlined on the map).
+- **Laws**: leaders decree, members `propose` and `support`. Laws the game can read ("no stealing", "no taking from
+  the granary at night", "no hunting in spring", "no cutting trees near the village") are checked: members nearby
+  witness a breach and can `punish` (a fine), `forgive`, or the leader can `exile` someone for good. Other groups'
+  laws apply on their land.
+- **Stories and places**: memorable events become stories that Sol writes at its reviews and sometimes retells a
+  little differently; they spread around the fire in the evening and when someone `tell`s one. Agents `name` places.
+- **History**: Sol writes a monthly chapter of the chronicle; the hub keeps snapshots for the replay slider.
+
+### Everyday life
 - **Time:** one turn is one hour; 24 hours a day, 30 days a month, 12 months a year (Thawing … Deepwinter). Everyone sleeps
   from 22:00 to 06:00 (no model calls, slower hunger, a little healing).
 - **Personality (0-1), four traits that each change the game:** *curious* (explores and tries bold attempts), *social*
   (others warm to them faster, time together bonds more), *kind* (easier to win over, nudged to share and care) and
   *driven* (builds faster, sticks to its plans instead of getting distracted). Children inherit a mix of their parents'.
-- **Map:** 64×40 tiles of grass, sand, water, rock and forest. Trees give wood, rocks stone, berry bushes food (and seeds);
+- **Map:** 88×56 tiles of grass, sand, water, rock and forest. Trees give wood, rocks stone, berry bushes food (and seeds);
   bushes take about 4 days to regrow.
 - **Survival:** hunger rises every hour; at 100 an agent loses health and can starve. Elders may die of old age.
 - **Farming:** plants grow by themselves (about 20 hours, faster near water). Tending speeds them up once every few days,
@@ -125,6 +177,10 @@ society/
   config.py              every tunable number (costs, ages, radii, regrowth...)
   world.py               map generation, resources, farming, structures, fog of war
   models.py              Agent, Traits (curious/social/kind/driven) and Abilities (strength/speed/endurance/wits)
+  needs.py, memory.py    needs, moods and skills; recalling relevant memories, beliefs
+  social.py, culture.py  trade, promises, groups, laws; stories, places, peoples and language
+  ecology.py, tech.py    animals, soil, floods and wildfires; the hidden tech tree and ages
+  history.py             snapshots for the replay, the chronicle, the family tree
   clock.py               hours, days, months, years; night and sleep
   mind.py                prompts, parsing the model's JSON, calling the model
   gm.py                  Sol as referee: judges attempts/inventions, designs blueprints, grants bounded outcomes
@@ -142,6 +198,8 @@ tests/                   `python -m unittest`
 `ACTIONS` and a one-line description in `system_prompt` in `society/mind.py`.
 
 ## Saving money and time
+- **Far from the camera, think less:** agents more than 30 tiles from where you're looking think three times less
+  often (at least every 6 hours) - they carry on with their plans and routines meanwhile.
 - **Thinking every few hours:** ⚙️ Settings → *Agents think* (every 1, 2, 3 or 6 hours; default 2). In between, agents
   follow the steps they planned or an obvious routine (eat, gather, tend, keep building) with no model call. Being spoken
   to, hunger, a baby or a failed step wakes their brain immediately.
