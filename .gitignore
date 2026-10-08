@@ -148,3 +148,5 @@ vite.config.ts.timestamp-*
 # Turbo Repo
 .turbo
 society_log.json
+__pycache__/
+*.pyc
