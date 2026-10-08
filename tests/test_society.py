@@ -202,6 +202,21 @@ class GameMasterTests(unittest.TestCase):
         self.assertEqual(sim.discoveries, [])
 
 
+class TalkTests(unittest.TestCase):
+    def test_talking_can_change_plans_and_queue_work(self):
+        sim = make()
+        sim.human_say(["Ada"], "please fetch wood, and make it your ambition to build us a hall")
+        for _ in range(100):
+            if not sim.chat[-1].get("pending"):
+                break
+            time.sleep(0.02)
+        ada = sim.agents["Ada"]
+        self.assertEqual(ada.plan, "fetch wood for the Human")
+        self.assertEqual([q["action"] for q in ada.queue], ["go", "gather"])
+        self.assertIn("ambition", ada.ambition)
+        self.assertTrue(any("starting tomorrow" in c for c in sim.chat[-1]["changes"]))
+
+
 class SaveTests(unittest.TestCase):
     def test_round_trip_and_continue(self):
         sim = make(60)

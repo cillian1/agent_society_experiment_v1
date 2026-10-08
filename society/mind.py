@@ -302,8 +302,14 @@ def reply_prompt(a: Agent, situation: str, human_msg: str, also_to: list[str]) -
             f'The Human (a voice from outside the world) just said to you{also}: "{human_msg}"\n'
             + HUMAN_NOTES[a.authority] + "\n"
             "Answer them directly and in character in 1-3 sentences: reply to what they actually say or ask. "
-            "If they gave an instruction, say what you will do about it first. Reply ONLY with JSON: "
-            '{"thought": "<private reasoning>", "message": "<what you say to them>"}')
+            "If they gave an instruction, say what you will do about it first.\n"
+            "Their words may change what you want. If so, include any of these (leave them out otherwise):\n"
+            '  "ambition": your new long-term goal;  "plan": your new plan in words;\n'
+            f'  "next": up to {MAX_QUEUE} actions to start doing from tomorrow, in the same format as your daily actions '
+            f"(actions: {', '.join(a_ for a_ in ACTIONS if a_ not in ('wait', 'attempt', 'invent'))}), e.g. "
+            '[{"action": "go", "target": "wood"}, {"action": "gather"}, {"action": "build", "direction": "east", "title": "storehouse"}].\n'
+            'Reply ONLY with JSON: {"thought": "<private reasoning>", "message": "<what you say to them>", '
+            '"ambition": "...", "plan": "...", "next": [...]}')
 
 
 def summary_prompt(a: Agent, old: list[str]) -> str:
@@ -356,8 +362,11 @@ def decide(a: Agent, llm, prompt: str, others: list[str]) -> dict:
 def reply(a: Agent, llm, situation: str, human_msg: str, others: list[str], also_to: list[str]) -> dict:
     raw = llm.complete(system_prompt(a, others), reply_prompt(a, situation, human_msg, also_to), model=a.model)
     data = _json(raw)
+    nxt = parse_action(json.dumps({"action": "wait", "next": data.get("next") or []}), others)["next"]
     return {"thought": str(data.get("thought") or "").strip(),
-            "message": str(data.get("message") or (raw if not data else "")).strip()}
+            "message": str(data.get("message") or (raw if not data else "")).strip(),
+            "ambition": str(data.get("ambition") or "").strip()[:240], "plan": str(data.get("plan") or "").strip()[:240],
+            "next": nxt}
 
 
 def reflect(a: Agent, llm, tick: int, ideas: list[str]) -> dict:

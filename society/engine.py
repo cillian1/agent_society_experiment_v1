@@ -481,6 +481,21 @@ class Society:
                 del a.chat[:-16]
                 a.last_say, a.last_say_to, a.last_say_tick = text, "Human", self.tick
                 a.remember(self.tick, f'The Human said to me: "{message}" and I answered: "{text}"')
+                changes = []
+                if out.get("ambition") and out["ambition"] != a.ambition:
+                    a.ambition = out["ambition"]
+                    changes.append(f"🎯 new ambition: {a.ambition}")
+                    a.remember(self.tick, f"After talking with the Human, my ambition is: {a.ambition}")
+                    self.event(self.tick, a, f"set a new ambition after talking with you: {a.ambition}", "goal")
+                if out.get("plan") and out["plan"] != a.plan:
+                    a.plan = out["plan"]
+                    changes.append(f"🗺️ new plan: {a.plan}")
+                    a.remember(self.tick, f"After talking with the Human, my plan is: {a.plan}")
+                if out.get("next"):
+                    a.queue = [dict(n) for n in out["next"]]
+                    steps = " → ".join(n["action"] + (f" {n.get('target') or n.get('title') or ''}".rstrip()) for n in a.queue)
+                    changes.append(f"⏭️ starting tomorrow: {steps}")
+                slot["changes"] = changes
             verb = {"leader": "(your leader) ORDERED you", "advisor": "advised you", "observer": "said to you"}[a.authority]
             a.heard.append(f'The Human {verb}: "{message}"' + (f' - you replied: "{text}"' if err is None else "")
                            + (" - now carry it out." if a.authority == "leader" else ""))

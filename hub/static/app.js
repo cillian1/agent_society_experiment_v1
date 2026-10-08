@@ -458,7 +458,7 @@ function renderChat(force) {
   const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
   el.innerHTML = c.length ? c.map(m => m.from === 'You'
     ? `<div class="bub me"><b style="color:var(--you)">You → ${esc(m.to)}</b>${esc(m.text)}</div>`
-    : `<div class="bub"><b style="color:${m.color}">${esc(m.from)}</b>${m.pending ? '<span class="muted typing">thinking</span>' : esc(m.text)}</div>`).join('')
+    : `<div class="bub"><b style="color:${m.color}">${esc(m.from)}</b>${m.pending ? '<span class="muted typing">thinking</span>' : esc(m.text)}${(m.changes || []).map(c => `<div class="tag" style="margin-top:4px;color:var(--gold)">${esc(c)}</div>`).join('')}</div>`).join('')
     : '<p class="muted">Pick who to talk to below and say hello. Ask what they are up to, give them a task, or tell them a story.</p>';
   if (stick || force) el.scrollTop = el.scrollHeight;
 }

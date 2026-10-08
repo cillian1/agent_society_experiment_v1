@@ -38,8 +38,14 @@ class MockLLM(UsageMixin):
                                    plan=f"start working toward: {goal}"))
         if "CHAT_WITH_HUMAN" in prompt:
             who = re.search(r"You are (\w+),", system)
-            return json.dumps(dict(thought="The human spoke to me, I should answer.",
-                                   message=f"[MOCK MODE - scripted, not a real reply] This is {who.group(1) if who else 'me'}."))
+            asked = re.search(r'just said to you[^:]*: "([^"]*)"', prompt)
+            d = dict(thought="The human spoke to me, I should answer.",
+                     message=f"[MOCK MODE - scripted, not a real reply] This is {who.group(1) if who else 'me'}.")
+            if asked and "wood" in asked.group(1).lower():
+                d.update(plan="fetch wood for the Human", next=[{"action": "go", "target": "wood"}, {"action": "gather"}])
+            if asked and "ambition" in asked.group(1).lower():
+                d.update(ambition=asked.group(1))
+            return json.dumps(d)
         hunger = int(re.search(r"Hunger: (\d+)", prompt).group(1))
         carried = int(re.search(r"Food carried: (\d+)", prompt).group(1))
         seeds = int(re.search(r"Seeds: (\d+)", prompt).group(1))
