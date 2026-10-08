@@ -55,7 +55,7 @@ def agent_detail(sim: Society, name: str) -> dict | None:
         return {
             **_brief(sim, a), "alive": not dead, "goal": a.goal, "traits": vars(a.traits),
             "seeds": a.seeds, "wood": a.wood, "stone": a.stone, "items": a.items, "discoveries": a.discoveries,
-            "parents": a.parents, "children": a.children, "pregnancy": a.pregnancy, "plan": a.plan,
+            "parents": a.parents, "children": a.children, "pregnancy": a.pregnancy, "plan": a.plan, "ambition": a.ambition, "queue": a.queue,
             "abilities": vars(a.abilities), "ability_info": ABILITY_INFO, "lifespan": a.abilities.lifespan(),
             "bonds": {k: int(v) for k, v in sorted(a.bonds.items(), key=lambda kv: -kv[1]) if v >= 1},
             "summary": a.summary, "log": a.log[-60:], "log_total": len(a.log),

@@ -22,6 +22,11 @@ class MockLLM(UsageMixin):
         if "SUMMARIZE_MEMORIES" in prompt:
             lines = prompt.split("New memories to fold in:\n", 1)[-1].split("\n\nWrite the updated")[0].splitlines()
             return "I remember: " + " ".join(l.split(": ", 1)[-1] for l in lines)[:600]
+        if "REFLECT_ON_LIFE" in prompt:
+            goal = rng.choice(["build a village by the lake", "become the best farmer around", "map the whole world",
+                               "raise a big family", "make tools for everyone"])
+            return json.dumps(dict(insight="I have survived so far, but I want more.", ambition=goal,
+                                   plan=f"start working toward: {goal}"))
         if "CHAT_WITH_HUMAN" in prompt:
             who = re.search(r"You are (\w+),", system)
             return json.dumps(dict(thought="The human spoke to me, I should answer.",
@@ -66,7 +71,9 @@ class MockLLM(UsageMixin):
             d = dict(thought="A tool would help me; I'll craft one.", action="craft",
                      title=rng.choice(["axe", "pickaxe", "hoe", "fishing rod", "basket"]), message="a useful tool")
         elif mats and mat_have < 4 and rng.random() < 0.5:
-            d = dict(thought="Gathering wood and stone for building.", action="gather")
+            d = dict(thought="A project: gather materials, then build a house.", action="gather",
+                     next=[{"action": "gather"}, {"action": "build", "direction": rng.choice(["north", "south", "east", "west"]),
+                            "title": "house", "message": "a home"}])
         elif friend and rng.random() < 0.3:
             d = dict(thought=f"Let me chat with {friend.group(1)}.", action="say", to=friend.group(1),
                      message=rng.choice(self.LINES), role=rng.choice(["", "", "farmer", "builder", "storyteller"]))

@@ -4,7 +4,7 @@ import random
 import re
 
 from .config import (ADULT_AGE, BABY_DAYS, BUILD_COST, CHILD_FOOD_COST, CRAFT_COST, FRIEND_BOND, HUNGER_WARNING,
-                     KEEP_RECENT, LOVE_BOND, MAX_ITEMS, ORDER_MEMORY_DAYS, PREGNANCY_DAYS)
+                     KEEP_RECENT, LOVE_BOND, MAX_ITEMS, MAX_QUEUE, ORDER_MEMORY_DAYS, PREGNANCY_DAYS)
 from .models import Agent
 
 DIRS = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
@@ -95,11 +95,24 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         '  invent  - {"title": "...", "message": "describe your idea, custom, tool or law"} shared with the whole society\n'
         "  wait\n"
         + HUMAN_NOTES[a.authority] + " (Talking with the Human happens in a separate chat, so it does not use up your turn.)\n"
-        "Reply ONLY with JSON. Optional extra fields: \"plan\" (your plan for the coming days - you'll see it again "
-        "tomorrow), \"remember\" (a note to your future self) and \"role\" (claim or change your own role/title), e.g.\n"
-        '{"thought": "<1-2 sentences of private reasoning>", "action": "say", "to": "Ada", "message": "Want to farm '
-        'together?", "plan": "start a farm by the lake with Ada, then build a storehouse", "role": "farmer"}'
+        "THINK IN PROJECTS, not single steps: with \"next\" you can line up to "
+        f"{MAX_QUEUE} more actions that run automatically on the following days (you'll be interrupted if something "
+        "important happens, e.g. hunger or someone talking to you). Use it to get real things done.\n"
+        "Reply ONLY with JSON. Optional extra fields: \"next\" (list of follow-up actions), \"plan\" (your plan in "
+        "words), \"remember\" (a note to your future self) and \"role\" (claim or change your own role/title), e.g.\n"
+        '{"thought": "We need shelter before winter; I have no wood yet.", "action": "go", "target": "wood", '
+        '"next": [{"action": "gather"}, {"action": "gather"}, {"action": "build", "direction": "east", "title": "house", '
+        '"message": "home of Ada"}], "plan": "build a house near the forest, then invite Brix", "role": "builder"}'
     )
+
+
+FAILS = ("blocked", "nothing", "no ", "need ", "couldn't", "unknown", "nobody", "there is no", "these plants",
+         "invalid", "water here", "the fish", "name the", "your hands", "you already", "a baby needs", "not enough",
+         "asked ")
+
+
+def failed(result: str) -> bool:
+    return result.startswith(FAILS)
 
 
 def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[str, dict]]:
@@ -167,10 +180,10 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
              f"Your surroundings (@ = you):\n{world.view(a.x, a.y, view, others)}"]
     if a.plan:
         lines.insert(2, f"Your current plan: {a.plan} (keep following it, or change it with \"plan\")")
+    if a.ambition:
+        lines.insert(2, f"Your long-term ambition: {a.ambition}")
     last = next((h for h in reversed(a.history) if h["action"] != "reply to Human"), None)
-    fails = ("blocked", "nothing", "no ", "need ", "couldn't", "unknown", "nobody", "there is no", "these plants",
-             "invalid", "water here", "the fish", "name the", "your hands", "you already", "a baby needs", "not enough")
-    if last and last["result"].startswith(fails):
+    if last and failed(last["result"]):
         lines.insert(2, f"!!! Your last action ({last['action']}) did not work: {last['result']}. Don't repeat it - "
                         "try something else.")
     opts = suggestions(a, world, agents, tick)
@@ -288,7 +301,7 @@ def _json(raw: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def parse_action(raw: str, others: list[str]) -> dict:
+def parse_action(raw: str, others: list[str], depth: int = 0) -> dict:
     data = _json(raw)
     s = lambda k: str(data.get(k) or "").strip()
     to = data.get("to", "all")
@@ -298,7 +311,10 @@ def parse_action(raw: str, others: list[str]) -> dict:
             "action": data.get("action") if data.get("action") in ACTIONS else "wait",
             "direction": data.get("direction"), "to": to, "target": s("target") or s("to"), "message": s("message"), "title": s("title"),
             "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"), "plan": s("plan"),
-            "steps": data.get("steps") if isinstance(data.get("steps"), int) else 1}
+            "steps": data.get("steps") if isinstance(data.get("steps"), int) else 1,
+            "next": [] if depth else [
+                parse_action(json.dumps(n), others, 1) for n in (data.get("next") or [])[:MAX_QUEUE]
+                if isinstance(n, dict) and n.get("action") in ACTIONS and n.get("action") != "wait"]}
 
 
 def failed_action(err: Exception) -> dict:
@@ -320,6 +336,23 @@ def reply(a: Agent, llm, situation: str, human_msg: str, others: list[str], also
     data = _json(raw)
     return {"thought": str(data.get("thought") or "").strip(),
             "message": str(data.get("message") or (raw if not data else "")).strip()}
+
+
+def reflect(a: Agent, llm, tick: int, ideas: list[str]) -> dict:
+    """Every so often an agent steps back: what have I achieved, what do I want? Sets a long-term ambition."""
+    recent = "\n".join(a.log[-30:]) or "(nothing yet)"
+    prompt = (f"REFLECT_ON_LIFE\nDay {tick}. You are {a.name}, a {a.word(tick)}, {a.age(tick)} days old"
+              + (f", known as the {a.role}" if a.role else "") + f".\nPersonality: {a.traits.describe()}\n"
+              f"Abilities: {a.abilities.describe()}\nYour ambition so far: {a.ambition or '(none yet)'}\n"
+              f"Earlier life: {a.summary or '(nothing summarised yet)'}\nRecent memories:\n{recent}\n"
+              + ("Ideas in your society:\n" + "\n".join("- " + i for i in ideas) + "\n" if ideas else "")
+              + "Step back and reflect. What have you achieved? What matters to you now? What could you build, start "
+              "or change that would make a real difference for you and your community over the next weeks? Be "
+              "ambitious, specific and creative, and play to your abilities. Reply ONLY with JSON: "
+              '{"insight": "<one sentence about your life so far>", "ambition": "<a concrete long-term goal>", '
+              '"plan": "<the first few steps toward it>"}')
+    data = _json(llm.complete(f"You are {a.name}, reflecting on your life.", prompt, model=a.model))
+    return {k: str(data.get(k) or "").strip()[:240] for k in ("insight", "ambition", "plan")}
 
 
 def compact_memory(a: Agent, llm, model: str | None):

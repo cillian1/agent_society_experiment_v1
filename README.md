@@ -67,6 +67,10 @@ Keyboard: `Space` pause · `N` next day · `+`/`−` zoom · `0` fit · `F` foll
 - **Helping small models:** every turn an agent gets a few good options worked out from its situation (eat, feed a baby,
   gather, craft a first tool, talk to a neighbour, explore...), is warned when its last action failed, and a reply that
   isn't valid JSON is retried once.
+- **Projects:** with `"next"` an agent lines up to 4 follow-up actions that run on the following days without a model
+  call (faster and free); it stops and rethinks when it's spoken to, gets hungry, a baby needs it, or a step fails.
+- **Reflection & ambition:** every 20 days each agent looks back on its life and sets itself a long-term ambition
+  (shown in its profile and the 🌍 feed) that guides its plans.
 - **Thinking:** each turn an agent runs a short checklist (danger/hunger first, then its plan, then something creative),
   keeps a plan from day to day, and gets one idea to consider for inspiration.
 - **Society:** no roles or family at the start. Agents claim their own roles, `invent` ideas everyone hears about, build

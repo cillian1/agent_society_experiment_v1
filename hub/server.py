@@ -68,6 +68,10 @@ class Hub:
                     with self.busy_lock:
                         if key in self.busy:          # still thinking about an earlier day
                             continue
+                    queued = sim.take_queued(a)           # a step it planned earlier: no thinking needed
+                    if queued:
+                        sim.apply_decision(a, queued, {"heard": []})
+                        continue
                     job = sim.prepare(a)
                     if job:
                         with self.busy_lock:

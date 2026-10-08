@@ -63,6 +63,8 @@ KEEP_RECENT = 25                      # memory lines shown verbatim; older ones 
 COMPACT_AFTER = 20                    # this many unsummarised old lines trigger a summary
 ORDER_MEMORY_DAYS = 30                # how long a request from the Human stays on an agent's mind
 MAX_IDEAS_IN_PROMPT = 10
+MAX_QUEUE = 4                         # follow-up actions an agent may line up (run without a model call)
+REFLECT_EVERY = 20                    # days between an agent's reflections on its life and ambition
 
 # ---- bookkeeping ----
 AUTOSAVE_EVERY = 25                   # days

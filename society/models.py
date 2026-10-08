@@ -87,6 +87,9 @@ class Agent:
     sex: str = "female"                # "female" | "male" - a woman carries the baby
     abilities: Abilities = field(default_factory=Abilities)
     plan: str = ""                     # the agent's own current plan, kept from day to day
+    ambition: str = ""                 # long-term goal it sets for itself when reflecting
+    queue: list[dict] = field(default_factory=list)          # follow-up actions it lined up ("next")
+    last_reflect: int = -999
     role: str = ""                     # agents invent and claim their own roles
     goal: str = DEFAULT_GOAL
     model: str | None = None           # brain: "local", "local:<name>", or a Claude model id

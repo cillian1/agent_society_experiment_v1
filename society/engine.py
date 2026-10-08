@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import actions, mind
-from .config import (INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND_DECAY,
+from .config import (HUNGER_WARNING, REFLECT_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND_DECAY,
                      DEFAULT_MAX_AGENTS, EAT_RELIEF, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
                      MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS)
 from .models import Abilities, Agent, Traits
@@ -88,6 +88,7 @@ class Society:
             if a.born == -999:
                 a.born = -self.rng.randint(20, 120)    # settlers start as adults of varied age
                 a.food = max(a.food, START_FOOD)
+            a.last_reflect = self.rng.randint(-REFLECT_EVERY + 1, -REFLECT_EVERY + 6)   # first reflection in days 1-5
             if a.abilities == Abilities():              # no abilities given: everyone gets their own mix
                 a.abilities = Abilities.random(self.rng)
             self.world.reveal(a.x, a.y, a.abilities.view())
@@ -130,8 +131,44 @@ class Society:
             a.heard = []
             return job
 
+    def take_queued(self, a: Agent) -> dict | None:
+        """The next action the agent lined up earlier - unless something important needs fresh thinking."""
+        with self.lock:
+            if not a.queue or a.name not in self.agents or a.is_baby(self.tick):
+                return None
+            last = a.history[-1]["result"] if a.history else ""
+            nxt = a.queue[0]
+            hungry = a.hunger >= HUNGER_WARNING and nxt["action"] not in ("eat", "gather") and nxt.get("target") != "food"
+            baby = any(a.name in b.parents and b.is_baby(self.tick) and b.hunger >= 50 for b in self.agents.values())
+            personal = [h for h in a.heard if any(k in h for k in (" to you", "The Human", "gave you", "courting you",
+                                                                    "wants to have a child", "birth", "died", "gift"))]
+            why = ("someone spoke to me" if personal else "I got hungry" if hungry else "a baby needs me" if baby
+                   else "my last step failed" if mind.failed(last) else "")
+            if why:
+                a.queue = []
+                a.remember(self.tick, f"I stopped following my plan because {why}.")
+                return None
+            act = a.queue.pop(0)
+            act["thought"] = f"(following my plan) {act.get('thought') or ''}".strip()
+            return act
+
     def think(self, a: Agent, job: dict) -> dict:
         """Ask the agent's brain (no lock held; runs in parallel with everyone else)."""
+        if self.tick - a.last_reflect >= REFLECT_EVERY:
+            a.last_reflect = self.tick
+            try:
+                r = mind.reflect(a, self.llm, self.tick, self._ideas())
+                with self.lock:
+                    if r["insight"]:
+                        a.remember(self.tick, f"Reflecting on my life: {r['insight']}")
+                    if r["ambition"] and r["ambition"] != a.ambition:
+                        a.ambition = r["ambition"]
+                        a.remember(self.tick, f"My ambition: {a.ambition}")
+                        self.event(self.tick, a, f"set an ambition: {a.ambition}", "goal")
+                    if r["plan"]:
+                        a.plan = r["plan"]
+            except Exception as e:
+                self._error(a, e, "reflection failed")
         try:
             act = mind.decide(a, self.llm, job["prompt"], job["others"])
         except Exception as e:                        # one broken brain must not stop everyone else
@@ -161,8 +198,15 @@ class Society:
         t0 = time.time()
         self.begin_day()
         agents = list(self.agents.values())
-        jobs = [(a, self.prepare(a)) for a in agents]
-        jobs = [(a, j) for a, j in jobs if j]
+        jobs = []
+        for a in agents:
+            queued = self.take_queued(a)
+            if queued:
+                self.apply_decision(a, queued, {"heard": []})
+            else:
+                job = self.prepare(a)
+                if job:
+                    jobs.append((a, job))
         with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as pool:
             acts = list(pool.map(lambda aj: self.think(*aj), jobs))
         order = list(zip(jobs, acts))
@@ -200,6 +244,8 @@ class Society:
 
     def _act(self, a: Agent, act: dict, tick: int, heard: list[str]):
         result = actions.apply(self, a, act, tick)
+        if act.get("next"):                       # a fresh decision may line up a whole project
+            a.queue = [dict(n) for n in act["next"]]
         if act["role"] and act["role"][:40] != a.role:
             a.role = act["role"][:40]
             self.event(tick, a, f'took on a new role: "{a.role}"', "role")

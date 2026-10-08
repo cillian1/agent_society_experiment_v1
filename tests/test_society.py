@@ -157,6 +157,23 @@ class MovementTests(unittest.TestCase):
         self.assertIn("moved east 2", apply(sim, ada, parse_action('{"action": "move", "direction": "east", "steps": 2}', []), 1))
 
 
+class PlanningTests(unittest.TestCase):
+    def test_queued_steps_run_and_hunger_interrupts(self):
+        sim = make()
+        ada = sim.agents["Ada"]
+        act = parse_action('{"action": "wait", "next": [{"action": "gather"}, {"action": "say", "to": "all", "message": "hi"}]}', [])
+        sim.apply_decision(ada, act, {"heard": []})
+        self.assertEqual(len(ada.queue), 2)
+        self.assertEqual(sim.take_queued(ada)["action"], "gather")
+        ada.hunger = 80
+        self.assertIsNone(sim.take_queued(ada))                 # hungry -> stop and think again
+        self.assertEqual(ada.queue, [])
+
+    def test_reflection_sets_an_ambition(self):
+        sim = make(8)
+        self.assertTrue(any(a.ambition for a in sim.agents.values()))
+
+
 class SaveTests(unittest.TestCase):
     def test_round_trip_and_continue(self):
         sim = make(60)
