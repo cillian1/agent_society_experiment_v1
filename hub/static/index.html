@@ -52,6 +52,7 @@ textarea{width:100%;resize:vertical;min-height:58px}
 <div class="panel"><h2>🗣 Talk to the agents</h2><div id="chat"><div class="dim">Pick who to talk to, then say something - they answer here.</div></div><div class="chips" id="to"></div>
 <textarea id="msg" placeholder="Type a message… (Enter to send, Shift+Enter for a new line)"></textarea>
 <div class="row"><span class="msg dim" id="sent"></span><button class="primary" id="send">Speak</button></div>
+<div class="row"><label class="dim">How they treat you <select id="auth"><option value="leader">Leader - they obey</option><option value="advisor">Advisor - they usually follow</option><option value="observer">Observer - they ignore you</option></select></label></div>
 <div class="tag" style="margin-top:6px">Each agent you address answers right away, in character (one extra API call each). They also remember it in their next turn.</div></div>
 <div class="panel"><h2>Agents</h2><div class="cards" id="cards"></div></div>
 <div class="panel" id="detail"><h2>Inspector</h2><div class="dim">Click an agent on the map or in the list to see what it is thinking and what it has done.</div></div>
@@ -245,11 +246,12 @@ async function poll1(){
       +(!B.mock&&(B.notes||[]).some(n=>/unavailable|not reachable|isn't installed/.test(n))?'<div class="warn">'+esc((B.notes||[]).filter(n=>/unavailable|not reachable|isn.t installed/.test(n)).join(' · '))+'</div>':'')
       +(s.errors&&s.errors.length&&s.tick-s.errors[s.errors.length-1].tick<10?'<div class="bad">Brain error · '+esc(s.errors[s.errors.length-1].agent)+' ('+esc(s.errors[s.errors.length-1].model)+'): '+esc(s.errors[s.errors.length-1].error)+'</div>':'');
 $('pause').textContent=s.paused?'▶ Resume':'⏸ Pause';
-    structures=s.structures;renderChat(s.chat);renderUsage(s.usage);
+    structures=s.structures;if(document.activeElement!==$('auth'))$('auth').value=s.authority;renderChat(s.chat);renderUsage(s.usage);
     $('talk').innerHTML=s.talk.slice().reverse().map(m=>`<div class="feedrow"><span class="tag">day ${m.tick}</span> <b style="color:${m.color}">${esc(m.from)}</b> <span class="dim">→ ${m.to==='all'?'everyone':esc(m.to)}</span><div>${esc(m.text)}</div></div>`).join('')||'<div class="dim">no one has spoken yet…</div>';renderCards();if(first||$('to').children.length!==agents.length+1)renderTo();if(sel)renderDetail();
     $('feed').innerHTML=s.events.slice().reverse().map(e=>`<div class="feedrow ${e.human?'you':''}"><span class="tag">turn ${e.tick}</span> <span class="dot" style="background:${e.color}"></span><b>${esc(e.agent)}</b> ${esc(e.text)}</div>`).join('')||'<div class="dim">quiet so far…</div>'}catch(e){console.error(e)}}
 function poll(){poll1().finally(()=>setTimeout(poll,600))}
 async function histLoop(){try{await loadHistory()}catch(e){}setTimeout(histLoop,1200)}
+$('auth').onchange=e=>post('/api/control',{authority:e.target.value});
 $('pause').onclick=()=>post('/api/control',{paused:!state.paused});
 $('speed').onchange=e=>post('/api/control',{interval:+e.target.value});
 function setZoom(z){zoom=Math.min(1.6,Math.max(.3,z));cv.style.width=Math.round(W*T*zoom)+'px';cv.style.height=Math.round(H*T*zoom)+'px';$('zlabel').textContent=Math.round(zoom*100)+'%'}

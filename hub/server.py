@@ -63,6 +63,8 @@ def serve(society, host: str, port: int, interval: float):
                 data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 if "paused" in data:
                     ctl["paused"] = bool(data["paused"])
+                if data.get("authority") in ("leader", "advisor", "observer"):
+                    society.human_authority = data["authority"]
                 if "interval" in data:
                     ctl["interval"] = max(0.1, float(data["interval"]))
                 self._json(ctl)

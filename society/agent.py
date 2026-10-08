@@ -16,8 +16,18 @@ CHILD_COOLDOWN = 50
 BUILD_COST = 2          # wood/stone needed per structure
 KEEP_RECENT = 25        # memory lines shown verbatim; older ones are folded into the summary
 COMPACT_AFTER = 20      # unsummarised old lines that trigger a summarisation
+HUMAN_NOTES = {
+    "leader": ("The Human is the founder and leader of your community, a voice from outside the world. When the Human tells you "
+               "to do something, you do it - starting right away, as your next actions - and you tell them you will. Only refuse "
+               "if it would clearly get you killed, and say why. Respect and obey them."),
+    "advisor": ("The Human is a wise outsider whose advice you take seriously. Consider what they say and usually follow it, "
+                "but you may politely decline if you have a good reason."),
+    "observer": ("A human observer outside the world sometimes talks to you. They have no authority over you: you are free and "
+                 "answer them as you like, in character."),
+}
+ORDER_MEMORY_DAYS = 30
 DEFAULT_GOAL = ("Survive, make friends, and build a life and a society together with the others. "
-                "Nobody tells you what to do or who to be - decide for yourselves what matters.")
+                "Nobody assigns you a role - decide for yourselves what matters.")
 
 
 @dataclass
@@ -69,6 +79,8 @@ class Agent:
     last_say_to: str = "all"
     last_say_tick: int = -99
     chat: list[tuple[str, str]] = field(default_factory=list)  # (speaker, text) conversation with the Human
+    authority: str = "leader"                                  # how this agent treats the Human (see HUMAN_NOTES)
+    orders: list[tuple[int, str]] = field(default_factory=list)  # (day, text) things the Human asked it to do
 
     # ---- family / age ----
     def age(self, tick: int) -> int:
@@ -127,8 +139,8 @@ class Agent:
             f"adults, nearby, each pays {CHILD_FOOD_COST} food)\n"
             '  invent  - {"title": "...", "message": "describe your idea, custom, tool or law"} shared with the whole society\n'
             "  wait\n"
-            "A human observer outside the world sometimes talks to you; you answer them directly and in character "
-            "(that happens in a separate chat, so it does not use up your turn).\n"
+            + HUMAN_NOTES[self.authority] + " (Talking with the Human happens in a separate chat, so it does not use up your turn.)\n"
+            +
             "Reply ONLY with JSON. Optional extra fields: \"remember\" (a note to your future self) and \"role\" "
             "(claim or change your own role/title whenever you like), e.g.\n"
             '{"thought": "<1-2 sentences of private reasoning>", "action": "say", "to": "Ada", "message": "Want to farm together?", "role": "farmer"}'
@@ -178,6 +190,10 @@ class Agent:
             lines.append("You could have a child right now with: " + ", ".join(partners))
         if self.parents or self.children:
             lines.append(f"Family - parents: {', '.join(self.parents) or 'none'}; children: {', '.join(self.children) or 'none'}")
+        recent_orders = [t for d, t in self.orders if tick - d <= ORDER_MEMORY_DAYS]
+        if recent_orders and self.authority != "observer":
+            lines.append("What the Human has asked of you recently (keep working on it until it's done; "
+                         "tell the Human with say to=Human when finished):\n" + "\n".join(f'- "{t}"' for t in recent_orders[-3:]))
         if self.summary:
             lines.append("What you remember of your earlier life (summary):\n" + self.summary)
         if self.log[self.sum_upto:]:
@@ -216,8 +232,9 @@ class Agent:
         also = f" (they said it to {', '.join(also_to)} as well)" if also_to else ""
         return (f"CHAT_WITH_HUMAN\nYour current situation:\n{situation}\n\nYour earlier conversation with the Human:\n{talk}\n\n"
                 f'The Human (an observer outside the world) just said to you{also}: "{human_msg}"\n'
-                "Answer them directly and in character in 1-3 sentences: reply to what they actually say or ask, and "
-                "mention what is going on in your life if it fits. Reply ONLY with JSON: "
+                + HUMAN_NOTES[self.authority] + "\n"
+                "Answer them directly and in character in 1-3 sentences: reply to what they actually say or ask. "
+                "If they gave an instruction, say what you will do about it first. Reply ONLY with JSON: "
                 '{"thought": "<private reasoning>", "message": "<what you say to them>"}')
 
     def reply(self, llm, situation: str, human_msg: str, others: list[str], also_to: list[str]) -> dict:

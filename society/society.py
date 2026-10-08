@@ -61,6 +61,7 @@ class Society:
         self.llm = llm
         self.max_agents = max_agents
         self.baby_model = baby_model
+        self.human_authority = "leader"   # leader | advisor | observer: how agents treat the human
         self.errors: list[dict] = []
         self.tick_seconds = 0.0
         self.tick = 0
@@ -103,6 +104,8 @@ class Society:
             names = list(self.agents)
             ideas = [f"{i['title']} (by {i['by']}): {i['text']}" for i in self.inventions[-MAX_IDEAS_IN_PROMPT:]]
             jobs = [(a, a.observe(self.world, agents, tick, ideas), [n for n in names if n != a.name]) for a in agents]
+            for a in agents:
+                a.authority = self.human_authority
             heard_by = {a.name: list(a.heard) for a in agents}
             for a in agents:
                 a.heard = []
@@ -425,6 +428,10 @@ class Society:
                                 "color": "#ffffff", "human": True})
             slots = []
             for a in chosen:
+                a.authority = self.human_authority
+                if self.human_authority != "observer":
+                    a.orders.append((self.tick, message[:300]))
+                    del a.orders[:-5]
                 slot = {"from": a.name, "text": "", "pending": True, "tick": self.tick, "color": a.color}
                 self.chat.append(slot)
                 slots.append((a, slot))
@@ -453,7 +460,9 @@ class Society:
                 a.last_say, a.last_say_to, a.last_say_tick = text, "Human", self.tick
                 self._note(a, self.tick, f'The Human said to me: "{message}" and I answered: "{text}"')
                 self._event(self.tick, a, f'replied to You: "{text}"', reply=True)
-            a.heard.append(f'The Human said to you: "{message}"' + (f' - you replied: "{text}"' if err is None else ""))
+            verb = {"leader": "(your leader) ORDERED you", "advisor": "advised you", "observer": "said to you"}[a.authority]
+            a.heard.append(f'The Human {verb}: "{message}"' + (f' - you replied: "{text}"' if err is None else "")
+                           + (" - now carry it out." if a.authority == "leader" else ""))
             a.history.append({"tick": self.tick, "x": a.x, "y": a.y, "hunger": int(a.hunger),
                               "thought": out.get("thought", ""), "action": "reply to Human", "result": text,
                               "heard": [f'The Human says: "{message}"']})
@@ -529,6 +538,7 @@ class Society:
                                | {"y": y} for (x, y), st in self.world.structures.items()],
                 "inventions": self.inventions[-30:],
                 "usage": self.llm.usage(),
+                "authority": self.human_authority,
                 "backends": self.llm.info() if hasattr(self.llm, "info") else {},
                 "errors": self.errors[-5:], "tick_seconds": self.tick_seconds,
                 "limits": {"max_agents": self.max_agents, "adult_age": ADULT_AGE, "love": LOVE_BOND, "old_age": OLD_AGE},
