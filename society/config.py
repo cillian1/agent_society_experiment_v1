@@ -105,11 +105,18 @@ SOL_EVERY = 3 * DAY                   # Sol's default gap between reviews; Sol p
 SOL_MIN_DAYS, SOL_MAX_DAYS = 1, 7
 SOL_HOUR = 7
 ADVICE_MEMORY = 2 * DAY
-MAX_QUEUE = 6                         # follow-up actions an agent may line up (run without a model call)
+MAX_QUEUE = 10                        # steps an agent may line up in its plan (run without a model call)
 REFLECT_EVERY = 3 * DAY               # nobody goes longer than this without a night of reflection (a dream)
 DREAM_CHANCE = 0.35                   # chance of dreaming on any other night, at a random hour of sleep
-THINK_EVERY = 2                       # hours between an agent's model calls (in between: its queue or routine)
-THINK_CHOICES = (1, 2, 3, 6)          # the Settings menu: smartest ... thriftiest
+THINK_EVERY = 2                       # (older "every N hours" thinking; see THINK_MODES)
+THINK_CHOICES = (1, 2, 3, 6)
+# How often agents use their brain (Settings). "plan" modes: big-brain moments at these hours, where the model plans
+# the day; every other hour autopilot.py runs the plan and reacts to small things. Numbers: think every N hours.
+THINK_MODES = {"plan1": (7,), "plan2": (7, 13), "plan4": (7, 11, 15, 19), "2": None, "1": None}
+THINK_MODE = "plan2"
+CHAT_GAP = 3                          # hours: an agent answers someone with its brain at most this often...
+CHAT_BUDGET = 3                       # ...and at most this many such answers per hour across the whole society
+URGENT_GAP = 4                        # hours: something big (spoken to, an offer, a crime) can wake the brain this often
 
 # ---- bookkeeping ----
 AUTOSAVE_EVERY = DAY

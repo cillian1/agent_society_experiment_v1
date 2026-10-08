@@ -13,8 +13,8 @@ p.add_argument("--port", type=int, default=8000)
 p.add_argument("--agents", help="JSON file defining the starting agents (default: built-in 6)")
 p.add_argument("--max-agents", type=int, default=DEFAULT_MAX_AGENTS, help="population cap")
 p.add_argument("--seed", type=int, help="world seed (same seed = same map)")
-p.add_argument("--interval", type=float, default=1.0, help="minimum seconds per day")
-p.add_argument("--max-wait", type=float, default=5.0,
+p.add_argument("--interval", type=float, default=0.8, help="seconds per hour of world time")
+p.add_argument("--max-wait", type=float, default=0.8,
                help="max seconds a day waits for slow brains (they act a little later instead)")
 p.add_argument("--load", metavar="NAME", help="start from a save in ./saves (e.g. autosave)")
 p.add_argument("--resume", action="store_true", help="continue from the latest autosave if there is one")

@@ -239,18 +239,6 @@ def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[s
     return unique[:4]
 
 
-ROUTINE = ("eat", "care", "gather", "tend", "work", "store", "take", "go")
-
-
-def routine(a: Agent, world, agents: list[Agent], tick: int) -> dict | None:
-    """An obvious next step worked out by code (no model call): the best concrete suggestion, if there is one."""
-    for why, act in suggestions(a, world, agents, tick):
-        if act["action"] in ROUTINE and "<" not in json.dumps(act):
-            act = parse_action(json.dumps({**act, "thought": why}), [o.name for o in agents if o is not a])
-            return act
-    return None
-
-
 def society_lines(sim, a: Agent, tick: int) -> list[str]:
     """Season, technology, animals, deals, group & laws, culture, beliefs and recalled memories."""
     out = []
@@ -593,6 +581,27 @@ def reply(a: Agent, llm, situation: str, human_msg: str, others: list[str], also
             "message": said(raw)[:600],
             "ambition": str(data.get("ambition") or "").strip()[:240], "plan": str(data.get("plan") or "").strip()[:240],
             "next": nxt}
+
+
+def converse(a: Agent, llm, sim, speaker: str, words: str) -> dict:
+    """A quick answer to someone who spoke to you: a short prompt and a short reply (cheap and fast)."""
+    t = sim.tick
+    feel = int(a.bonds.get(speaker, 0))
+    about = memory.recall(a.log, len(a.log), [speaker], k=3) or []
+    prompt = (f"CHAT_REPLY\nYou are {a.name}, a {a.word(t)}" + (f", the {a.role}" if a.role else "")
+              + f". {needs.describe(a, t)} Personality: {a.traits.describe()}.\n"
+              f"Your plan: {a.plan or 'none'}. Your feelings toward {speaker}: {feel}"
+              + (" (in love)" if feel >= LOVE_BOND else " (friend)" if feel >= FRIEND_BOND else " (grudge)" if feel <= -10 else "") + ".\n"
+              + ("What you remember about them:\n" + "\n".join("- " + m for m in about) + "\n" if about else "")
+              + "Lately:\n" + "\n".join("- " + m for m in recent_memories(a.log[-5:])) + "\n"
+              f'{speaker} just said to you: "{words}"\n'
+              "Answer in character in one or two short sentences. If you agree to do something together, you may add up to "
+              '3 steps to start on. Reply ONLY with JSON: {"message": "...", "next": [optional actions, e.g. '
+              '{"action": "go", "target": "wood"}]}')
+    raw = llm.complete(f"You are {a.name}, talking with {speaker}.", prompt, model=a.model, max_tokens=160)
+    data = _json(raw)
+    nxt = parse_action(json.dumps({"action": "wait", "next": (data.get("next") or [])[:3]}), [speaker])["next"]
+    return {"message": said(raw)[:200], "next": nxt}
 
 
 def dream(a: Agent, llm, tick: int, ideas: list[str], fold: list[str] | None = None) -> dict:

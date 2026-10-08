@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from society import persistence, sol, views
-from society.config import AUTOSAVE_EVERY, THINK_CHOICES
+from society.config import AUTOSAVE_EVERY, THINK_MODES
 
 STATIC = Path(__file__).parent / "static"
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -72,9 +72,16 @@ class Hub:
                     self._dream(sim, a)
                 for a in list(sim.agents.values()):
                     key = (id(sim), a.name)
+                    due = sim.chat_due(a)
+                    if due:                            # answer someone with the brain, in the background
+                        self.pool.submit(sim.converse, a, *due)
                     with self.busy_lock:
-                        if key in self.busy:          # still thinking about an earlier day
-                            continue
+                        busy = key in self.busy
+                    if busy:                           # its brain is still planning: carry on by habit meanwhile
+                        act = sim.autopilot_step(a)
+                        if act:
+                            sim.apply_decision(a, act, {"heard": []})
+                        continue
                     queued = sim.take_queued(a)           # a step it planned earlier: no thinking needed
                     if queued:
                         sim.apply_decision(a, queued, {"heard": []})
@@ -159,8 +166,8 @@ class Hub:
                 sim.sol_model = names.get(d["sol_model"], d["sol_model"])
             if d.get("authority") in ("leader", "advisor", "observer"):
                 sim.human_authority = d["authority"]
-            if d.get("think_every") in THINK_CHOICES:
-                sim.think_every = int(d["think_every"])
+            if d.get("think_mode") in THINK_MODES:
+                sim.think_mode = d["think_mode"]
             return {"paused": self.paused, "interval": self.interval, "max_wait": self.max_wait,
                     "authority": sim.human_authority}
         if path == "/api/speak":

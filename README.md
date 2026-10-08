@@ -195,21 +195,25 @@ tests/                   `python -m unittest`
 **Adding an action:** write a function in `society/actions.py` decorated with `@action("name")`, add the name to
 `ACTIONS` and a one-line description in `system_prompt` in `society/mind.py`.
 
-## Saving money and time
-- **Far from the camera, think less:** agents more than 30 tiles from where you're looking think three times less
-  often (at least every 6 hours) - they carry on with their plans and routines meanwhile.
-- **Thinking every few hours:** ⚙️ Settings → *Agents think* (every 1, 2, 3 or 6 hours; default 2). In between, agents
-  follow the steps they planned or an obvious routine (eat, gather, tend, keep building) with no model call. Being spoken
-  to, hunger, a baby or a failed step wakes their brain immediately.
-- **Small prompts:** the rules every agent shares are one fixed text sent as the system prompt (Claude caches it, so it
-  costs a tenth after the first call; local servers reuse it); each turn adds only what that agent sees and remembers,
-  with repeated memories folded together. A 48-hour test went from 204 calls of ~2,900 tokens to 105 of ~2,000.
-- **You go first:** your messages (and Sol's answers to you) skip the queue of routine thinking and use a short prompt,
-  so replies come quickly even when everyone is busy.
+## Saving money and time: big-brain moments and autopilot
+- **The brain plans, habits do the rest.** Each agent's AI has a *big-brain moment* in the morning and at midday
+  (⚙️ Settings → *Agents think*: once, twice or four times a day, or the old every-1/2-hours modes). It plans the
+  day - what matters, who to talk to, up to 10 steps. Every other hour the agent runs on **autopilot** (plain code,
+  `society/autopilot.py`): it follows the plan and reacts to small things by habit - eats, flees fire, feeds its baby,
+  rests, gets warm on winter nights, keeps promises, takes fair trades, chats with friends, has children with the one
+  it loves, tends crops, stores spare food, builds a missing hut/storehouse/hearth, gathers, explores. Nobody stands
+  around waiting: even while its brain is busy planning, an agent carries on by habit.
+- **Big things wake the brain early** (at most every 4 hours): an offer, a crime they saw, a death or birth, the Human.
+- **Conversations use the brain, sparingly:** when someone speaks to an agent it may answer with a short, cheap model
+  call - each agent at most every 3 hours, and at most 3 such answers per hour in the whole society; otherwise it
+  answers by habit. In a mock test this is ~3-4 model calls per agent per day instead of ~16.
+- **Small prompts:** the rules every agent shares are one fixed text sent as the system prompt (Claude caches it;
+  local servers reuse it); each turn adds only what that agent sees and remembers.
+- **You go first:** your messages (and Sol's answers to you) skip the queue and use a short prompt.
 - ⚙️ Settings shows calls, tokens per call and cached tokens per model.
 
 ## Speed
-Hours don't wait for every brain. Each agent acts the moment its brain answers (at most once per hour); an hour ends
+Hours don't wait for brains: an agent whose brain is still working carries on by autopilot. An hour ends
 when everyone has answered or after a short wait (`--max-wait`, or the Slow / Normal / Fast buttons), so a slow brain
 such as Opus only slows its own agent - it acts an hour or two later (💭 over its head) while everyone else carries on.
 To go faster still: pick **Fast**, match `OLLAMA_NUM_PARALLEL` with `--local-concurrency`, use a smaller local model

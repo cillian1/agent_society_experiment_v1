@@ -172,10 +172,11 @@ class PlanningTests(unittest.TestCase):
         act = parse_action('{"action": "wait", "next": [{"action": "gather"}, {"action": "say", "to": "all", "message": "hi"}]}', [])
         sim.apply_decision(ada, act, {"heard": []})
         self.assertEqual(len(ada.queue), 2)
+        ada.last_think, ada.heard = sim.tick, []
         self.assertEqual(sim.take_queued(ada)["action"], "gather")
-        ada.hunger = 80
-        self.assertIsNone(sim.take_queued(ada))                 # hungry -> stop and think again
-        self.assertEqual(ada.queue, [])
+        ada.hunger, ada.food = 80, 2
+        self.assertEqual(sim.take_queued(ada)["action"], "eat")  # hungry: autopilot eats first...
+        self.assertEqual(len(ada.queue), 1)                      # ...and the plan carries on afterwards
 
     def test_dreams_happen_at_night_and_set_ambitions(self):
         sim = make(16)                                          # 06:00 -> 22:00: nobody has dreamt yet
@@ -211,16 +212,35 @@ class SpeedTests(unittest.TestCase):
             t.join()
         self.assertEqual(order[:2], ["busy", "human"])
 
-    def test_routine_saves_calls_but_speech_wakes_the_brain(self):
+    def test_autopilot_between_big_brain_moments(self):
+        from society import clock
         sim = make(30)
         ada = sim.agents["Ada"]
         ada.queue, ada.last_think, ada.history, ada.heard, ada.task = [], sim.tick, [], [], None
         ada.hunger, ada.food = 70, 3
-        self.assertEqual(sim.take_queued(ada)["action"], "eat")       # obvious: no model call
-        ada.heard = ['Brix says to you: "come here"']
-        self.assertIsNone(sim.take_queued(ada))                        # spoken to: think
-        ada.heard, ada.last_think = [], sim.tick - sim.think_every
-        self.assertIsNone(sim.take_queued(ada))                        # time to think again anyway
+        self.assertEqual(sim.take_queued(ada)["action"], "eat")       # by habit: no model call
+        ada.hunger = 10
+        self.assertIsNotNone(sim.take_queued(ada))                     # always something to do
+        ada.heard = ['Dov offers you 2 food for 3 wood (now).']
+        ada.last_think = sim.tick - 5
+        self.assertIsNone(sim.take_queued(ada))                        # something big: the brain reacts
+        ada.heard, ada.last_think = [], sim.tick - 3
+        offset = sum(map(ord, "Ada")) % 2
+        while clock.when(sim.tick)["hour"] != 7 + offset:
+            sim.tick += 1
+        self.assertEqual(sim.brain_due(ada), "plan")                   # the morning plan
+
+    def test_conversations_use_the_brain_sparingly(self):
+        sim = make(30)
+        ada, brix = sim.agents["Ada"], sim.agents["Brix"]
+        brix.x, brix.y = ada.x, ada.y
+        ada.heard, ada.last_chat = ['Brix says to you: "shall we build a house?"'], -999
+        sim.chat_used = {}
+        self.assertEqual(sim.chat_due(ada), ("Brix", "shall we build a house?"))
+        sim.converse(ada, "Brix", "shall we build a house?")
+        self.assertEqual(ada.history[-1]["action"], "say")
+        ada.heard = ['Brix says to you: "and then?"']
+        self.assertIsNone(sim.chat_due(ada))                           # answered with the brain recently
 
 
 class GameMasterTests(unittest.TestCase):

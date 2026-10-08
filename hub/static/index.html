@@ -21,7 +21,7 @@
     <button id="b-pause" class="btn primary" title="Pause / resume (Space)">⏸ Pause</button>
     <button id="b-step" class="btn" title="Advance one hour while paused (N)">⏭ Hour</button>
     <div class="seg" id="speed" title="Simulation speed">
-      <button data-v="3" data-w="15" title="Hours last at least 3 s and wait up to 15 s for slow brains">Slow</button><button data-v="1" data-w="5" class="on" title="At least 1 s per hour; slow brains get up to 5 s">Normal</button><button data-v="0.2" data-w="1.5" title="As fast as possible; slow brains act an hour or two later">Fast</button>
+      <button data-v="2" data-w="2" title="2 s per hour">Slow</button><button data-v="0.8" data-w="0.8" class="on" title="0.8 s per hour (a day in about 20 s)">Normal</button><button data-v="0.25" data-w="0.25" title="As fast as it goes">Fast</button>
     </div>
     <button id="b-help" class="btn icon" title="Help &amp; shortcuts (?)">?</button>
   </div>
@@ -152,9 +152,9 @@
       <p class="muted small">Sol reviews the society every few days (Sol decides when the next review is, and you can ask any time), judges everything agents attempt or invent, and designs blueprints for new buildings. A smarter Sol makes a richer world.</p>
       <h3>Thinking &amp; cost</h3>
       <div class="row"><label class="field-label" for="thinkev">Agents think</label>
-        <select id="thinkev"><option value="1">every hour (smartest, most calls)</option><option value="2">every 2 hours (balanced)</option>
-          <option value="3">every 3 hours (thrifty)</option><option value="6">every 6 hours (cheapest, fastest)</option></select></div>
-      <p class="muted small">Between thoughts agents follow the steps they planned (“next”) or an obvious routine (eat, gather, tend, keep building) without a model call. Being spoken to, hunger, a baby or a failure always gets them thinking right away. At night they sleep for free; on some nights each has one dream, at a random hour, where they reflect, set ambitions, may wake up with an idea, and tidy up their memories. The rules every agent shares are cached on Claude (cached input costs a tenth).</p>
+        <select id="thinkev"><option value="plan1">plan once a day (fastest)</option><option value="plan2">plan twice a day (recommended)</option>
+          <option value="plan4">plan four times a day</option><option value="2">think every 2 hours (slow)</option><option value="1">think every hour (slowest)</option></select></div>
+      <p class="muted small">Big-brain moments: in the morning (and at midday) each agent's AI plans the day. Every other hour they run on <b>autopilot</b>: they follow the plan and handle small things by habit - eating, resting, getting warm, feeding babies, keeping promises, fair trades, chatting with friends, tending crops, building what's obviously missing - with no model call, so they never stand around waiting. Something big (an offer, a crime they saw, a death, you talking to them) wakes the brain early. When someone speaks to them they may answer with their brain too, a few times a day. At night they sleep for free; on some nights each has one dream, at a random hour, where they reflect, set ambitions, may wake up with an idea, and tidy up their memories. The rules every agent shares are cached on Claude (cached input costs a tenth).</p>
       <h3>Brains &amp; usage</h3>
       <div id="usage"></div>
       <h3>Keyboard shortcuts</h3>

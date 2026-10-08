@@ -68,7 +68,7 @@ class Abilities:
 
     # ---- effects ----
     def steps(self) -> int:
-        return 2 + self.speed // 4                       # 2-4 tiles per move
+        return 3 + self.speed // 4                       # 3-5 tiles per move
 
     def view(self) -> int:
         return 4 + (self.wits + 1) // 3                  # 4-7 tiles
@@ -102,6 +102,7 @@ class Agent:
     task: dict | None = None                                 # ongoing multi-hour work, e.g. {"type": "build", "id": 3}
     last_reflect: int = -999
     last_think: int = -999            # when its brain was last asked
+    last_chat: int = -999             # when it last answered someone with its brain
     dream_at: int = -1                # the hour of tonight's dream (-1: a dreamless night)
     last_dream: list = field(default_factory=list)          # [tick, text]
     role: str = ""                     # agents invent and claim their own roles

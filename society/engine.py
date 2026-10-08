@@ -9,13 +9,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import actions, clock, culture, gm, history, memory, mind, needs, social, sol
+from . import actions, autopilot, clock, culture, gm, history, memory, mind, needs, social, sol
 from . import tech as techtree
 from .ecology import ANIMALS, Ecology
 from .clock import DAY
-from .config import (ADVICE_MEMORY, SOL_HOUR, SOL_EVERY, HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, DREAM_CHANCE, THINK_EVERY, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
+from .config import (ADVICE_MEMORY, SOL_HOUR, SOL_EVERY, HOME_HEAL, EFFECTS, HUNGER_WARNING, REFLECT_EVERY, DREAM_CHANCE, THINK_EVERY, THINK_MODE, THINK_MODES, URGENT_GAP, CHAT_GAP, CHAT_BUDGET, INSTINCT_EAT_AT, START_FOOD, ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND, BOND_DECAY,
                      DEFAULT_MAX_AGENTS, EAT_RELIEF, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
-                     MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS, KEEP_RECENT, COMPACT_AFTER, FRIEND_BOND)
+                     MAX_STATS_POINTS, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS, KEEP_RECENT, COMPACT_AFTER, FRIEND_BOND, MAX_QUEUE)
 from .models import Abilities, Agent, Traits
 from .world import World
 
@@ -78,7 +78,8 @@ class Society:
         self.discoveries: list[dict] = []        # ideas Sol judged real: they change the rules
         self.blueprints: dict[str, dict] = {}    # what each kind of building costs and does (shared knowledge)
         self.lock = threading.RLock()
-        self.think_every = THINK_EVERY             # hours between model calls per agent (Settings)
+        self.think_every = THINK_EVERY             # hours between model calls in the "every N hours" modes
+        self.think_mode = THINK_MODE               # Settings: big-brain moments per day (see config.THINK_MODES)
         self.sol_model = LOCAL                   # Sol: mentor AND referee; starts on the local brain (Settings / --sol-model)
         self.sol_log: list[dict] = []
         self.sol_last, self.sol_due = -SOL_EVERY, False
@@ -99,6 +100,7 @@ class Society:
         self.snapshots: list[dict] = []
         self.ids: dict[str, int] = {}
         self._territory: dict = {}
+        self.chat_used: dict[int, int] = {}       # brain-powered answers used this hour
         self.focus = None                         # where the Human is looking (far-away agents think less often)
         if spawn:
             self._spawn()
@@ -189,16 +191,90 @@ class Society:
             job = {"prompt": mind.observation(a, self.world, agents, self.tick, self._ideas(), self._discoveries(),
                                               self._blueprints(), self._mentor_for(a), sim=self),
                    "others": [o.name for o in agents if o is not a], "heard": a.heard}
+            why = self.brain_due(a) or "plan"
+            hours = THINK_MODES.get(self.think_mode)
+            if hours is not None:
+                until = next((h for h in hours if h > clock.when(self.tick)["hour"] + 1), 22)
+                job["prompt"] += (
+                    f"\n\nBIG-BRAIN MOMENT ({'planning your day' if why == 'plan' else 'something important happened'}): "
+                    f"you only stop to really think a few times a day; until about {until:02d}:00 you'll follow the steps "
+                    "you line up now (and handle eating, sleeping and small things by habit). So: decide what matters most, "
+                    f"answer anyone who spoke to you, and line up a whole plan in \"next\" (up to {MAX_QUEUE} steps).")
             a.heard = []
             a.last_think = self.tick
             return job
 
+    URGENT = ("The Human", "offers you", "courting you", "gave you", "STOLE", "saw ", "died", "birth",
+              "wants to have a child", "proposes a law", "exiled")
+
+    def brain_due(self, a: Agent) -> str:
+        """Is it time for this agent's big-brain moment? "" if not, else why (it goes in the prompt)."""
+        since = self.tick - a.last_think
+        if a.last_think < 0:
+            return "plan"                                   # the very first morning: plan the day
+        hours = THINK_MODES.get(self.think_mode)
+        if hours is None:                                   # "think every N hours" modes
+            return "think" if since >= int(self.think_mode) else ""
+        hour, offset = clock.when(self.tick)["hour"], sum(map(ord, a.name)) % 2    # spread the planners over two hours
+        if since >= 2 and any(hour == h + offset for h in hours):
+            return "plan"
+        if since >= URGENT_GAP and any(k in h for h in a.heard for k in self.URGENT):
+            return "react"                                  # something big happened: think about it now
+        recent = [h["result"] for h in a.history[-2:]]
+        if since >= URGENT_GAP and len(recent) == 2 and all(mind.failed(r) for r in recent):
+            return "react"                                  # stuck: autopilot keeps failing
+        return ""
+
+    SAYS = re.compile(r'^(\w+) says to you: "(.*)"$')
+
+    def chat_due(self, a: Agent):
+        """Someone spoke to this agent: may it answer with its brain? (speaker, words) or None. Limited per agent
+        (CHAT_GAP hours) and per hour for everyone (CHAT_BUDGET) - otherwise it answers by habit (autopilot)."""
+        with self.lock:
+            if a.is_baby(self.tick) or clock.is_night(self.tick) or self.tick - a.last_chat < CHAT_GAP:
+                return None
+            if self.chat_used.get(self.tick, 0) >= CHAT_BUDGET:
+                return None
+            for h in a.heard:
+                m = self.SAYS.match(h)
+                if m and m.group(1) in self.agents:
+                    a.last_chat = self.tick
+                    self.chat_used = {self.tick: self.chat_used.get(self.tick, 0) + 1}
+                    return m.group(1), m.group(2)
+            return None
+
+    def converse(self, a: Agent, speaker: str, words: str):
+        """Answer someone with the brain (no lock held during the model call)."""
+        try:
+            out = mind.converse(a, self.llm, self, speaker, words)
+        except Exception as e:
+            self._error(a, e, "conversation failed")
+            return
+        with self.lock:
+            o = self.agents.get(speaker)
+            if a.name not in self.agents or not o or not out["message"] or a.dist(o) > 8:
+                return
+            act = mind.parse_action(json.dumps({"action": "say", "to": speaker, "message": out["message"],
+                                                "thought": f"(answering {speaker})"}), [speaker])
+            act["next"] = out["next"]
+            self._act(a, act, self.tick, [f'{speaker}: "{words}"'])
+
     def take_queued(self, a: Agent) -> dict | None:
-        """The next action the agent lined up earlier - unless something important needs fresh thinking."""
+        """This hour without the brain: the next step of the agent's plan, ongoing work, or autopilot.
+        None means: ask the brain (a big-brain moment is due) - or nothing to do (asleep, a baby)."""
         with self.lock:
             if a.name not in self.agents or a.is_baby(self.tick) or clock.is_night(self.tick):
                 return None
-            if not a.queue and a.task:                      # carry on with ongoing work (no thinking needed)
+            if self.brain_due(a):
+                return None
+            return self.autopilot_step(a)
+
+    def autopilot_step(self, a: Agent) -> dict | None:
+        """Plan step, building work, or autopilot.decide - never a model call (also used while the brain is busy)."""
+        with self.lock:
+            if a.name not in self.agents or a.is_baby(self.tick) or clock.is_night(self.tick):
+                return None
+            if not a.queue and a.task:                      # carry on with ongoing work
                 site = self.world.buildings.get(a.task.get("id"))
                 if not site or site.get("done", True):
                     a.task = None
@@ -207,38 +283,22 @@ class Society:
                            {"action": "go", "target": f"{site['x']},{site['y']}"})
                     a.queue = [mind.parse_action(json.dumps(nxt), [])]
             last = a.history[-1]["result"] if a.history else ""
-            if not a.queue:
-                return self._routine(a, last)
-            nxt = a.queue[0]
-            hungry = a.hunger >= HUNGER_WARNING and nxt["action"] not in ("eat", "gather") and nxt.get("target") != "food"
-            baby = any(a.name in b.parents and b.is_baby(self.tick) and b.hunger >= 50 for b in self.agents.values())
-            keys = ("The Human", "gave you", "wants to have a child", "birth", "died")          # driven people stay focused
-            keys += () if a.traits.driven >= 0.7 else (" to you", "courting you", "gift")
-            personal = [h for h in a.heard if any(k in h for k in keys)]
-            why = ("someone spoke to me" if personal else "I got hungry" if hungry else "a baby needs me" if baby
-                   else "my last step failed" if mind.failed(last) else "")
-            if why:
-                a.queue = []
-                a.remember(self.tick, f"I stopped what I was doing because {why}.")
-                return None
-            act = a.queue.pop(0)
-            act["thought"] = f"(following my plan) {act.get('thought') or ''}".strip()
+            if a.queue:
+                nxt = a.queue[0]
+                hungry = a.hunger >= HUNGER_WARNING and nxt["action"] not in ("eat", "gather") and nxt.get("target") != "food"
+                baby = any(a.name in b.parents and b.is_baby(self.tick) and b.hunger >= 50 for b in self.agents.values())
+                if hungry or baby or mind.failed(last):    # deal with it on autopilot, then carry on with the plan
+                    if mind.failed(last):
+                        a.queue.pop(0) if a.queue and len(a.history) and a.history[-1]["action"] == nxt["action"] else None
+                    act = autopilot.decide(self, a)
+                    act["thought"] = f"(autopilot) {act['thought']}"
+                    return act
+                act = a.queue.pop(0)
+                act["thought"] = f"(following my plan) {act.get('thought') or ''}".strip()
+                return act
+            act = autopilot.decide(self, a)
+            act["thought"] = f"(autopilot) {act['thought']}"
             return act
-
-    def _routine(self, a: Agent, last: str) -> dict | None:
-        """Between thoughts (see think_every) an agent carries on with an obvious routine instead of asking its brain.
-        Anything that needs real thinking - being spoken to, a failure, hunger without food, a baby - asks the brain."""
-        every = self.think_every
-        if self.focus and max(abs(a.x - self.focus[0]), abs(a.y - self.focus[1])) > 30:
-            every = max(every * 3, 6)                     # far from where the Human is looking: think less often
-        if self.tick - a.last_think >= every or mind.failed(last):
-            return None
-        if any(k in h for h in a.heard for k in ("The Human", " to you", "courting you", "gave you", "child", "birth", "died")):
-            return None
-        act = mind.routine(a, self.world, list(self.agents.values()), self.tick)
-        if act:
-            act["thought"] = f"(routine) {act['thought']}"
-        return act
 
     def dreamers(self) -> list[Agent]:
         """Who dreams this hour. The rest of the night costs nothing: sleepers don't think."""
@@ -317,6 +377,10 @@ class Society:
         self.begin_day()
         for a in self.dreamers():
             self.dream(a)
+        for a in list(self.agents.values()):
+            due = self.chat_due(a)
+            if due:
+                self.converse(a, *due)
         agents = list(self.agents.values())
         jobs = []
         for a in agents:
@@ -856,7 +920,7 @@ class Society:
                 "dead": [{"agent": d["agent"].to_dict(), "tick": d["tick"], "cause": d["cause"]} for d in self.dead.values()],
                 "events": self.events, "inventions": self.inventions, "discoveries": self.discoveries,
                 "blueprints": self.blueprints, "sol_log": self.sol_log, "sol_last": self.sol_last, "sol_next": self.sol_next,
-                "sol_model": self.sol_model, "think_every": self.think_every,
+                "sol_model": self.sol_model, "think_every": self.think_every, "think_mode": self.think_mode,
                 "eco": self.eco.to_dict(), "techs": self.techs, "tech_tries": self.tech_tries, "groups": list(self.groups.values()),
                 "deals": self.deals, "promises": self.promises, "stories": self.stories, "story_seeds": self.story_seeds,
                 "places": self.places, "contacts": self.contacts, "chronicle": self.chronicle, "snapshots": self.snapshots,
@@ -880,6 +944,7 @@ class Society:
         s.sol_log, s.sol_last = d.get("sol_log", []), d.get("sol_last", s.tick)
         s.sol_next = d.get("sol_next", s.tick + 1)
         s.think_every = d.get("think_every", THINK_EVERY)
+        s.think_mode = d.get("think_mode", THINK_MODE)
         s.eco = Ecology.from_dict(s.world, d.get("eco"), d.get("seed"))
         s.world.eco = s.eco
         s.groups = {g["id"]: g for g in d.get("groups", [])}

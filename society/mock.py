@@ -60,6 +60,8 @@ class MockLLM(UsageMixin):
             if "FOLD_MEMORIES" in prompt:
                 d["summary"] = "I remember: " + prompt.split("FOLD_MEMORIES", 1)[1][:400]
             return json.dumps(d)
+        if "CHAT_REPLY" in prompt:
+            return json.dumps({"message": rng.choice(["Sure, let's do it.", "Good to see you too!", "I'm not so sure about that."])})
         if "CHAT_WITH_HUMAN" in prompt:
             who = re.search(r"You are (\w+),", system)
             asked = re.search(r'just said to you[^:]*: "([^"]*)"', prompt)

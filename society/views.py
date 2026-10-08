@@ -74,7 +74,7 @@ def state(sim: Society, since_event: int = 0) -> dict:
                             "done": b.get("done", True), "progress": round(b.get("progress", 0), 1), "work": b.get("work", 0)}
                            for b in sim.world.buildings.values()],
             "explored": sim.world.explored_pct(),
-            "authority": sim.human_authority, "think_every": sim.think_every,
+            "authority": sim.human_authority, "think_every": sim.think_every, "think_mode": sim.think_mode,
             "usage": sim.llm.usage(),
             "backends": sim.llm.info() if hasattr(sim.llm, "info") else {},
             "errors": sim.errors[-5:],

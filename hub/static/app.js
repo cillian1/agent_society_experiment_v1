@@ -1048,7 +1048,7 @@ $('send').onclick = send;
 $('msg').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 $('auth').onchange = e => api.post('/api/control', { authority: e.target.value });
 $('solm').onchange = e => api.post('/api/control', { sol_model: e.target.value });
-$('thinkev').onchange = e => api.post('/api/control', { think_every: +e.target.value }).then(() => toast(`Agents now think every ${e.target.value === '1' ? 'hour' : e.target.value + ' hours'}`));
+$('thinkev').onchange = e => api.post('/api/control', { think_mode: e.target.value }).then(() => toast(`Agents now ${e.target.selectedOptions[0].textContent}`));
 $('discoveries').onclick = e => { const g = e.target.closest('[data-goto]'); if (g) select(g.dataset.goto); };
 
 // ======================================================================= world feed
@@ -1208,7 +1208,7 @@ async function poll() {
     if (!S.sel) renderList(st);
     if ($('to').children.length !== st.agents.length + 2) renderTo();
     if (document.activeElement !== $('auth')) $('auth').value = st.authority;
-    if (document.activeElement !== $('thinkev') && st.think_every) $('thinkev').value = st.think_every;
+    if (document.activeElement !== $('thinkev') && st.think_mode) $('thinkev').value = st.think_mode;
     renderChat(); renderFeed(st); toastNewEvents(st.events);
     $('discoveries').innerHTML = st.discoveries.length ? st.discoveries.slice().reverse().map(d => `<div class="disc"><b>${esc(d.name)}</b>
       <span class="muted">by <span class="who" data-goto="${esc(d.by)}" style="color:${d.color};cursor:pointer">${esc(d.by)}</span>, ${ts(d.tick)}</span>
