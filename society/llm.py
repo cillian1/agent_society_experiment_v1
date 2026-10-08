@@ -171,7 +171,16 @@ class LocalLLM(UsageMixin):
                         "options": {"num_ctx": self.ctx, "temperature": 0.6, "num_predict": limit}}
                 if json_mode:
                     body["format"] = "json"
-                r = self._post("/api/chat", body)
+                try:
+                    r = self._post("/api/chat", body)
+                except RuntimeError as e:
+                    if "repeat" not in str(e):
+                        raise
+                    # the model got stuck repeating itself (it happens in JSON mode): try once more without JSON
+                    # mode and with a penalty on repeats - the answer is still read as JSON
+                    body.pop("format", None)
+                    body["options"].update(repeat_penalty=1.15, temperature=0.7)
+                    r = self._post("/api/chat", body)
                 text, inp, out = r["message"]["content"], r.get("prompt_eval_count", 0), r.get("eval_count", 0)
             else:
                 body = {"model": model, "messages": msgs, "max_tokens": limit, "temperature": 0.6}
