@@ -103,7 +103,9 @@ class Agent:
             "talk, make friends (or enemies), plan together, farm, build, invent customs, tools, jobs and laws. "
             "Be creative and resourceful, and think about how to solve your problems in new ways. "
             "Talking is valuable: answer people who speak to you, share what you know, ask questions, make deals. "
-            "You remember everything that has happened to you.\n"
+            "You remember everything that has happened to you. Survival comes first: eat before you get very hungry, "
+            "and keep some food on you. Don't repeat or echo what others just said, and don't repeat your own last action "
+            "if it isn't working - try something new, specific and concrete.\n"
             f"Goal: {self.goal}\nPersonality: {self.traits.describe()}\n\n"
             "World: g grass, . sand, ~ water (impassable), # rock (impassable), ^ tree (impassable), f wild food bush "
             "(slow to regrow), , young plant, * ripe crop, & a structure someone built. North is up (y decreases), "
@@ -144,6 +146,10 @@ class Agent:
         near = [f"{a.name} [{a.symbol}] dx={a.x - self.x} dy={a.y - self.y}" + (f", role: {a.role}" if a.role else "")
                 + f", {a.age(tick)} days old" for a in agents
                 if a is not self and max(abs(a.x - self.x), abs(a.y - self.y)) <= VIEW_RADIUS]
+        if self.hunger >= 55:
+            lines.insert(1, f"!!! YOU ARE HUNGRY ({int(self.hunger)}/100) - at 100 you start losing health and die. "
+                         + ("EAT NOW: choose the eat action (you carry food)." if self.food else
+                            "Find food first: gather from a bush/crop, or ask someone to give you some. Everything else can wait."))
         lines.append("Agents in view: " + ("; ".join(near) or "none"))
         built = [f"{s['kind']} at dx={dx} dy={dy}" + (f' ("{s["text"]}")' if s["text"] else "") + f" built by {s['by']}"
                  for dx, dy, s in world.structures_near(self.x, self.y, VIEW_RADIUS)][:6]
@@ -152,7 +158,10 @@ class Agent:
         food = world.food_near(self.x, self.y, SMELL_RADIUS)
         if food:
             fx, fy = food[0]
-            lines.append(f"Nearest food: dx={fx - self.x} dy={fy - self.y}")
+            dx, dy = fx - self.x, fy - self.y
+            where = ", ".join(p for p in (f"{abs(dx)} east" if dx > 0 else f"{abs(dx)} west" if dx < 0 else "",
+                                          f"{abs(dy)} south" if dy > 0 else f"{abs(dy)} north" if dy < 0 else "") if p)
+            lines.append(f"Nearest food: dx={dx} dy={dy} ({where or 'right here'})")
         else:
             lines.append("Nearest food: none sensed")
         lines.append(f"Food within reach to gather: {'yes' if world.food_near(self.x, self.y, 1) else 'no'}")
