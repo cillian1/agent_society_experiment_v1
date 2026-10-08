@@ -71,7 +71,7 @@ def serve(society, host: str, port: int, interval: float):
                 self._json({"delivered": society.human_say(data.get("to", "all"), str(data.get("message", "")))})
             elif urlparse(self.path).path == "/api/tier":
                 data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-                self._json({"model": society.set_tier(data.get("name", ""), data.get("tier", ""))})
+                self._json({"model": society.set_model(data.get("name", ""), data.get("model") or data.get("tier", ""))})
             else:
                 self._json({"error": "not found"}, 404)
 

@@ -3,11 +3,33 @@ Agents building a society
 
 ## Quick start
 ```
-pip install -r requirements.txt
-export ANTHROPIC_API_KEY=...     # omit (or pass --mock) to use the offline mock
-python serve.py                  # visual hub at http://127.0.0.1:8000
-python run.py --ticks 10         # headless: prints each agent's thoughts/actions
+py -m pip install -r requirements.txt      # (python -m pip ... on Mac/Linux)
+py serve.py                                # visual hub at http://127.0.0.1:8000
+py run.py --ticks 10                       # headless: prints each agent's thoughts/actions
 ```
+**Where do the agents' brains come from?** `serve.py` auto-detects what is available and shows it in the hub header:
+- **Local model (free)** via [Ollama](https://ollama.com) - see below.
+- **Claude** (Haiku / Sonnet / Opus) if the `ANTHROPIC_API_KEY` environment variable is set.
+- If neither is found it falls back to a **scripted MOCK** (red banner in the hub): those agents cannot really think or reply.
+  `--mock` forces this.
+
+Default setup: **Ada and Fenn on Haiku, everyone else (and all babies) on the local model.** If you have no API key, everyone
+uses the local model; if you have no local server, everyone uses Haiku. You can switch any agent to any model in the hub
+(Local / Haiku / Sonnet / Enlighten=Opus, or type any model id; `local:<name>` for another local model). The memory summaries
+use Haiku if there is a key, else the local model.
+
+## Running local models (RTX 5070 Ti 16 GB, Windows)
+1. Install Ollama, then `ollama pull qwen2.5:7b-instruct` (a good small instruction model; any Ollama model works via `--local-model`).
+2. For many simultaneous agents set these environment variables, then restart Ollama (right-click tray icon > Quit, start again):
+   - `OLLAMA_NUM_PARALLEL=20` - how many requests it serves at once (memory use = context size x this number).
+   - `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q8_0` - halves the memory used by each conversation.
+3. Start the hub with matching settings: `py serve.py --local-concurrency 20 --local-ctx 4096`
+   (prompts are ~2-3k tokens, so 4096 is enough; `--local-ctx` is the per-request window).
+4. Check `ollama ps` / Task Manager: the model should be 100% on GPU. If it spills to CPU, lower `OLLAMA_NUM_PARALLEL`
+   (try 8-10), or use a smaller model (`qwen2.5:3b-instruct`). A day's speed is shown in the hub header (`Ns/day`).
+Rough guide: a 7B 4-bit model is ~5 GB; each parallel conversation adds roughly 0.2-0.4 GB at 4k context, so ~20 in parallel
+should fit in 16 GB - but this is an estimate, not a guarantee. LM Studio / llama.cpp / vLLM work too (`--local-api openai`).
+Small local models are noticeably weaker at following the JSON format and at being creative; expect some wasted turns.
 
 ## The world
 A procedurally generated 64x40 tile map (`society/world.py`): grass, sand, water, rock and forest (the last three impassable; trees give wood, rocks stone),
@@ -38,8 +60,8 @@ are in the header. `serve.py --host 0.0.0.0 --port 8000` exposes it beyond local
   long-term `remember` memory.
 - **Love & children:** `court`, `give` and talking build a *bond*. When two adult, non-related agents each reach 50, both
   choose `procreate` (each pays 2 food) and a baby spawns. Population is capped (`--max-agents`, default 14).
-- **Brains/cost tiers:** babies run on Haiku (cheap). In the hub's inspector, **Upgrade to Sonnet** or **Enlighten (Opus)**:
-  only one agent can be Opus at a time; Fenn starts enlightened. More agents = more API calls per turn.
+- **Brains/cost tiers:** babies run on the free local model. In the hub's inspector pick any agent's brain: Local, Haiku, Sonnet,
+  **Enlighten (Opus, only one agent at a time)** or any model id. More agents = more calls per turn.
 
 ## Talking to the agents
 The **Talk** panel in the hub lets you message everyone, one agent, or any group (click the name chips, type, press Enter).

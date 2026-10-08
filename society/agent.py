@@ -193,7 +193,7 @@ class Agent:
                   f"Current summary of their earlier life:\n{self.summary or '(none)'}\n\nNew memories to fold in:\n"
                   + "\n".join(old) + "\n\nWrite the updated summary in the first person, under 200 words. Keep names, "
                   "relationships, promises, places, inventions and anything important; drop trivia.")
-        text = llm.complete("You write concise, faithful memory summaries.", prompt, model=model).strip()
+        text = llm.complete("You write concise, faithful memory summaries.", prompt, model=model, json_mode=False).strip()
         if text:
             self.summary, self.sum_upto = text, upto
 

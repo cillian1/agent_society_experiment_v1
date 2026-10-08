@@ -3,6 +3,7 @@ import random
 import re
 import string
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -12,7 +13,8 @@ from .world import GRASS, GROW_NEEDED, World
 
 PALETTE = ["#ff6b6b", "#ffd93d", "#6bcB77", "#4d96ff", "#c77dff", "#ff9f45", "#2ec4b6", "#f15bb5"]
 HAIKU, SONNET, OPUS = "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"
-TIERS = {"haiku": HAIKU, "sonnet": SONNET, "opus": OPUS}
+LOCAL = "local"   # whatever local model the server is configured with
+TIERS = {"local": LOCAL, "haiku": HAIKU, "sonnet": SONNET, "opus": OPUS}
 BABY_NAMES = ["Nova", "Pip", "Juno", "Kit", "Rue", "Sol", "Tove", "Wren", "Zed", "Lark", "Moss", "Ember",
               "Fig", "Sage", "Briar", "Onyx", "Dale", "Ivy", "Rook", "Tansy"]
 HUNGER_PER_TICK = 1.5
@@ -23,14 +25,15 @@ OLD_AGE_DEATH_CHANCE = 0.015
 
 
 def default_agents() -> list[Agent]:
-    """Six settlers with different personalities and nothing else: no roles, no goals, no family."""
+    """Six settlers with different personalities and nothing else: no roles, no goals, no family.
+    Two start on Haiku (the 'main characters'), the rest on a free local model."""
     return [
         Agent("Ada", Traits(0.6, 0.8, 0.9, 0.6, 0.2), model=HAIKU),
-        Agent("Brix", Traits(0.4, 0.9, 0.4, 0.5, 0.3), model=HAIKU),
-        Agent("Cleo", Traits(0.95, 0.3, 0.7, 0.6, 0.4), model=HAIKU),
-        Agent("Dov", Traits(0.5, 0.6, 0.7, 0.2, 0.5), model=HAIKU),
-        Agent("Eli", Traits(0.7, 0.7, 0.3, 0.2, 0.7), model=HAIKU),
-        Agent("Fenn", Traits(0.85, 0.7, 0.5, 0.9, 0.2), model=OPUS),
+        Agent("Brix", Traits(0.4, 0.9, 0.4, 0.5, 0.3), model=LOCAL),
+        Agent("Cleo", Traits(0.95, 0.3, 0.7, 0.6, 0.4), model=LOCAL),
+        Agent("Dov", Traits(0.5, 0.6, 0.7, 0.2, 0.5), model=LOCAL),
+        Agent("Eli", Traits(0.7, 0.7, 0.3, 0.2, 0.7), model=LOCAL),
+        Agent("Fenn", Traits(0.85, 0.7, 0.5, 0.9, 0.2), model=HAIKU),
     ]
 
 
@@ -50,13 +53,16 @@ def _mix(c1: str, c2: str) -> str:
 
 class Society:
     def __init__(self, agents: list[Agent], llm, world: World | None = None, seed: int | None = None,
-                 max_agents: int = 14):
+                 max_agents: int = 14, baby_model: str = LOCAL):
         self.rng = random.Random(seed)
         self.world = world or World(seed=seed)
         self.agents = {a.name: a for a in agents}
         self.dead: dict[str, dict] = {}   # name -> {"agent": Agent, "tick": int, "cause": str}
         self.llm = llm
         self.max_agents = max_agents
+        self.baby_model = baby_model
+        self.errors: list[dict] = []
+        self.tick_seconds = 0.0
         self.tick = 0
         self.events: list[dict] = []
         self.inventions: list[dict] = []
@@ -92,6 +98,7 @@ class Society:
                 return
             self.tick += 1
             tick = self.tick
+            t0 = time.time()
             agents = list(self.agents.values())
             names = list(self.agents)
             ideas = [f"{i['title']} (by {i['by']}): {i['text']}" for i in self.inventions[-MAX_IDEAS_IN_PROMPT:]]
@@ -101,12 +108,17 @@ class Society:
                 a.heard = []
         def work(job):
             a, prompt, others = job
-            act = a.decide(self.llm, prompt, others)
+            try:
+                act = a.decide(self.llm, prompt, others)
+            except Exception as e:   # one broken brain must not stop everyone else
+                self._error(a, e)
+                act = {"thought": f"(my mind failed this turn: {e})"[:300], "action": "wait", "direction": None,
+                       "to": "all", "message": "", "title": "", "baby_name": "", "remember": "", "role": ""}
             if a.needs_compaction():      # fold old memories into the summary with a cheap model
                 try:
-                    a.compact(self.llm, HAIKU)
+                    a.compact(self.llm, self._summary_model())
                 except Exception as e:
-                    print(f"memory compaction failed for {a.name}: {e}")
+                    self._error(a, e, "memory summary failed")
             return act
 
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:  # LLM calls run outside the lock
@@ -143,6 +155,7 @@ class Society:
                 agent.history.append({"tick": tick, "x": agent.x, "y": agent.y, "hunger": int(agent.hunger),
                                       "thought": act["thought"], "action": act["action"], "result": result,
                                       "heard": heard_by[agent.name]})
+            self.tick_seconds = round(time.time() - t0, 1)
 
     def _die(self, a: Agent, tick: int, cause: str):
         self.dead[a.name] = {"agent": a, "tick": tick, "cause": cause}
@@ -153,6 +166,18 @@ class Society:
         for o in self.agents.values():
             o.heard.append(f"{a.name} has died ({cause}).")
             self._note(o, tick, f"{a.name} died of {cause}" + (" - my own child." if a.name in o.children else "."))
+
+    def _summary_model(self):
+        """Memory summaries use Haiku when a Claude key exists (cheap, better quality), else the local model."""
+        info = self.llm.info() if hasattr(self.llm, "info") else {}
+        return HAIKU if info.get("claude") else (LOCAL if info.get("local") else None)
+
+    def _error(self, a: Agent, e: Exception, what: str = "brain error"):
+        with self.lock:
+            self.errors.append({"tick": self.tick, "agent": a.name, "model": a.model or "default",
+                                "error": f"{what}: {e}"[:300]})
+            del self.errors[:-30]
+        print(f"[{a.name} / {a.model}] {what}: {e}")
 
     @staticmethod
     def _note(a: Agent, tick: int, text: str):
@@ -375,7 +400,7 @@ class Society:
             name = self.rng.choice(free) if free else f"Baby{len(taken)}"
         mix = lambda x, y: min(1.0, max(0.0, (x + y) / 2 + self.rng.gauss(0, 0.1)))
         traits = Traits(**{k: mix(getattr(a.traits, k), getattr(b.traits, k)) for k in vars(a.traits)})
-        baby = Agent(name, traits, model=HAIKU, color=_mix(a.color, b.color),
+        baby = Agent(name, traits, model=self.baby_model, color=_mix(a.color, b.color),
                      x=spot[0], y=spot[1], hunger=10.0, born=tick, parents=[a.name, b.name],
                      bonds={a.name: 60.0, b.name: 60.0})
         baby.symbol = self._symbol_for(name)
@@ -433,23 +458,31 @@ class Society:
                               "thought": out.get("thought", ""), "action": "reply to Human", "result": text,
                               "heard": [f'The Human says: "{message}"']})
 
-    def set_tier(self, name: str, tier: str) -> str | None:
-        """haiku (cheap) -> sonnet (upgrade) -> opus ('enlighten': only one agent at a time)."""
+    def set_model(self, name: str, spec: str) -> str | None:
+        """Give an agent any brain: local / haiku / sonnet / opus, or any model id ('local:<name>' for a local model).
+        Opus ('enlighten') is limited to one agent at a time; enlightening another demotes the previous one to Sonnet."""
+        spec = (spec or "").strip()
+        model = TIERS.get(spec.lower(), spec)
+        if not model or len(model) > 80 or not re.fullmatch(r"[\w.:\-/]+", model):
+            return None
         with self.lock:
             a = self.agents.get(name)
-            if not a or tier not in TIERS:
+            if not a:
                 return None
-            if tier == "opus":
+            if model == OPUS:
                 for o in self.agents.values():
                     if o is not a and o.model == OPUS:
                         o.model = SONNET
                         o.heard.append("The enlightenment has passed to someone else; you are now at the Sonnet level.")
-            a.model = TIERS[tier]
-            if tier == "opus":
                 a.heard.append("You have been ENLIGHTENED: your mind is now sharper than anyone else's.")
-            self._event(self.tick, a, {"haiku": "was set to the Haiku tier", "sonnet": "was upgraded to Sonnet",
-                                       "opus": "was ENLIGHTENED (Opus)"}[tier], tier=True)
-            return a.model
+            a.model = model
+            tier = self._tier(model)
+            self._event(self.tick, a, {"local": "now thinks with the free local model", "haiku": "was set to the Haiku tier",
+                                       "sonnet": "was upgraded to Sonnet", "opus": "was ENLIGHTENED (Opus)"}
+                        .get(tier, f"now thinks with {model}"), tier=True)
+            return model
+
+    set_tier = set_model
 
     def run(self, ticks: int):
         for _ in range(ticks):
@@ -463,7 +496,9 @@ class Society:
     # ---- views for the hub ----
     @staticmethod
     def _tier(model):
-        return "opus" if model == OPUS else "sonnet" if model == SONNET else "haiku"
+        if model in (None, LOCAL) or model.startswith("local:"):
+            return "local"
+        return {OPUS: "opus", SONNET: "sonnet", HAIKU: "haiku"}.get(model, "custom")
 
     def _agent_view(self, a: Agent, alive=True) -> dict:
         t = self.tick
@@ -494,6 +529,8 @@ class Society:
                                | {"y": y} for (x, y), st in self.world.structures.items()],
                 "inventions": self.inventions[-30:],
                 "usage": self.llm.usage(),
+                "backends": self.llm.info() if hasattr(self.llm, "info") else {},
+                "errors": self.errors[-5:], "tick_seconds": self.tick_seconds,
                 "limits": {"max_agents": self.max_agents, "adult_age": ADULT_AGE, "love": LOVE_BOND, "old_age": OLD_AGE},
             }
 

@@ -1,9 +1,21 @@
-"""LLM backends: Claude via the Anthropic API, or an offline mock for testing."""
+"""LLM backends and a router: Claude (Anthropic API), local models (Ollama / OpenAI-compatible servers), and a mock.
+
+Agent model strings: "claude-..." -> Anthropic, "local" -> the default local model, "local:<name>" -> a specific local model.
+"""
 import json
 import os
 import random
 import re
 import threading
+import urllib.error
+import urllib.request
+
+HAIKU = "claude-haiku-5-5"
+LOCAL = "local"
+
+
+def is_local(model: str | None) -> bool:
+    return model is not None and (model == LOCAL or model.startswith("local:"))
 
 
 class UsageMixin:
@@ -25,7 +37,7 @@ class UsageMixin:
         with self._ulock:
             models = {m: dict(u) for m, u in self._usage.items()}
         cost = 0.0
-        priced = bool(self.prices)
+        priced = True
         for m, u in models.items():
             if m in self.prices:
                 pi, po = self.prices[m]
@@ -40,15 +52,15 @@ class UsageMixin:
 
 
 class ClaudeLLM(UsageMixin):
-    def __init__(self, model: str = "claude-haiku-5-5", max_tokens: int = 500, prices: dict | None = None):
+    def __init__(self, model: str = HAIKU, max_tokens: int = 500, prices: dict | None = None):
         self._init_usage(prices)
-        import anthropic  # imported lazily so the mock works without the SDK
+        import anthropic  # imported lazily so the other backends work without the SDK
 
         self.client = anthropic.Anthropic()
         self.model = model
         self.max_tokens = max_tokens
 
-    def complete(self, system: str, prompt: str, model: str | None = None) -> str:
+    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True) -> str:
         model = model or self.model
         resp = self.client.messages.create(
             model=model,
@@ -60,8 +72,75 @@ class ClaudeLLM(UsageMixin):
         return "".join(b.text for b in resp.content if b.type == "text")
 
 
+class LocalLLM(UsageMixin):
+    """Local model served by Ollama (native /api/chat) or any OpenAI-compatible server (LM Studio, llama.cpp, vLLM)."""
+
+    def __init__(self, base_url: str = "http://127.0.0.1:11434", model: str = "qwen2.5:7b-instruct",
+                 api: str = "ollama", concurrency: int = 8, ctx: int = 4096, max_tokens: int = 400,
+                 timeout: float = 300):
+        self._init_usage()
+        self.base, self.model, self.api = base_url.rstrip("/"), model, api
+        self.ctx, self.max_tokens, self.timeout = ctx, max_tokens, timeout
+        self.sem = threading.Semaphore(concurrency)   # how many requests we send to the server at once
+
+    def usage(self) -> dict:
+        u = super().usage()
+        for m in u["models"].values():
+            m["cost"] = 0.0                          # running locally is free
+        u["cost"] = 0.0 if u["models"] else None
+        return u
+
+    def _post(self, path: str, body: dict) -> dict:
+        req = urllib.request.Request(self.base + path, json.dumps(body).encode(), {"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"local model server said {e.code}: {e.read()[:300].decode(errors='replace')}") from e
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            raise RuntimeError(f"can't reach the local model server at {self.base} ({e})") from e
+
+    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True) -> str:
+        model = model or self.model
+        msgs = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+        with self.sem:
+            if self.api == "ollama":
+                body = {"model": model, "messages": msgs, "stream": False, "keep_alive": "30m",
+                        "options": {"num_ctx": self.ctx, "temperature": 0.8, "num_predict": self.max_tokens}}
+                if json_mode:
+                    body["format"] = "json"
+                r = self._post("/api/chat", body)
+                text, inp, out = r["message"]["content"], r.get("prompt_eval_count", 0), r.get("eval_count", 0)
+            else:
+                body = {"model": model, "messages": msgs, "max_tokens": self.max_tokens, "temperature": 0.8}
+                try:
+                    r = self._post("/v1/chat/completions",
+                                   {**body, **({"response_format": {"type": "json_object"}} if json_mode else {})})
+                except RuntimeError:
+                    if not json_mode:
+                        raise
+                    r = self._post("/v1/chat/completions", body)   # server without JSON mode
+                text = r["choices"][0]["message"]["content"]
+                inp, out = r.get("usage", {}).get("prompt_tokens", 0), r.get("usage", {}).get("completion_tokens", 0)
+        self._record(f"local:{model}", inp, out)
+        return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()   # drop reasoning blocks some models emit
+
+    def probe(self) -> tuple[bool, str]:
+        """Is the server up, and does it have our model?"""
+        try:
+            path = "/api/tags" if self.api == "ollama" else "/v1/models"
+            with urllib.request.urlopen(self.base + path, timeout=3) as r:
+                data = json.loads(r.read())
+        except Exception as e:
+            return False, f"local model server not reachable at {self.base} ({e})"
+        names = [m.get("name") or m.get("id") for m in (data.get("models") or data.get("data") or [])]
+        if self.api == "ollama" and self.model not in names and f"{self.model}:latest" not in names:
+            return False, f"server is up but model '{self.model}' isn't installed - run: ollama pull {self.model}"
+        return True, f"local model '{self.model}' ready at {self.base}"
+
+
 class MockLLM(UsageMixin):
-    """Offline stand-in: seeks food, eats when hungry, wanders and chats a little."""
+    """Offline stand-in: seeks food, eats when hungry, wanders and chats a little. NOT real thinking."""
 
     LINES = ["Found some berries over here!", "Anyone seen water nearby?",
              "Let's stick together.", "I'll look around the east side.", "Careful, rocks ahead."]
@@ -70,7 +149,7 @@ class MockLLM(UsageMixin):
         self._init_usage()
         self.rng = random.Random(seed)
 
-    def complete(self, system: str, prompt: str, model: str | None = None) -> str:
+    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True) -> str:
         self._record("mock", 0, 0)
         rng = self.rng
         if "SUMMARIZE_MEMORIES" in prompt:
@@ -79,7 +158,7 @@ class MockLLM(UsageMixin):
         if "CHAT_WITH_HUMAN" in prompt:
             who = re.search(r"You are (\w+),", system)
             return json.dumps(dict(thought="The human spoke to me, I should answer.",
-                                   message=f"Hello, human! It's {who.group(1) if who else 'me'} - I'm busy surviving, but happy to chat. (mock reply)"))
+                                   message=f"[MOCK MODE - scripted, not a real reply] This is {who.group(1) if who else 'me'}."))
         hunger = int(re.search(r"Hunger: (\d+)", prompt).group(1))
         carried = int(re.search(r"Food carried: (\d+)", prompt).group(1))
         seeds = int(re.search(r"Seeds: (\d+)", prompt).group(1))
@@ -132,9 +211,37 @@ class MockLLM(UsageMixin):
         return json.dumps(d)
 
 
-def make_llm(mock: bool = False, model: str | None = None, prices: dict | None = None):
-    if mock or not os.environ.get("ANTHROPIC_API_KEY"):
-        if not mock:
-            print("[no ANTHROPIC_API_KEY set - using mock LLM]")
-        return MockLLM()
-    return ClaudeLLM(model=model, prices=prices) if model else ClaudeLLM(prices=prices)
+class RouterLLM:
+    """Sends each call to the right backend based on the agent's model string."""
+
+    def __init__(self, claude: ClaudeLLM | None = None, local: LocalLLM | None = None,
+                 mock: MockLLM | None = None, notes: list[str] | None = None):
+        self.claude, self.local, self.mock = claude, local, mock
+        self.notes = notes or []
+        self.default_model = LOCAL if local else HAIKU
+
+    def complete(self, system: str, prompt: str, model: str | None = None, json_mode: bool = True) -> str:
+        model = model or self.default_model
+        if self.mock:
+            return self.mock.complete(system, prompt, model, json_mode)
+        if is_local(model):
+            if not self.local:
+                raise RuntimeError("no local model server available (is Ollama running?)")
+            return self.local.complete(system, prompt, None if model == LOCAL else model[6:], json_mode)
+        if not self.claude:
+            raise RuntimeError("no ANTHROPIC_API_KEY set, so Claude models are unavailable")
+        return self.claude.complete(system, prompt, model, json_mode)
+
+    def usage(self) -> dict:
+        parts = [b.usage() for b in (self.claude, self.local, self.mock) if b]
+        models: dict = {}
+        for u in parts:
+            models.update(u["models"])
+        costs = [u["cost"] for u in parts if u["models"]]
+        return {"models": models, "calls": sum(u["calls"] for u in parts), "input": sum(u["input"] for u in parts),
+                "output": sum(u["output"] for u in parts),
+                "cost": None if (not costs or None in costs) else sum(costs)}
+
+    def info(self) -> dict:
+        return {"mock": bool(self.mock), "claude": bool(self.claude), "local": bool(self.local),
+                "local_model": self.local.model if self.local else None, "notes": self.notes}
