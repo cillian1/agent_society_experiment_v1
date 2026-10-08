@@ -51,10 +51,8 @@ class MockLLM(UsageMixin):
                 return json.dumps(dict(thought=f"{baby.group(1)} is hungry, I'll feed them.", action="care", to=baby.group(1)))
             dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
             return json.dumps(dict(thought=f"I must get to baby {baby.group(1)}.", action="move", direction=dirn, steps=3))
-        if hunger > 55 and not carried and not reach and m:     # hungry: food first, like the prompt says
-            dx, dy = int(m.group(1)), int(m.group(2))
-            dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
-            return json.dumps(dict(thought="I'm hungry - food first.", action="move", direction=dirn, steps=3))
+        if hunger > 55 and not carried and not reach:          # hungry: food first, like the prompt says
+            return json.dumps(dict(thought="I'm hungry - food first.", action="go", target="food"))
         if carried and hunger > 45:
             d = dict(thought="I'm getting hungry, time to eat.", action="eat")
         elif reach and hunger > 20:
@@ -81,14 +79,9 @@ class MockLLM(UsageMixin):
             d = dict(thought=f"I like {near.group(1)}; let me show it.", action="court", to=near.group(1),
                      message="You make this world brighter.")
         elif unexp and rng.random() < 0.45:
-            dx, dy = int(unexp.group(1)), int(unexp.group(2))
-            dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
-            d = dict(thought="Time to explore somewhere new.", action="move", direction=dirn, steps=3)
+            d = dict(thought="Time to explore somewhere new.", action="go", target="explore")
         elif m and rng.random() < 0.9:
-            dx, dy = int(m.group(1)), int(m.group(2))
-            dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
-            d = dict(thought="I can sense food nearby, heading for it.", action="move", direction=dirn,
-                     remember="food is to the " + dirn)
+            d = dict(thought="I can sense food nearby, heading for it.", action="go", to="food")
         elif rng.random() < 0.05:
             d = dict(thought="An idea!", action="invent", title="Shared Harvest",
                      message="Everyone brings extra food to the middle of the map.")

@@ -24,7 +24,7 @@ const extras = a => `${STAGE[a.stage] || ''}${a.pregnant ? '🤰' : ''}`;
 const S = {
   st: null, W: 0, H: 0, tiles: [], agents: [], sel: null, detail: null,
   tab: 'people', ptab: 'overview', to: new Set(['*']), filter: 'all',
-  zoom: 1, disp: {}, lastEvent: null, stats: [], hover: null, brainKey: '',
+  zoom: 1, disp: {}, offset: {}, lastEvent: null, stats: [], hover: null, brainKey: '',
 };
 
 // ======================================================================= map
@@ -115,10 +115,19 @@ function drawFrame() {
   requestAnimationFrame(drawFrame);
 }
 
-function pos(a) {
+function pos(a) {                       // smooth movement; agents sharing a tile fan out a little
   const d = S.disp[a.name] || (S.disp[a.name] = { x: a.x, y: a.y });
-  d.x += (a.x - d.x) * .18; d.y += (a.y - d.y) * .18;
+  const [ox, oy] = S.offset[a.name] || [0, 0];
+  d.x += (a.x + ox - d.x) * .18; d.y += (a.y + oy - d.y) * .18;
   return d;
+}
+function spread(agents) {
+  const groups = {};
+  for (const a of agents) (groups[a.x + ',' + a.y] ||= []).push(a.name);
+  S.offset = {};
+  for (const names of Object.values(groups)) names.forEach((n, i) => {
+    if (names.length > 1) { const ang = i / names.length * Math.PI * 2; S.offset[n] = [Math.cos(ang) * .28, Math.sin(ang) * .28]; }
+  });
 }
 
 function drawAgent(a) {
@@ -592,7 +601,7 @@ async function poll() {
   polling = true;
   try {
     const st = await api.get('/api/state');
-    S.st = st; S.agents = st.agents;
+    S.st = st; S.agents = st.agents; spread(st.agents);
     if (st.tiles.length === S.H) syncTiles(st.tiles);
     renderTop(st);
     if (!S.sel) renderList(st);

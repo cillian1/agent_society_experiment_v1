@@ -8,7 +8,7 @@ from .config import (ADULT_AGE, BABY_DAYS, BUILD_COST, CHILD_FOOD_COST, CRAFT_CO
 from .models import Agent
 
 DIRS = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
-ACTIONS = ("move", "gather", "eat", "say", "give", "plant", "tend", "build", "craft", "court", "procreate",
+ACTIONS = ("go", "move", "gather", "eat", "say", "give", "plant", "tend", "build", "craft", "court", "procreate",
            "care", "invent", "wait")
 
 INSPIRATION = [   # one is offered each day to spark creativity
@@ -71,7 +71,9 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         "Hunger rises every day; at 100 you take damage and can starve. Eating food lowers hunger. "
         "Life lasts roughly 500-700 days; one turn is one day.\n"
         "Each turn pick ONE action:\n"
-        f'  move    - {{"direction": "north|south|east|west", "steps": 1-{a.abilities.steps()}}} walk several tiles (stops at obstacles)\n'
+        f'  go      - {{"target": "food|explore|wood|stone|water|<name>|x,y"}} walk up to {a.abilities.steps()} tiles toward it, '
+        "finding the way around water and obstacles (the easiest way to travel)\n"
+        f'  move    - {{"direction": "north|south|east|west", "steps": 1-{a.abilities.steps()}}} walk straight (stops at obstacles)\n'
         "  gather  - take from an adjacent/own-tile food bush or ripe crop (food, sometimes seeds), tree (wood) or rock "
         "(stone); next to water with a fishing tool you catch fish (food)\n"
         "  eat     - eat one carried food (hunger -40)\n"
@@ -100,6 +102,58 @@ def system_prompt(a: Agent, others: list[str]) -> str:
     )
 
 
+def suggestions(a: Agent, world, agents: list[Agent], tick: int) -> list[tuple[str, dict]]:
+    """A few sensible moves worked out by code, so even a small model has good options to choose from."""
+    out = []
+    add = lambda why, **act: out.append((why, act))
+    reach_food = bool(world.food_near(a.x, a.y, 1))
+    if a.hunger >= HUNGER_WARNING:
+        if a.food:
+            add("you are hungry and carry food", action="eat")
+        elif reach_food:
+            add("you are hungry and food is within reach", action="gather")
+        else:
+            add("you are hungry - walk to the nearest food", action="go", target="food")
+    for b in agents:
+        if b is not a and b.is_baby(tick) and b.hunger >= 40 and (a.name in b.parents or a.dist(b) <= 2):
+            if a.dist(b) <= 1 and a.food:
+                add(f"baby {b.name} is hungry and next to you", action="care", to=b.name)
+            elif a.food:
+                add(f"baby {b.name} is hungry", action="go", target=b.name)
+    if reach_food and a.food < 3 and a.hunger >= 15 and not any(x[1]["action"] == "gather" for x in out):
+        add("stock up while food is within reach", action="gather")
+    plants = world.plants_near(a.x, a.y, 1)
+    if any(world.needs_tending(x, y, tick) for x, y in plants):
+        add("a plant next to you could use tending", action="tend")
+    if a.seeds and not plants:
+        add("you have seeds - start a farm", action="plant", direction="north")
+    if a.materials() >= 1 and not a.items:
+        tool = "fishing rod" if world.water_near(a.x, a.y) else "axe"
+        add(f"a {tool} would really help you", action="craft", title=tool, message=f"my first {tool}")
+    elif a.materials() >= 2:
+        add("you have materials to build something useful", action="build", direction="east",
+            title="storehouse", message="a place to share food")
+    mats = [p for p in world.gather_options(a.x, a.y) if world.tile(*p) in ("tree", "rock")]
+    if mats and a.materials() < 3:
+        add("trees/rocks are within reach - gather materials", action="gather")
+    others = [o for o in agents if o is not a and not o.is_baby(tick) and a.dist(o) <= 6]
+    if others:
+        o = min(others, key=a.dist)
+        talked = any(f"to {o.name}:" in m or f"{o.name} said" in m for m in a.log[-8:])
+        if not talked:
+            add(f"{o.name} is nearby and you haven't talked lately", action="say", to=o.name,
+                message="<something worth saying>")
+    if world.nearest_unexplored(a.x, a.y):
+        add("much of the world is still unexplored", action="go", target="explore")
+    seen, unique = set(), []
+    for why, act in out:
+        key = json.dumps(act, sort_keys=True)
+        if key not in seen:
+            seen.add(key)
+            unique.append((why, act))
+    return unique[:4]
+
+
 def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str]) -> str:
     """Everything the agent perceives and remembers this turn."""
     others = {(o.x, o.y): o.symbol for o in agents if o is not a}
@@ -113,6 +167,16 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
              f"Your surroundings (@ = you):\n{world.view(a.x, a.y, view, others)}"]
     if a.plan:
         lines.insert(2, f"Your current plan: {a.plan} (keep following it, or change it with \"plan\")")
+    last = next((h for h in reversed(a.history) if h["action"] != "reply to Human"), None)
+    fails = ("blocked", "nothing", "no ", "need ", "couldn't", "unknown", "nobody", "there is no", "these plants",
+             "invalid", "water here", "the fish", "name the", "your hands", "you already", "a baby needs", "not enough")
+    if last and last["result"].startswith(fails):
+        lines.insert(2, f"!!! Your last action ({last['action']}) did not work: {last['result']}. Don't repeat it - "
+                        "try something else.")
+    opts = suggestions(a, world, agents, tick)
+    if opts:
+        lines.insert(3, "Good options right now (pick one, adapt it, or do something better):\n" + "\n".join(
+            f"  {i + 1}. {json.dumps(act)}  <- {why}" for i, (why, act) in enumerate(opts)))
     if a.hunger >= HUNGER_WARNING:
         lines.insert(1, f"!!! YOU ARE HUNGRY ({int(a.hunger)}/100) - at 100 you start losing health and die. "
                      + ("EAT NOW: choose the eat action (you carry food)." if a.food else
@@ -121,6 +185,9 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
     near = [f"{o.name} [{o.symbol}] dx={o.x - a.x} dy={o.y - a.y}, {o.word(tick)}" + (f", role: {o.role}" if o.role else "")
             + f", {o.age(tick)} days old" + {"baby": " (BABY)", "child": " (child)"}.get(o.stage(tick), "")
             + (" (pregnant)" if o.pregnancy else "") for o in agents if o is not a and a.dist(o) <= view]
+    ways = world.open_ways(a.x, a.y)
+    lines.append("Open directions: " + ", ".join(f"{d} {v} tiles" if isinstance(v, int) else f"{d} blocked ({v})"
+                                                 for d, v in ways.items()))
     lines.append("Agents in view: " + ("; ".join(near) or "none"))
     if a.pregnancy:
         lines.append(f"You are PREGNANT by {a.pregnancy['father']}: the baby is due on day {a.pregnancy['due']} "
@@ -140,17 +207,17 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
         dx, dy = food[0][0] - a.x, food[0][1] - a.y
         where = ", ".join(p for p in (f"{abs(dx)} east" if dx > 0 else f"{abs(dx)} west" if dx < 0 else "",
                                       f"{abs(dy)} south" if dy > 0 else f"{abs(dy)} north" if dy < 0 else "") if p)
-        lines.append(f"Nearest food: dx={dx} dy={dy} ({where or 'right here'})")
+        lines.append(f"Nearest food: dx={dx} dy={dy} ({where or 'right here'}) - use go with target food to walk there")
     else:
         known = world.known_food(a.x, a.y)
         lines.append("Nearest food: none sensed nearby." + (" Food your community has seen: " + "; ".join(
             f"{k} at dx={dx} dy={dy} ({compass(dx, dy)})" for dx, dy, k in known) if known else
-            " Nobody has found food yet - explore!"))
+            " Nobody has found food yet - explore!") + " (go with target food finds the way)")
     un = world.nearest_unexplored(a.x, a.y)
     if un:
         dx, dy = un
         lines.append(f"Your community has explored {world.explored_pct()}% of the world. Nearest unexplored area: "
-                     f"dx={dx} dy={dy} ({compass(dx, dy)}, ~{max(abs(dx), abs(dy))} tiles away)")
+                     f"dx={dx} dy={dy} ({compass(dx, dy)}, ~{max(abs(dx), abs(dy))} tiles away) - go with target explore")
     if a.items:
         lines.append("Objects you carry: " + "; ".join(i["name"] + (f" ({i['text']})" if i["text"] else "") for i in a.items))
     if a.materials() >= CRAFT_COST:
@@ -229,7 +296,7 @@ def parse_action(raw: str, others: list[str]) -> dict:
         to = "all"
     return {"thought": s("thought") or raw[:200].strip(),
             "action": data.get("action") if data.get("action") in ACTIONS else "wait",
-            "direction": data.get("direction"), "to": to, "message": s("message"), "title": s("title"),
+            "direction": data.get("direction"), "to": to, "target": s("target") or s("to"), "message": s("message"), "title": s("title"),
             "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"), "plan": s("plan"),
             "steps": data.get("steps") if isinstance(data.get("steps"), int) else 1}
 
@@ -240,7 +307,12 @@ def failed_action(err: Exception) -> dict:
 
 # ---------------------------------------------------------------- calls to the model
 def decide(a: Agent, llm, prompt: str, others: list[str]) -> dict:
-    return parse_action(llm.complete(system_prompt(a, others), prompt, model=a.model), others)
+    system = system_prompt(a, others)
+    raw = llm.complete(system, prompt, model=a.model)
+    if _json(raw).get("action") not in ACTIONS:          # one retry: small models sometimes ramble or break the format
+        raw = llm.complete(system, prompt + "\n\nReply with ONLY one JSON object that has an \"action\" field "
+                           f"(one of: {', '.join(ACTIONS)}).", model=a.model)
+    return parse_action(raw, others)
 
 
 def reply(a: Agent, llm, situation: str, human_msg: str, others: list[str], also_to: list[str]) -> dict:

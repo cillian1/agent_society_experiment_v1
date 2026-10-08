@@ -41,8 +41,6 @@ def move(sim, a, act, tick):
             why = "edge of the world"
         elif not w.walkable(nx, ny):
             why = w.tile(nx, ny)
-        elif sim.occupied(nx, ny, a):
-            why = "another agent"
         else:
             a.x, a.y = nx, ny
             moved += 1
@@ -53,6 +51,52 @@ def move(sim, a, act, tick):
         return f"blocked: {why}"
     return (f"moved {act['direction']} {moved} tile{'s' if moved > 1 else ''} to ({a.x}, {a.y})"
             + (f" (then blocked by {why})" if why else ""))
+
+
+def route_to(sim, a, target: str):
+    """Resolve a go-target to (path, label). Targets: food, explore, wood, stone, water, a name, or "x,y"."""
+    w, t = sim.world, (target or "").strip()
+    low = t.lower()
+    from .world import CROP, FOOD, ROCK, TREE, WATER
+    near = lambda kinds: lambda x, y: any(w.in_bounds(x + dx, y + dy) and w.tiles[y + dy][x + dx] in kinds
+                                          for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+    if low in ("food", "berries", "crop", "crops"):
+        return w.path((a.x, a.y), near((FOOD, CROP))), "food"
+    if low in ("explore", "unexplored", "new land"):
+        return w.path((a.x, a.y), lambda x, y: (x, y) not in w.explored), "unexplored land"
+    if low in ("wood", "tree", "trees", "forest"):
+        return w.path((a.x, a.y), near((TREE,))), "trees"
+    if low in ("stone", "rock", "rocks"):
+        return w.path((a.x, a.y), near((ROCK,))), "rocks"
+    if low in ("water", "lake", "fishing"):
+        return w.path((a.x, a.y), near((WATER,))), "water"
+    who = next((o for n, o in sim.agents.items() if n.lower() == low and o is not a), None)
+    if who:
+        return w.path((a.x, a.y), lambda x, y: max(abs(x - who.x), abs(y - who.y)) <= 1), who.name
+    m = re.fullmatch(r"\(?\s*(-?\d+)\s*,\s*(-?\d+)\s*\)?", t)
+    if m:
+        gx, gy = int(m.group(1)), int(m.group(2))
+        return w.path((a.x, a.y), lambda x, y: abs(x - gx) + abs(y - gy) <= 1), f"({gx}, {gy})"
+    return None, None
+
+
+@action("go")
+def go(sim, a, act, tick):
+    """Walk toward a target, finding the way around water, rocks and trees."""
+    target = act.get("target") or act.get("title") or act.get("message")
+    path, label = route_to(sim, a, target)
+    if label is None:
+        return f'unknown destination "{target}" - use food, explore, wood, stone, water, a name, or x,y'
+    if path is None:
+        return f"there is no way to reach {label} from here"
+    if not path:
+        return f"you are already at {label}"
+    steps = path[:a.abilities.steps()]
+    for x, y in steps:
+        a.x, a.y = x, y
+        sim.explore(a, tick)
+    left = len(path) - len(steps)
+    return f"walked {len(steps)} tiles toward {label}, now at ({a.x}, {a.y})" + (f", {left} more to go" if left else ", arrived")
 
 
 @action("gather")

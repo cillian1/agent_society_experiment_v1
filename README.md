@@ -24,6 +24,10 @@ uses the local model; without a local server everyone uses Haiku. Change any age
 (Local / Haiku / Sonnet / **Enlighten** = Opus, one agent at a time, or any model id; `local:<name>` for another local model).
 
 ### Local models (RTX 5070 Ti, 16 GB)
+Smarter agents = a bigger model. `qwen2.5:7b-instruct` is the fast default; `ollama pull qwen2.5:14b-instruct` and start with
+`--local-model qwen2.5:14b-instruct --local-concurrency 8` (and `OLLAMA_NUM_PARALLEL=8`) for noticeably better decisions at
+roughly half the speed. Or give your favourite agents Haiku/Sonnet in their profile → Brain.
+
 1. Install Ollama, then `ollama pull qwen2.5:7b-instruct`.
 2. For many agents at once: `setx OLLAMA_NUM_PARALLEL 20`, `setx OLLAMA_FLASH_ATTENTION 1`, `setx OLLAMA_KV_CACHE_TYPE q8_0`,
    then quit and restart Ollama.
@@ -58,6 +62,11 @@ Keyboard: `Space` pause · `N` next day · `+`/`−` zoom · `0` fit · `F` foll
   damage is slow; agents are told where the community has seen food.
 - **Families:** a woman and a man in love can conceive; she is pregnant for 10 days. Newborns stay with their mother,
   don't think, and must be fed with `care` for 5 days; then they are children (on the local model) and adults at day 10.
+- **Getting around:** `go` walks toward food, unexplored land, trees, rocks, water, a person or coordinates and finds the
+  way around water and obstacles; agents can walk past each other and are told which directions are open.
+- **Helping small models:** every turn an agent gets a few good options worked out from its situation (eat, feed a baby,
+  gather, craft a first tool, talk to a neighbour, explore...), is warned when its last action failed, and a reply that
+  isn't valid JSON is retried once.
 - **Thinking:** each turn an agent runs a short checklist (danger/hunger first, then its plan, then something creative),
   keeps a plan from day to day, and gets one idea to consider for inspiration.
 - **Society:** no roles or family at the start. Agents claim their own roles, `invent` ideas everyone hears about, build

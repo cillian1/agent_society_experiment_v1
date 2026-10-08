@@ -133,6 +133,30 @@ class AbilityTests(unittest.TestCase):
         self.assertEqual(w.tiles[y][x], "crop")
 
 
+class MovementTests(unittest.TestCase):
+    def test_go_finds_a_way_around_water(self):
+        from society.actions import apply
+        sim = make()
+        ada = sim.agents["Ada"]
+        before = (ada.x, ada.y)
+        out = apply(sim, ada, parse_action('{"action": "go", "to": "food"}', []), 1)
+        self.assertTrue(out.startswith("walked") or out.startswith("you are already"), out)
+        if out.startswith("walked"):
+            self.assertNotEqual((ada.x, ada.y), before)
+            for x, y in [(ada.x, ada.y)]:
+                self.assertTrue(sim.world.walkable(x, y))
+
+    def test_agents_can_pass_each_other(self):
+        from society.actions import apply
+        sim = make()
+        ada, brix = sim.agents["Ada"], sim.agents["Brix"]
+        w = sim.world
+        y, x = next((y, x) for y in range(w.height) for x in range(w.width - 2)
+                    if all(w.tiles[y][x + i] == "grass" for i in range(3)))
+        ada.x, ada.y, brix.x, brix.y = x, y, x + 1, y
+        self.assertIn("moved east 2", apply(sim, ada, parse_action('{"action": "move", "direction": "east", "steps": 2}', []), 1))
+
+
 class SaveTests(unittest.TestCase):
     def test_round_trip_and_continue(self):
         sim = make(60)

@@ -104,13 +104,13 @@ class LocalLLM(UsageMixin):
         with self.sem:
             if self.api == "ollama":
                 body = {"model": model, "messages": msgs, "stream": False, "keep_alive": "30m",
-                        "options": {"num_ctx": self.ctx, "temperature": 0.8, "num_predict": self.max_tokens}}
+                        "options": {"num_ctx": self.ctx, "temperature": 0.6, "num_predict": self.max_tokens}}
                 if json_mode:
                     body["format"] = "json"
                 r = self._post("/api/chat", body)
                 text, inp, out = r["message"]["content"], r.get("prompt_eval_count", 0), r.get("eval_count", 0)
             else:
-                body = {"model": model, "messages": msgs, "max_tokens": self.max_tokens, "temperature": 0.8}
+                body = {"model": model, "messages": msgs, "max_tokens": self.max_tokens, "temperature": 0.6}
                 try:
                     r = self._post("/v1/chat/completions",
                                    {**body, **({"response_format": {"type": "json_object"}} if json_mode else {})})

@@ -184,6 +184,40 @@ class World:
         return [(sx - x, sy - y, s) for (sx, sy), s in self.structures.items()
                 if max(abs(sx - x), abs(sy - y)) <= radius]
 
+    # ---- finding the way ----
+    def path(self, start, goal, max_nodes: int = 4000) -> list | None:
+        """Shortest walkable route from start to the first tile where goal(x, y) is true (breadth-first).
+        Returns the steps after start (empty if start already qualifies), or None if unreachable."""
+        from collections import deque
+        if goal(*start):
+            return []
+        prev, todo = {start: None}, deque([start])
+        while todo and len(prev) < max_nodes:
+            x, y = todo.popleft()
+            for nx, ny in ((x, y - 1), (x + 1, y), (x, y + 1), (x - 1, y)):
+                if (nx, ny) in prev or not self.walkable(nx, ny):
+                    continue
+                prev[(nx, ny)] = (x, y)
+                if goal(nx, ny):
+                    out, p = [], (nx, ny)
+                    while p != start:
+                        out.append(p)
+                        p = prev[p]
+                    return out[::-1]
+                todo.append((nx, ny))
+        return None
+
+    def open_ways(self, x: int, y: int, look: int = 4) -> dict:
+        """How many tiles you can walk straight in each direction (stops at water, rock, trees, walls)."""
+        out = {}
+        for name, (dx, dy) in (("north", (0, -1)), ("east", (1, 0)), ("south", (0, 1)), ("west", (-1, 0))):
+            n = 0
+            while n < look and self.walkable(x + dx * (n + 1), y + dy * (n + 1)):
+                n += 1
+            blocked = self.tiles[y + dy][x + dx] if n == 0 and self.in_bounds(x + dx, y + dy) else "edge"
+            out[name] = n if n else blocked
+        return out
+
     # ---- exploration ----
     def reveal(self, x: int, y: int, radius: int) -> dict:
         """Mark tiles around (x, y) as explored; returns counts of what was newly revealed."""
