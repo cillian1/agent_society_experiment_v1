@@ -14,6 +14,8 @@ p.add_argument("--agents", help="JSON file defining the starting agents (default
 p.add_argument("--max-agents", type=int, default=DEFAULT_MAX_AGENTS, help="population cap")
 p.add_argument("--seed", type=int, help="world seed (same seed = same map)")
 p.add_argument("--interval", type=float, default=1.0, help="minimum seconds per day")
+p.add_argument("--max-wait", type=float, default=5.0,
+               help="max seconds a day waits for slow brains (they act a little later instead)")
 p.add_argument("--load", metavar="NAME", help="start from a save in ./saves (e.g. autosave)")
 p.add_argument("--resume", action="store_true", help="continue from the latest autosave if there is one")
 p.add_argument("--no-autosave", action="store_true", help="don't autosave every few days")
@@ -40,4 +42,4 @@ start = args.load or ("autosave" if args.resume and Path("saves/autosave.json").
 society = load_world(start) if start else new_world(args.seed)
 if start:
     print(f"Loaded '{start}' at day {society.tick}")
-serve(Hub(society, new_world, load_world, args.interval, autosave=not args.no_autosave), args.host, args.port)
+serve(Hub(society, new_world, load_world, args.interval, args.max_wait, autosave=not args.no_autosave), args.host, args.port)

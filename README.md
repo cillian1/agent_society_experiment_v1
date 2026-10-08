@@ -76,6 +76,13 @@ tests/                   `python -m unittest`
 **Adding an action:** write a function in `society/actions.py` decorated with `@action("name")`, add the name to
 `ACTIONS` and a one-line description in `system_prompt` in `society/mind.py`.
 
+## Speed
+Days don't wait for every brain. Each agent acts the moment its brain answers (at most once per day); a day ends
+when everyone has answered or after a short wait (`--max-wait`, or the Slow / Normal / Fast buttons), so a slow brain
+such as Opus only slows its own agent - it acts a day or two later (💭 over its head) while everyone else carries on.
+To go faster still: pick **Fast**, match `OLLAMA_NUM_PARALLEL` with `--local-concurrency`, use a smaller local model
+(`--local-model qwen2.5:3b-instruct`), or cap the population (`--max-agents 8`).
+
 ## Cost
 The top bar and ⚙️ Settings show calls and tokens per model. Local models are free. For a dollar estimate start with
 `--price claude-haiku-5-5=IN,OUT` (USD per million tokens, from Anthropic's pricing page). Each agent makes one call per

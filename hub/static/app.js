@@ -128,6 +128,7 @@ function drawAgent(a) {
   ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(px - 11, py - r - 9, 22, 5);             // hunger bar
   ctx.fillStyle = a.hunger > 70 ? '#e0525e' : a.hunger > 40 ? '#e0a252' : '#5cc46e'; ctx.fillRect(px - 10, py - r - 8, 20 * (1 - a.hunger / 100), 3);
   if (a.heart) { ctx.font = '15px system-ui'; ctx.fillText('❤️', px + r + 2, py - r - 12); }
+  if (a.slow) { ctx.font = '14px system-ui'; ctx.fillText('💭', px - r - 4, py - r - 10); }
   ctx.font = 'bold 11px system-ui';
   const tag = `${a.name} · ${a.age}`, nw = ctx.measureText(tag).width + 10;
   ctx.fillStyle = 'rgba(10,12,16,.78)'; ctx.beginPath(); ctx.roundRect(px - nw / 2, py + r + 4, nw, 15, 6); ctx.fill();
@@ -209,7 +210,7 @@ cv.addEventListener('mousemove', e => {
   const unseen = st.fog && st.fog[y][x] === '0';
   let html = `<div class="muted">(${x}, ${y}) · ${unseen ? 'Unexplored' : names[t]}</div>`;
   const a = agentAt(fx, fy, .8);
-  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}<div>${a.age} days old · hunger ${a.hunger} · ${a.food} food</div><div class="muted">${esc(a.doing)}</div>` + html;
+  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${a.age} days old · hunger ${a.hunger} · ${a.food} food</div><div class="muted">${esc(a.doing)}</div>` + html;
   const s = st.structures.find(q => q.x === x && q.y === y);
   if (s) html += `<div>${iconFor(s.kind)} <b>${esc(s.kind)}</b> by ${esc(s.by)}${s.text ? `<div class="muted">“${esc(s.text)}”</div>` : ''}</div>`;
   const g = st.dead.find(q => q.x === x && q.y === y);
@@ -232,7 +233,8 @@ function renderTop(st) {
   $('p-brain').textContent = B.mock ? '🎭 Mock (scripted)' : '🧠 ' + [B.local ? 'Local: ' + B.local_model : '', B.claude ? 'Claude' : ''].filter(Boolean).join(' + ');
   $('p-pop').textContent = `👥 ${st.agents.length} / ${st.limits.max_agents}` + (st.dead.length ? ` · 🪦 ${st.dead.length}` : '');
   $('p-explored').textContent = `🧭 ${st.explored}% explored`;
-  $('p-speed').textContent = `⏱ ${st.day_seconds || 0}s / day`;
+  $('p-speed').textContent = `⏱ ${st.day_seconds || 0}s / day` + (st.thinking ? ` · 💭 ${st.thinking} thinking` : '');
+  $('p-speed').title = 'Seconds the last day took. 💭 = agents whose brain is still working (slow brains act a little later instead of holding everyone up).';
   const u = st.usage;
   $('p-usage').textContent = `💬 ${fmt(u.calls)} calls · ${fmt(u.input + u.output)} tokens` + (u.cost != null && u.cost > 0 ? ` · ~$${u.cost.toFixed(2)}` : '');
   $('p-usage').title = Object.entries(u.models).map(([m, x]) => `${m}: ${x.calls} calls, ${x.input} in / ${x.output} out`).join('\n') || 'No model calls yet';
@@ -249,7 +251,7 @@ function renderTop(st) {
 }
 $('b-pause').onclick = () => api.post('/api/control', { paused: !S.st?.paused }).then(poll);
 $('b-step').onclick = () => api.post('/api/control', { step: true }).then(() => setTimeout(poll, 300));
-for (const b of $('speed').children) b.onclick = () => api.post('/api/control', { interval: +b.dataset.v }).then(poll);
+for (const b of $('speed').children) b.onclick = () => api.post('/api/control', { interval: +b.dataset.v, max_wait: +b.dataset.w }).then(poll);
 
 // ======================================================================= tabs
 function showTab(name) {

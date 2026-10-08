@@ -96,48 +96,69 @@ class Society:
         return "?"
 
     # ================================================================ one day
-    def step(self):
+    # A day has four parts. step() runs them in lockstep (headless runs, tests); the hub's scheduler runs
+    # them asynchronously so a slow brain never holds up everyone else (see hub/server.py).
+    def begin_day(self) -> int:
+        """Advance the clock: the world grows, everyone gets hungrier and older (some may die)."""
         with self.lock:
-            if not self.agents:
-                return
             self.tick += 1
-            tick, t0 = self.tick, time.time()
-            agents, names = list(self.agents.values()), list(self.agents)
-            ideas = self._ideas()
-            for a in agents:
+            self.world.update(self.tick)
+            for a in list(self.agents.values()):
                 a.authority = self.human_authority
-            jobs = [(a, mind.observation(a, self.world, agents, tick, ideas), [n for n in names if n != a.name])
-                    for a in agents]
-            heard = {a.name: a.heard for a in agents}
-            for a in agents:
-                a.heard = []
+                self._live_a_day(a, self.tick)
+            return self.tick
 
-        def think(job):                               # runs in parallel, outside the lock
-            a, prompt, others = job
-            try:
-                act = mind.decide(a, self.llm, prompt, others)
-            except Exception as e:                    # one broken brain must not stop everyone else
-                self._error(a, e)
-                act = mind.failed_action(e)
-            if a.needs_compaction():
-                try:
-                    mind.compact_memory(a, self.llm, self._summary_model())
-                except Exception as e:
-                    self._error(a, e, "memory summary failed")
-            return act
-
-        with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
-            acts = list(pool.map(think, jobs))
-
+    def prepare(self, a: Agent) -> dict | None:
+        """What the agent perceives right now (consumes the messages it has heard)."""
         with self.lock:
-            self.world.update(tick)
-            order = list(zip(agents, acts))
-            self.rng.shuffle(order)
-            for a, act in order:
-                if a.name in self.agents and self._live_a_day(a, tick):
-                    self._act(a, act, tick, heard[a.name])
-            self.tick_seconds = round(time.time() - t0, 1)
+            if a.name not in self.agents:
+                return None
+            agents = list(self.agents.values())
+            job = {"prompt": mind.observation(a, self.world, agents, self.tick, self._ideas()),
+                   "others": [o.name for o in agents if o is not a], "heard": a.heard}
+            a.heard = []
+            return job
+
+    def think(self, a: Agent, job: dict) -> dict:
+        """Ask the agent's brain (no lock held; runs in parallel with everyone else)."""
+        try:
+            act = mind.decide(a, self.llm, job["prompt"], job["others"])
+        except Exception as e:                        # one broken brain must not stop everyone else
+            self._error(a, e)
+            act = mind.failed_action(e)
+        if a.needs_compaction():
+            try:
+                mind.compact_memory(a, self.llm, self._summary_model())
+            except Exception as e:
+                self._error(a, e, "memory summary failed")
+        return act
+
+    def apply_decision(self, a: Agent, act: dict, job: dict):
+        with self.lock:
+            if a.name in self.agents:
+                self._act(a, act, self.tick, job["heard"])
+
+    def end_day(self, seconds: float):
+        with self.lock:
+            self.tick_seconds = round(seconds, 1)
             self._record_stats()
+
+    def step(self):
+        """One whole day in lockstep: everyone thinks, then everyone acts (in random order)."""
+        if not self.agents:
+            return
+        t0 = time.time()
+        self.begin_day()
+        agents = list(self.agents.values())
+        jobs = [(a, self.prepare(a)) for a in agents]
+        jobs = [(a, j) for a, j in jobs if j]
+        with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as pool:
+            acts = list(pool.map(lambda aj: self.think(*aj), jobs))
+        order = list(zip(jobs, acts))
+        self.rng.shuffle(order)
+        for (a, job), act in order:
+            self.apply_decision(a, act, job)
+        self.end_day(time.time() - t0)
 
     def _live_a_day(self, a: Agent, tick: int) -> bool:
         """Hunger, health, fading feelings, old age. False if the agent died."""

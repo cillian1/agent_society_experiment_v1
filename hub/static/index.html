@@ -21,7 +21,7 @@
     <button id="b-pause" class="btn primary" title="Pause / resume (Space)">⏸ Pause</button>
     <button id="b-step" class="btn" title="Advance one day while paused (N)">⏭ Day</button>
     <div class="seg" id="speed" title="Simulation speed">
-      <button data-v="3">Slow</button><button data-v="1" class="on">Normal</button><button data-v="0.2">Fast</button>
+      <button data-v="3" data-w="15" title="Days last at least 3 s and wait up to 15 s for slow brains">Slow</button><button data-v="1" data-w="5" class="on" title="At least 1 s per day; slow brains get up to 5 s">Normal</button><button data-v="0.2" data-w="1.5" title="As fast as possible; slow brains act a day or two later">Fast</button>
     </div>
     <button id="b-help" class="btn icon" title="Help &amp; shortcuts (?)">?</button>
   </div>
