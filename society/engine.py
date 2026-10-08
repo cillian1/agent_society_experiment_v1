@@ -77,7 +77,7 @@ class Society:
         info = llm.info() if hasattr(llm, 'info') else {}
         smart = info.get("smart_local")
         self.gm_model = HAIKU if info.get('claude') else (f"local:{smart}" if smart else LOCAL)   # the referee
-        self.sol_model = HAIKU if info.get("claude") else (f"local:{smart}" if smart else LOCAL)   # Sol the mentor
+        self.sol_model = LOCAL                   # Sol the mentor starts on the local brain (change in Settings / --sol-model)
         self.sol_log: list[dict] = []
         self.sol_last, self.sol_due = 0, False
         if spawn:

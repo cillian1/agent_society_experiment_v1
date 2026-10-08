@@ -19,6 +19,7 @@ p.add_argument("--max-wait", type=float, default=5.0,
 p.add_argument("--load", metavar="NAME", help="start from a save in ./saves (e.g. autosave)")
 p.add_argument("--resume", action="store_true", help="continue from the latest autosave if there is one")
 p.add_argument("--no-autosave", action="store_true", help="don't autosave every few days")
+p.add_argument("--sol-model", default="local", help="Sol's brain: local, smart, haiku, sonnet, opus or a model id")
 add_llm_args(p)
 args = p.parse_args()
 
@@ -35,6 +36,23 @@ def load_world(name: str) -> Society:
     sim = persistence.load(name, llm)
     apply_backends(list(sim.agents.values()), llm)          # e.g. Haiku agents fall back to local without a key
     sim.baby_model = resolve_model(sim.baby_model, llm)
+    return sim
+
+
+def sol_brain() -> str:
+    smart = llm.info().get("smart_local")
+    names = {"local": "local", "smart": f"local:{smart}" if smart else "local", "haiku": "claude-haiku-5-5",
+             "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
+    return resolve_model(names.get(args.sol_model, args.sol_model), llm)
+
+
+_new, _load = new_world, load_world
+new_world = lambda seed=None: _with_sol(_new(seed))
+load_world = lambda name: _with_sol(_load(name))
+
+
+def _with_sol(sim: Society) -> Society:
+    sim.sol_model = sol_brain()
     return sim
 
 

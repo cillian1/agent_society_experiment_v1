@@ -292,10 +292,15 @@ function showTab(name) {
 for (const b of $('tabs').children) b.onclick = () => showTab(b.dataset.tab);
 
 // ======================================================================= people
+function talkToSol() { S.to = new Set(['Sol']); showTab('talk'); renderTo(); $('msg').focus(); }
+
 function renderList(st) {
   const q = $('search').value.trim().toLowerCase();
   const rows = st.agents.filter(a => !q || a.name.toLowerCase().includes(q) || (a.role || '').toLowerCase().includes(q));
-  $('list').innerHTML = rows.map(a => `
+  $('list').innerHTML = `<div class="person" id="sol-row" title="Sol watches over everyone and gives advice. Click to talk to Sol.">
+      <div class="avatar" style="background:#ffd93d">🧙</div><div><div class="name">Sol <span class="muted small">the mentor</span></div>
+      <div class="sub">reviews everyone every 20 days · next in ${st.sol.next_in} days · click to talk</div></div>
+      <div class="right">${TIER[st.sol.model === 'local' ? 'local' : st.sol.model.startsWith('local:') ? 'smart' : 'haiku'] || ''}</div></div>` + rows.map(a => `
     <div class="person ${S.sel === a.name ? 'sel' : ''}" data-name="${esc(a.name)}">
       <div class="avatar" style="background:${a.color}">${esc(a.name[0])}</div>
       <div><div class="name">${esc(a.name)} <span class="muted" title="${a.sex}">${SEX[a.sex]}</span> <span title="${a.stage === 'baby' ? 'babies don\'t use a brain' : a.tier}">${a.stage === 'baby' ? '' : TIER[a.tier]}</span> ${extras(a)}</div>
@@ -306,7 +311,7 @@ function renderList(st) {
   $('graves').innerHTML = st.dead.length ? '<h3>In memory</h3>' + st.dead.map(g =>
     `<div class="grave" data-name="${esc(g.name)}">🪦 ${esc(g.name)} — ${esc(g.cause)} at ${g.age} days (day ${g.died})</div>`).join('') : '';
 }
-$('list').onclick = e => { const p = e.target.closest('.person'); if (p) select(p.dataset.name); };
+$('list').onclick = e => { const p = e.target.closest('.person'); if (!p) return; p.id === 'sol-row' ? talkToSol() : select(p.dataset.name); };
 $('graves').onclick = e => { const g = e.target.closest('.grave'); if (g) select(g.dataset.name, false); };
 $('search').oninput = () => S.st && renderList(S.st);
 
@@ -635,9 +640,10 @@ async function poll() {
       : '<p class="muted small">Nothing yet. When an agent attempts or invents something genuinely useful, it shows up here and changes the rules for everyone.</p>';
     const so = st.sol;
     $('solcard').innerHTML = `<b style="color:var(--gold)">🧙 Sol, the mentor</b> <span class="muted small">reviews everyone every 20 days · next in ${so.next_in} days</span>
-      <button class="btn" id="sol-now" style="float:right;padding:3px 10px">Review now</button>
+      <span style="float:right;display:flex;gap:6px"><button class="btn primary" id="sol-talk" style="padding:3px 10px">💬 Talk to Sol</button><button class="btn" id="sol-now" style="padding:3px 10px">Review now</button></span>
       <div class="small" style="margin-top:6px">${so.log.length ? esc(so.log[so.log.length - 1].note || so.log[so.log.length - 1].speech) : 'Sol hasn\'t reviewed the society yet. Pick 🧙 Sol below to talk to Sol.'}</div>`;
     $('sol-now').onclick = () => api.post('/api/sol').then(() => toast('🧙 Sol is reviewing the society…', '#ffd93d'));
+    $('sol-talk').onclick = talkToSol;
     if (document.activeElement !== $('solm')) $('solm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[so.model] || (so.model.startsWith('local:') ? 'smart' : 'local');
     $('blueprints').innerHTML = st.blueprints.length ? st.blueprints.slice().reverse().map(b => `<div class="disc" style="background:var(--panel-2);border-color:var(--line)">${iconFor(b.kind)} <b>${esc(b.kind)}</b>
       <span class="muted">${b.by ? 'designed by ' + esc(b.by) : ''}</span><div>${esc(b.description)}</div>
