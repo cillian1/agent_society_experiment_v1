@@ -3,10 +3,45 @@ import json
 import os
 import random
 import re
+import threading
 
 
-class ClaudeLLM:
-    def __init__(self, model: str = "claude-haiku-5-5", max_tokens: int = 350):
+class UsageMixin:
+    """Counts API calls and tokens per model; optional $/million-token prices give a cost estimate."""
+
+    def _init_usage(self, prices: dict | None = None):
+        self._usage: dict[str, dict] = {}
+        self._ulock = threading.Lock()
+        self.prices = prices or {}  # model -> (input $/M tokens, output $/M tokens)
+
+    def _record(self, model: str, inp: int, out: int):
+        with self._ulock:
+            u = self._usage.setdefault(model, {"calls": 0, "input": 0, "output": 0})
+            u["calls"] += 1
+            u["input"] += inp
+            u["output"] += out
+
+    def usage(self) -> dict:
+        with self._ulock:
+            models = {m: dict(u) for m, u in self._usage.items()}
+        cost = 0.0
+        priced = bool(self.prices)
+        for m, u in models.items():
+            if m in self.prices:
+                pi, po = self.prices[m]
+                u["cost"] = u["input"] * pi / 1e6 + u["output"] * po / 1e6
+                cost += u["cost"]
+            else:
+                priced = False
+        return {"models": models, "calls": sum(u["calls"] for u in models.values()),
+                "input": sum(u["input"] for u in models.values()),
+                "output": sum(u["output"] for u in models.values()),
+                "cost": cost if priced and models else None}
+
+
+class ClaudeLLM(UsageMixin):
+    def __init__(self, model: str = "claude-haiku-5-5", max_tokens: int = 350, prices: dict | None = None):
+        self._init_usage(prices)
         import anthropic  # imported lazily so the mock works without the SDK
 
         self.client = anthropic.Anthropic()
@@ -14,25 +49,29 @@ class ClaudeLLM:
         self.max_tokens = max_tokens
 
     def complete(self, system: str, prompt: str, model: str | None = None) -> str:
+        model = model or self.model
         resp = self.client.messages.create(
-            model=model or self.model,
+            model=model,
             max_tokens=self.max_tokens,
             system=system,
             messages=[{"role": "user", "content": prompt}],
         )
+        self._record(model, resp.usage.input_tokens, resp.usage.output_tokens)
         return "".join(b.text for b in resp.content if b.type == "text")
 
 
-class MockLLM:
+class MockLLM(UsageMixin):
     """Offline stand-in: seeks food, eats when hungry, wanders and chats a little."""
 
     LINES = ["Found some berries over here!", "Anyone seen water nearby?",
              "Let's stick together.", "I'll look around the east side.", "Careful, rocks ahead."]
 
     def __init__(self, seed: int = 0):
+        self._init_usage()
         self.rng = random.Random(seed)
 
     def complete(self, system: str, prompt: str, model: str | None = None) -> str:
+        self._record("mock", 0, 0)
         hunger = int(re.search(r"Hunger: (\d+)", prompt).group(1))
         carried = int(re.search(r"Food carried: (\d+)", prompt).group(1))
         reach = "reach to gather: yes" in prompt
@@ -54,9 +93,9 @@ class MockLLM:
         return json.dumps(d)
 
 
-def make_llm(mock: bool = False, model: str | None = None):
+def make_llm(mock: bool = False, model: str | None = None, prices: dict | None = None):
     if mock or not os.environ.get("ANTHROPIC_API_KEY"):
         if not mock:
             print("[no ANTHROPIC_API_KEY set - using mock LLM]")
         return MockLLM()
-    return ClaudeLLM(model=model) if model else ClaudeLLM()
+    return ClaudeLLM(model=model, prices=prices) if model else ClaudeLLM(prices=prices)

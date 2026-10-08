@@ -158,6 +158,7 @@ class Society:
                     "latest": a.history[-1] if a.history else None,
                 } for a in self.agents.values()],
                 "events": self.events[-60:],
+                "usage": self.llm.usage(),
             }
 
     def world_data(self) -> dict:

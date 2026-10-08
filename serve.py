@@ -12,10 +12,13 @@ p.add_argument("--port", type=int, default=8000)
 p.add_argument("--agents", help="JSON file defining agents (default: built-in 6)")
 p.add_argument("--model", help="default Claude model id (default: claude-haiku-5-5)")
 p.add_argument("--mock", action="store_true", help="use offline mock LLM")
+p.add_argument("--price", action="append", default=[], metavar="MODEL=IN,OUT",
+               help="USD per million tokens, to show a $ estimate (repeatable), e.g. claude-haiku-5-5=1,5")
 p.add_argument("--seed", type=int)
 p.add_argument("--interval", type=float, default=1.0, help="min seconds between ticks")
 args = p.parse_args()
 
+prices = {m: tuple(map(float, v.split(","))) for m, v in (x.split("=") for x in args.price)}
 agents = load_agents(args.agents) if args.agents else default_agents()
-society = Society(agents, make_llm(args.mock, args.model), seed=args.seed)
+society = Society(agents, make_llm(args.mock, args.model, prices), seed=args.seed)
 serve(society, args.host, args.port, args.interval)

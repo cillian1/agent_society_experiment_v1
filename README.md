@@ -24,3 +24,8 @@ Pass `--agents my.json` to define your own agents (name, role, goal, traits, ski
 Watch agents move on the map, with speech bubbles and a world feed. Click an agent (on the map or in the list)
 to see its current thought and action, stats, and its full history of thoughts and actions. Pause/speed controls
 are in the header. `serve.py --host 0.0.0.0 --port 8000` exposes it beyond localhost.
+
+## Usage counter
+The hub header shows API calls and input/output tokens used this run (hover for a per-model breakdown).
+For a dollar estimate, give prices in USD per million tokens: `python serve.py --price claude-haiku-5-5=IN,OUT --price claude-opus-5-5=IN,OUT`
+(the estimate appears only when every model in use has a price; look up current prices in the Anthropic docs).

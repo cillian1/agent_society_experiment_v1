@@ -24,6 +24,7 @@ canvas{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;dis
 .legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 </style></head><body>
 <header><h1>Agent Society Hub</h1><span id="tick" class="dim">tick 0</span>
+<span id="usage" class="dim" style="cursor:help">usage: –</span>
 <button id="pause">Pause</button>
 <label class="dim">speed <select id="speed"><option value="2">slow</option><option value="1" selected>normal</option><option value="0.3">fast</option></select></label></header>
 <main><div id="left"><canvas id="c"></canvas>
@@ -84,9 +85,13 @@ async function poll(){
   try{const s=await j('/api/state');state=s;agents=s.agents;tiles=s.tiles;
     document.getElementById('tick').textContent='tick '+s.tick;document.getElementById('pause').textContent=s.paused?'Resume':'Pause';
     if(!document.getElementById('chips').children.length||document.getElementById('chips').children.length!==agents.length)renderChips();
-    if(sel)renderDetail();
+    renderUsage(s.usage);if(sel)renderDetail();
     document.getElementById('feed').innerHTML=s.events.slice().reverse().map(e=>`<div class="hist"><span class="tag">t${e.tick}</span> <span class="dot" style="background:${e.color}"></span><b>${esc(e.agent)}</b> ${esc(e.text)}</div>`).join('')||'<div class="dim">quiet so far…</div>'}catch(e){}
   setTimeout(poll,600)}
+const fmt=n=>n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':n;
+function renderUsage(u){const el=document.getElementById('usage');if(!u)return;
+  el.textContent=`${u.calls} calls · ${fmt(u.input)} in / ${fmt(u.output)} out tokens`+(u.cost!=null?` · ~$${u.cost.toFixed(3)}`:'');
+  el.title=Object.entries(u.models).map(([m,x])=>`${m}: ${x.calls} calls, ${x.input} in, ${x.output} out`+(x.cost!=null?`, ~$${x.cost.toFixed(4)}`:'')).join('\n')||'no calls yet'}
 async function histLoop(){await loadHistory();setTimeout(histLoop,1500)}
 document.getElementById('pause').onclick=()=>j('/api/control',{method:'POST',body:JSON.stringify({paused:!state.paused})});
 document.getElementById('speed').onchange=e=>j('/api/control',{method:'POST',body:JSON.stringify({interval:+e.target.value})});
