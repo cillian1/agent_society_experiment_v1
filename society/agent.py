@@ -54,9 +54,11 @@ class Agent:
             '  move  - {"direction": "north|south|east|west"}\n'
             "  gather - pick food from your tile or an adjacent tile\n"
             "  eat   - eat one carried food (hunger -40)\n"
-            '  say   - {"to": "<name or all>", "message": "..."} heard by agents within 8 tiles\n'
+            '  say   - {"to": "<name, all, or Human>", "message": "..."} heard by agents within 8 tiles\n'
             '  give  - {"to": "<name>"} hand one carried food to an adjacent agent\n'
             "  wait\n"
+            "A human observer may speak to you (\"The Human says ...\"); they are not in the world. "
+            'Reply with a say action to "Human" when they ask something.\n'
             "Stay in character and pursue your goal. Reply ONLY with JSON, e.g.\n"
             '{"thought": "<1-2 sentences of private reasoning>", "action": "move", "direction": "east"}'
         )
@@ -96,7 +98,7 @@ class Agent:
             data = {}
         action = data.get("action") if data.get("action") in ACTIONS else "wait"
         to = data.get("to", "all")
-        if to != "all" and to not in others:
+        if to not in ("all", "Human") and to not in others:
             to = "all"
         return {"thought": str(data.get("thought") or raw[:200]).strip(), "action": action,
                 "direction": data.get("direction"), "to": to,

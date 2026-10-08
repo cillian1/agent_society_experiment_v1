@@ -2,98 +2,184 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Agent Society Hub</title>
 <style>
-:root{--bg:#14171c;--panel:#1d2229;--line:#2e3641;--text:#e6e9ee;--dim:#8d97a5;--accent:#ffd93d}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,sans-serif}
-header{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+:root{--bg:#12151a;--panel:#1b2027;--panel2:#232a33;--line:#2e3641;--text:#e8ebf0;--dim:#8d97a5;--accent:#ffd93d;--you:#7dd3fc}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,sans-serif}
+header{display:flex;gap:14px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 header h1{font-size:16px;margin:0;margin-right:auto}
-button,select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer}
+button,select,textarea{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 11px;font:inherit}
+button{cursor:pointer}button:hover{border-color:#4a5666}button.primary{background:#2b6cb0;border-color:#2b6cb0;font-weight:600}button.primary:hover{background:#3182ce}
 main{display:flex;gap:16px;padding:16px;flex-wrap:wrap;align-items:flex-start}
-#left{flex:1 1 640px;min-width:0}#right{flex:0 1 420px;min-width:300px;width:100%;max-width:520px}
-canvas{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;display:block;cursor:pointer;image-rendering:pixelated}
+#left{flex:1 1 680px;min-width:0}#right{flex:0 1 440px;min-width:300px;width:100%;max-width:540px}
+canvas{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;display:block;cursor:pointer}
+#hover{margin-top:8px;color:var(--dim);font-size:13px;min-height:20px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:12px}
-.panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);margin:0 0 8px}
-.chips{display:flex;flex-wrap:wrap;gap:6px}
-.chip{padding:3px 9px;border-radius:99px;border:2px solid transparent;background:#2a313a;cursor:pointer}
-.chip.sel{border-color:var(--accent)}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
-.dim{color:var(--dim)}.bar{height:6px;background:#2a313a;border-radius:3px;overflow:hidden;margin:3px 0 8px}
-.bar>div{height:100%}.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin-bottom:8px}
+.panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:0 0 8px}
+.dim{color:var(--dim)}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.bar{height:7px;background:#2a313a;border-radius:4px;overflow:hidden}.bar>div{height:100%;transition:width .4s}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.card{background:var(--panel2);border:2px solid transparent;border-radius:8px;padding:7px 9px;cursor:pointer;min-width:0}
+.card.sel{border-color:var(--accent)}.card .top{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.card .now{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.chip{padding:3px 10px;border-radius:99px;border:2px solid var(--line);background:var(--panel2);cursor:pointer;user-select:none}
+.chip.on{border-color:var(--you);background:#16384d}
+textarea{width:100%;resize:vertical;min-height:58px}
+.row{display:flex;gap:8px;align-items:center;margin-top:8px}.row .msg{margin-right:auto;font-size:12px}
+.section{margin-top:12px}.kv{display:grid;grid-template-columns:90px 1fr;gap:3px 10px}
+.trait{display:grid;grid-template-columns:110px 1fr 30px;gap:8px;align-items:center;font-size:12px;margin:2px 0}
 .thought{background:#252c35;border-left:3px solid var(--accent);padding:8px 10px;border-radius:4px;margin:6px 0}
-.scroll{max-height:300px;overflow:auto}.hist{padding:7px 0;border-top:1px solid var(--line)}
-.hist:first-child{border-top:0}.tag{font-size:12px;color:var(--dim)}
+.scroll{max-height:330px;overflow:auto}.hist{padding:8px 0;border-top:1px solid var(--line)}.hist:first-child{border-top:0}
+.tag{font-size:12px;color:var(--dim)}.heard{color:#9bd0e8;font-size:13px}.act{font-size:13px}
+.feedrow{padding:6px 0;border-top:1px solid var(--line)}.feedrow:first-child{border-top:0}.feedrow.you{background:rgba(125,211,252,.08)}
 .legend{display:flex;gap:14px;margin-top:8px;color:var(--dim);font-size:12px;flex-wrap:wrap}
-.legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-2px}
 </style></head><body>
-<header><h1>Agent Society Hub</h1><span id="tick" class="dim">tick 0</span>
-<span id="usage" class="dim" style="cursor:help">usage: –</span>
+<header><h1>Agent Society Hub</h1>
+<span id="usage" class="dim" style="cursor:help">usage: –</span><span id="tick" class="dim">tick 0</span>
 <button id="pause">Pause</button>
 <label class="dim">speed <select id="speed"><option value="2">slow</option><option value="1" selected>normal</option><option value="0.3">fast</option></select></label></header>
-<main><div id="left"><canvas id="c"></canvas>
-<div class="legend"><span><i style="background:#4e9a47"></i>grass</span><span><i style="background:#2f6fb5"></i>water</span><span><i style="background:#d9c88a"></i>sand</span><span><i style="background:#7b7f86"></i>rock</span><span><i style="background:#4e9a47;box-shadow:inset 0 0 0 3px #d62f4b"></i>food</span><span>click an agent to inspect</span></div></div>
-<div id="right"><div class="panel"><h2>Agents</h2><div class="chips" id="chips"></div></div>
-<div class="panel" id="detail"><h2>Agent</h2><div class="dim">Click an agent on the map or in the list.</div></div>
-<div class="panel"><h2>World feed</h2><div class="scroll" id="feed"></div></div></div></main>
+<main>
+<div id="left"><canvas id="c"></canvas><div id="hover">Hover over the map for details · click an agent to inspect it</div>
+<div class="legend"><span><i style="background:#4e9a47"></i>grass</span><span><i style="background:#2f6fb5"></i>water (impassable)</span><span><i style="background:#d9c88a"></i>sand</span><span><i style="background:#7b7f86"></i>rock (impassable)</span><span><i style="background:#2f7d32;box-shadow:inset 0 0 0 3px #d62f4b"></i>food bush (regrows)</span><span>agent ring colour = hunger bar above head</span></div></div>
+<div id="right">
+<div class="panel"><h2>🗣 Speak to the agents</h2><div class="chips" id="to"></div>
+<textarea id="msg" placeholder="Type a message… (Enter to send, Shift+Enter for a new line)"></textarea>
+<div class="row"><span class="msg dim" id="sent"></span><button class="primary" id="send">Speak</button></div>
+<div class="tag" style="margin-top:6px">Agents hear you wherever they are, on their next turn, and can reply to “Human”.</div></div>
+<div class="panel"><h2>Agents</h2><div class="cards" id="cards"></div></div>
+<div class="panel" id="detail"><h2>Inspector</h2><div class="dim">Click an agent on the map or in the list to see what it is thinking and what it has done.</div></div>
+<div class="panel"><h2>World feed</h2><div class="scroll" id="feed"></div></div>
+</div></main>
 <script>
-const T=22,COL={grass:'#4e9a47',water:'#2f6fb5',sand:'#d9c88a',rock:'#7b7f86',food:'#4e9a47'};
-const cv=document.getElementById('c'),ctx=cv.getContext('2d');
-let histHTML='<div class="dim">loading…</div>',W=0,H=0,tiles=[],agents=[],disp={},sel=null,state={};
+const T=28,$=id=>document.getElementById(id);
+const cv=$('c'),ctx=cv.getContext('2d'),bg=document.createElement('canvas'),bctx=bg.getContext('2d');
+let W=0,H=0,tiles=[],drawn=[],agents=[],disp={},sel=null,state={},toSet=new Set(['*']),detailFor=null,histKey='';
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const shade=(x,y)=>((x*73856093^y*19349663)>>>0)%100/100;
+const rnd=(x,y,k=0)=>{let h=(x*374761393+y*668265263+k*2147483647)>>>0;h=((h^(h>>>13))*1274126177)>>>0;return ((h^(h>>>16))>>>0)/4294967296};
 async function j(u,o){return (await fetch(u,o)).json()}
-function size(){cv.width=W*T;cv.height=H*T}
-function draw(){
-  ctx.clearRect(0,0,cv.width,cv.height);
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-    const t=tiles[y][x];ctx.fillStyle=COL[t];ctx.fillRect(x*T,y*T,T,T);
-    ctx.fillStyle=`rgba(${shade(x,y)>.5?'255,255,255':'0,0,0'},.05)`;ctx.fillRect(x*T,y*T,T,T);
-    if(t==='food'){ctx.fillStyle='#d62f4b';[[7,8],[14,7],[11,14]].forEach(([a,b])=>{ctx.beginPath();ctx.arc(x*T+a,y*T+b,3,0,7);ctx.fill()})}
-    if(t==='rock'){ctx.fillStyle='rgba(0,0,0,.15)';ctx.fillRect(x*T+4,y*T+13,T-8,5)}
+const post=(u,b)=>j(u,{method:'POST',body:JSON.stringify(b)});
+
+/* ---------- map rendering ---------- */
+function paintTile(x,y){
+  const t=tiles[y][x],px=x*T,py=y*T,c=bctx,v=rnd(x,y);
+  const base={grass:[78,154,71],food:[78,154,71],water:[47,111,181],sand:[217,200,138],rock:[123,127,134]}[t];
+  const k=(v-.5)*14;c.fillStyle=`rgb(${base.map(n=>Math.round(n+k)).join(',')})`;c.fillRect(px,py,T,T);
+  if(t==='grass'||t==='food'){
+    c.strokeStyle='rgba(30,90,35,.55)';c.lineWidth=1.4;
+    for(let i=0;i<4;i++){const a=px+3+rnd(x,y,i+1)*(T-6),b=py+6+rnd(x,y,i+9)*(T-9);c.beginPath();c.moveTo(a,b);c.lineTo(a-2,b-4);c.moveTo(a,b);c.lineTo(a+2,b-4);c.stroke()}
+    if(t==='grass'&&rnd(x,y,20)>.9){c.fillStyle=rnd(x,y,21)>.5?'#fff3a0':'#f8c8e0';c.beginPath();c.arc(px+6+rnd(x,y,22)*(T-12),py+6+rnd(x,y,23)*(T-12),2.2,0,7);c.fill()}
   }
-  for(const a of agents){
-    const d=disp[a.name]||(disp[a.name]={x:a.x,y:a.y});d.x+=(a.x-d.x)*.2;d.y+=(a.y-d.y)*.2;
-    const px=d.x*T+T/2,py=d.y*T+T/2;
-    if(sel===a.name){ctx.strokeStyle='#ffd93d';ctx.lineWidth=3;ctx.beginPath();ctx.arc(px,py,T/2+1,0,7);ctx.stroke()}
-    ctx.fillStyle=a.color;ctx.strokeStyle='#111';ctx.lineWidth=2;ctx.beginPath();ctx.arc(px,py,T/2-3,0,7);ctx.fill();ctx.stroke();
-    ctx.fillStyle='#111';ctx.font='bold 11px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(a.name[0],px,py+.5);
-    ctx.font='11px system-ui';ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,.7)';ctx.strokeText(a.name,px,py+T/2+6);ctx.fillStyle='#fff';ctx.fillText(a.name,px,py+T/2+6);
-    if(a.say){const s=a.say.length>40?a.say.slice(0,38)+'…':a.say;ctx.font='11px system-ui';const w=ctx.measureText(s).width+12,bx=Math.min(Math.max(px-w/2,2),cv.width-w-2),by=py-T-14;
-      ctx.fillStyle='#fff';ctx.beginPath();ctx.roundRect(bx,by,w,18,5);ctx.fill();ctx.fillStyle='#111';ctx.fillText(s,bx+w/2,by+9.5)}
+  if(t==='food'){
+    c.fillStyle='#2b6a2f';c.beginPath();c.arc(px+T/2,py+T/2+2,T*.36,0,7);c.fill();
+    c.fillStyle='#37803b';c.beginPath();c.arc(px+T/2-3,py+T/2-1,T*.22,0,7);c.fill();
+    c.fillStyle='#e0334e';[[-6,3],[5,0],[0,8],[-1,-3],[7,7]].forEach(([a,b])=>{c.beginPath();c.arc(px+T/2+a,py+T/2+b,2.6,0,7);c.fill()});
+    c.fillStyle='rgba(255,255,255,.7)';[[-6,3],[5,0]].forEach(([a,b])=>c.fillRect(px+T/2+a-1,py+T/2+b-1.5,1.3,1.3));
   }
-  requestAnimationFrame(draw)
+  if(t==='water'){
+    c.strokeStyle='rgba(255,255,255,.22)';c.lineWidth=1.5;
+    for(let i=0;i<2;i++){const a=px+4+rnd(x,y,i+3)*(T-14),b=py+7+i*11+rnd(x,y,i+5)*4;c.beginPath();c.moveTo(a,b);c.quadraticCurveTo(a+4,b-3,a+8,b);c.quadraticCurveTo(a+12,b+3,a+16,b);c.stroke()}
+    c.fillStyle='rgba(255,255,255,.3)';
+    [[0,-1,px,py,T,2],[0,1,px,py+T-2,T,2],[-1,0,px,py,2,T],[1,0,px+T-2,py,2,T]].forEach(([dx,dy,a,b,w,h])=>{
+      const n=tiles[y+dy]?.[x+dx];if(n&&n!=='water')c.fillRect(a,b,w,h)})
+  }
+  if(t==='sand'){c.fillStyle='rgba(120,95,40,.35)';for(let i=0;i<6;i++)c.fillRect(px+rnd(x,y,i+30)*(T-2),py+rnd(x,y,i+40)*(T-2),1.6,1.6)}
+  if(t==='rock'){
+    c.fillStyle='rgba(0,0,0,.28)';c.beginPath();c.ellipse(px+T/2,py+T-5,T*.42,T*.14,0,0,7);c.fill();
+    c.fillStyle='#8f949c';c.beginPath();c.moveTo(px+4,py+T-6);c.lineTo(px+7,py+9);c.lineTo(px+15,py+4);c.lineTo(px+23,py+9);c.lineTo(px+T-3,py+T-6);c.closePath();c.fill();
+    c.fillStyle='#a9aeb6';c.beginPath();c.moveTo(px+7,py+9);c.lineTo(px+15,py+4);c.lineTo(px+17,py+13);c.lineTo(px+9,py+16);c.closePath();c.fill();
+    c.strokeStyle='rgba(0,0,0,.35)';c.lineWidth=1;c.beginPath();c.moveTo(px+17,py+13);c.lineTo(px+20,py+T-7);c.stroke();
+  }
 }
-cv.addEventListener('click',e=>{
-  const r=cv.getBoundingClientRect(),mx=(e.clientX-r.left)*cv.width/r.width/T,my=(e.clientY-r.top)*cv.height/r.height/T;
-  let best=null,bd=1.2;for(const a of agents){const d=disp[a.name]||a,k=Math.hypot(d.x+.5-mx,d.y+.5-my);if(k<bd){bd=k;best=a.name}}
-  if(best)select(best)});
-function select(n){sel=n;histHTML='<div class="dim">loading…</div>';renderChips();renderDetail();loadHistory()}
-function renderChips(){document.getElementById('chips').innerHTML=agents.map(a=>`<span class="chip ${sel===a.name?'sel':''}" onclick="select('${a.name}')"><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</span>`).join('')}
-function bar(label,v,col){return `<div class="tag">${label} ${v}/100</div><div class="bar"><div style="width:${v}%;background:${col}"></div></div>`}
+function syncTiles(next){
+  tiles=next;
+  next.forEach((row,y)=>row.forEach((t,x)=>{if(!drawn[y]||drawn[y][x]!==t){(drawn[y]=drawn[y]||[])[x]=t;paintTile(x,y)}}));
+}
+function frame(){
+  ctx.drawImage(bg,0,0);
+  for(const a of agents){
+    const d=disp[a.name]||(disp[a.name]={x:a.x,y:a.y});d.x+=(a.x-d.x)*.18;d.y+=(a.y-d.y)*.18;
+    const px=d.x*T+T/2,py=d.y*T+T/2,r=T/2-3;
+    ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(px,py+r+1,r*.9,r*.35,0,0,7);ctx.fill();
+    if(sel===a.name){ctx.strokeStyle='#ffd93d';ctx.lineWidth=3;ctx.beginPath();ctx.arc(px,py,r+5,0,7);ctx.stroke()}
+    ctx.fillStyle=a.color;ctx.strokeStyle='#111';ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(px,py,r,0,7);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#111';ctx.font='bold 13px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(a.name[0],px,py+.5);
+    const hc=a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77';   // hunger bar over head
+    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(px-11,py-r-9,22,5);ctx.fillStyle=hc;ctx.fillRect(px-10,py-r-8,20*(1-a.hunger/100),3);
+    if(a.food>0){ctx.fillStyle='#d62f4b';ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(px+r,py-r+2,5.5,0,7);ctx.fill();ctx.stroke();
+      ctx.fillStyle='#fff';ctx.font='bold 8px system-ui';ctx.fillText(a.food>9?'9+':a.food,px+r,py-r+2.5)}
+    ctx.font='bold 11px system-ui';const nw=ctx.measureText(a.name).width+10;
+    ctx.fillStyle='rgba(10,12,16,.75)';ctx.beginPath();ctx.roundRect(px-nw/2,py+r+4,nw,15,6);ctx.fill();
+    ctx.fillStyle='#fff';ctx.fillText(a.name,px,py+r+11.5);
+    if(a.say){const s=a.say.length>46?a.say.slice(0,44)+'…':a.say;ctx.font='12px system-ui';const w=ctx.measureText(s).width+14,bx=Math.min(Math.max(px-w/2,3),cv.width-w-3),by=py-r-34;
+      ctx.fillStyle='#fff';ctx.beginPath();ctx.roundRect(bx,by,w,21,6);ctx.fill();ctx.beginPath();ctx.moveTo(px-5,by+21);ctx.lineTo(px,by+27);ctx.lineTo(px+5,by+21);ctx.fill();
+      ctx.fillStyle='#111';ctx.fillText(s,bx+w/2,by+11)}
+  }
+  requestAnimationFrame(frame)
+}
+const tileAt=e=>{const r=cv.getBoundingClientRect();return{fx:(e.clientX-r.left)*cv.width/r.width/T,fy:(e.clientY-r.top)*cv.height/r.height/T}};
+const nearest=(fx,fy,lim)=>{let best=null,bd=lim;for(const a of agents){const d=disp[a.name]||a,k=Math.hypot(d.x+.5-fx,d.y+.5-fy);if(k<bd){bd=k;best=a}}return best};
+cv.addEventListener('click',e=>{const{fx,fy}=tileAt(e),a=nearest(fx,fy,1.1);if(a)select(a.name)});
+cv.addEventListener('mousemove',e=>{const{fx,fy}=tileAt(e),x=Math.floor(fx),y=Math.floor(fy);if(!tiles[y]||!tiles[y][x])return;
+  const a=nearest(fx,fy,.8),names={grass:'grass (walkable)',water:'water (impassable)',sand:'sand (walkable)',rock:'rock (impassable)',food:'food bush (walkable, gather to eat)'};
+  $('hover').innerHTML=`(${x}, ${y}) · ${names[tiles[y][x]]}`+(a?` · <b style="color:${a.color}">${esc(a.name)}</b> the ${esc(a.role)} — hunger ${a.hunger}/100, carrying ${a.food} food`:'')});
+
+/* ---------- agents list, speak panel ---------- */
+function renderCards(){
+  $('cards').innerHTML=agents.map(a=>{const l=a.latest,hc=a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77';
+    return `<div class="card ${sel===a.name?'sel':''}" onclick="select('${a.name}')"><div class="top"><b><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</b><span class="tag">${esc(a.role)}</span></div>
+    <div class="bar" style="margin-top:5px"><div style="width:${a.hunger}%;background:${hc}"></div></div>
+    <div class="now">${l?esc(l.action)+' → '+esc(l.result):'waiting…'}</div></div>`}).join('')}
+function renderTo(){
+  const all=toSet.has('*');
+  $('to').innerHTML=`<span class="chip ${all?'on':''}" onclick="toggleTo('*')">Everyone</span>`+agents.map(a=>`<span class="chip ${!all&&toSet.has(a.name)?'on':''}" onclick="toggleTo('${a.name}')"><span class="dot" style="background:${a.color}"></span>${esc(a.name)}</span>`).join('')}
+function toggleTo(n){
+  if(n==='*'){toSet=new Set(['*'])}
+  else{if(toSet.has('*'))toSet=new Set();toSet.has(n)?toSet.delete(n):toSet.add(n);if(!toSet.size)toSet=new Set(['*'])}
+  renderTo()}
+async function speak(){
+  const m=$('msg').value.trim();if(!m)return;
+  const to=toSet.has('*')?'all':[...toSet],r=await post('/api/speak',{to,message:m});
+  $('sent').textContent=r.delivered.length?`Sent to ${r.delivered.length===agents.length?'everyone':r.delivered.join(', ')} — they'll hear it next turn.`:'Nobody received that.';
+  $('msg').value='';setTimeout(()=>$('sent').textContent='',6000)}
+$('send').onclick=speak;
+$('msg').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();speak()}});
+
+/* ---------- inspector ---------- */
+function select(n){sel=n;toSet=new Set([n]);renderTo();renderCards();detailFor=null;histKey='';renderDetail();loadHistory()}
 function renderDetail(){
-  const a=agents.find(x=>x.name===sel),el=document.getElementById('detail');if(!a)return;
-  const l=a.latest;
-  el.innerHTML=`<h2>${esc(a.name)} · ${esc(a.role)}</h2>
-  <div class="kv"><span class="dim">Goal</span><span>${esc(a.goal)}</span><span class="dim">Model</span><span>${esc(a.model||'default')}</span>
-  <span class="dim">Position</span><span>(${a.x}, ${a.y})</span><span class="dim">Food carried</span><span>${a.food}</span><span class="dim">Skills</span><span>${esc(a.skills.join(', '))}</span></div>
-  ${bar('Hunger',a.hunger,a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77')}
-  ${Object.entries(a.traits).map(([k,v])=>`<span class="tag">${k.slice(0,4)} ${(v*100)|0}</span>`).join(' · ')}
-  <h2 style="margin-top:12px">Currently</h2>
-  ${l?`<div class="thought">💭 ${esc(l.thought)}</div><div><b>${esc(l.action)}</b> <span class="dim">→ ${esc(l.result)}</span></div>`:'<div class="dim">No actions yet.</div>'}
-  <h2 style="margin-top:12px">History (newest first)</h2><div class="scroll" id="hist">${histHTML}</div>`}
+  const a=agents.find(x=>x.name===sel),el=$('detail');if(!a)return;
+  if(detailFor!==sel){detailFor=sel;el.innerHTML=`<h2 id="d-title"></h2><div id="d-stats"></div>
+    <div class="section"><h2>Right now</h2><div id="d-now"></div></div>
+    <div class="section"><h2>Personality</h2><div id="d-traits"></div></div>
+    <div class="section"><h2>Everything it has thought &amp; done <span class="tag">(newest first)</span></h2><div class="scroll" id="hist"><div class="dim">loading…</div></div></div>`}
+  const hc=a.hunger>70?'#e0525e':a.hunger>40?'#e0a252':'#6bcB77',l=a.latest;
+  $('d-title').innerHTML=`<span class="dot" style="background:${a.color}"></span>${esc(a.name)} · ${esc(a.role)}`;
+  $('d-stats').innerHTML=`<div class="kv"><span class="dim">Goal</span><span>${esc(a.goal)}</span><span class="dim">Model</span><span>${esc(a.model||'default')}</span>
+    <span class="dim">Position</span><span>(${a.x}, ${a.y})</span><span class="dim">Carrying</span><span>${a.food} food</span><span class="dim">Skills</span><span>${esc(a.skills.join(', '))}</span>
+    <span class="dim">Hunger</span><span>${a.hunger}/100<div class="bar" style="margin-top:3px"><div style="width:${a.hunger}%;background:${hc}"></div></div></span></div>`;
+  $('d-now').innerHTML=l?`${l.heard&&l.heard.length?`<div class="heard">👂 heard: ${l.heard.map(esc).join(' · ')}</div>`:''}
+    <div class="thought">💭 ${esc(l.thought)}</div><div class="act">▶ <b>${esc(l.action)}</b> <span class="dim">→ ${esc(l.result)}</span></div>`:'<div class="dim">No turn taken yet.</div>';
+  $('d-traits').innerHTML=Object.entries(a.traits).map(([k,v])=>`<div class="trait"><span class="dim">${k}</span><div class="bar"><div style="width:${v*100}%;background:#7aa2f7"></div></div><span>${Math.round(v*100)}</span></div>`).join('')}
 async function loadHistory(){
-  if(!sel)return;const h=await j('/api/history?name='+encodeURIComponent(sel)),el=document.getElementById('hist');
-  histHTML=h.slice().reverse().map(e=>`<div class="hist"><span class="tag">t${e.tick} · (${e.x},${e.y}) · hunger ${e.hunger}</span><div>💭 ${esc(e.thought)}</div><div><b>${esc(e.action)}</b> <span class="dim">→ ${esc(e.result)}</span></div></div>`).join('')||'<div class="dim">none yet</div>';if(el)el.innerHTML=histHTML}
-async function poll(){
-  try{const s=await j('/api/state');state=s;agents=s.agents;tiles=s.tiles;
-    document.getElementById('tick').textContent='tick '+s.tick;document.getElementById('pause').textContent=s.paused?'Resume':'Pause';
-    if(!document.getElementById('chips').children.length||document.getElementById('chips').children.length!==agents.length)renderChips();
-    renderUsage(s.usage);if(sel)renderDetail();
-    document.getElementById('feed').innerHTML=s.events.slice().reverse().map(e=>`<div class="hist"><span class="tag">t${e.tick}</span> <span class="dot" style="background:${e.color}"></span><b>${esc(e.agent)}</b> ${esc(e.text)}</div>`).join('')||'<div class="dim">quiet so far…</div>'}catch(e){}
-  setTimeout(poll,600)}
+  if(!sel)return;const h=await j('/api/history?name='+encodeURIComponent(sel)),el=$('hist');if(!el)return;
+  const key=sel+':'+h.length;if(key===histKey)return;histKey=key;
+  el.innerHTML=h.slice().reverse().map(e=>`<div class="hist"><div class="tag">turn ${e.tick} · at (${e.x}, ${e.y}) · hunger ${e.hunger}</div>
+    ${e.heard&&e.heard.length?`<div class="heard">👂 ${e.heard.map(esc).join('<br>👂 ')}</div>`:''}
+    <div>💭 ${esc(e.thought)}</div><div class="act">▶ <b>${esc(e.action)}</b> <span class="dim">→ ${esc(e.result)}</span></div></div>`).join('')||'<div class="dim">none yet</div>'}
+
+/* ---------- polling ---------- */
 const fmt=n=>n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':n;
-function renderUsage(u){const el=document.getElementById('usage');if(!u)return;
-  el.textContent=`${u.calls} calls · ${fmt(u.input)} in / ${fmt(u.output)} out tokens`+(u.cost!=null?` · ~$${u.cost.toFixed(3)}`:'');
-  el.title=Object.entries(u.models).map(([m,x])=>`${m}: ${x.calls} calls, ${x.input} in, ${x.output} out`+(x.cost!=null?`, ~$${x.cost.toFixed(4)}`:'')).join('\n')||'no calls yet'}
-async function histLoop(){await loadHistory();setTimeout(histLoop,1500)}
-document.getElementById('pause').onclick=()=>j('/api/control',{method:'POST',body:JSON.stringify({paused:!state.paused})});
-document.getElementById('speed').onchange=e=>j('/api/control',{method:'POST',body:JSON.stringify({interval:+e.target.value})});
-(async()=>{const w=await j('/api/world');W=w.width;H=w.height;tiles=w.tiles;size();draw();poll();histLoop()})();
+function renderUsage(u){if(!u)return;
+  $('usage').textContent=`${u.calls} calls · ${fmt(u.input)} in / ${fmt(u.output)} out tokens`+(u.cost!=null?` · ~$${u.cost.toFixed(3)}`:'');
+  $('usage').title=Object.entries(u.models).map(([m,x])=>`${m}: ${x.calls} calls, ${x.input} in, ${x.output} out`+(x.cost!=null?`, ~$${x.cost.toFixed(4)}`:'')).join('\n')||'no calls yet'}
+async function poll(){
+  try{const s=await j('/api/state'),first=!agents.length;state=s;agents=s.agents;syncTiles(s.tiles);
+    $('tick').textContent='turn '+s.tick;$('pause').textContent=s.paused?'▶ Resume':'⏸ Pause';
+    renderUsage(s.usage);renderCards();if(first||$('to').children.length!==agents.length+1)renderTo();if(sel)renderDetail();
+    $('feed').innerHTML=s.events.slice().reverse().map(e=>`<div class="feedrow ${e.human?'you':''}"><span class="tag">turn ${e.tick}</span> <span class="dot" style="background:${e.color}"></span><b>${esc(e.agent)}</b> ${esc(e.text)}</div>`).join('')||'<div class="dim">quiet so far…</div>'}catch(e){}
+  setTimeout(poll,600)}
+async function histLoop(){try{await loadHistory()}catch(e){}setTimeout(histLoop,1200)}
+$('pause').onclick=()=>post('/api/control',{paused:!state.paused});
+$('speed').onchange=e=>post('/api/control',{interval:+e.target.value});
+(async()=>{const w=await j('/api/world');W=w.width;H=w.height;cv.width=bg.width=W*T;cv.height=bg.height=H*T;syncTiles(w.tiles);frame();poll();histLoop()})();
 </script></body></html>

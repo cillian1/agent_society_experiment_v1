@@ -25,6 +25,11 @@ Watch agents move on the map, with speech bubbles and a world feed. Click an age
 to see its current thought and action, stats, and its full history of thoughts and actions. Pause/speed controls
 are in the header. `serve.py --host 0.0.0.0 --port 8000` exposes it beyond localhost.
 
+## Speaking to the agents
+The **Speak** panel in the hub lets you message everyone, one agent, or any group (click the name chips, then type and press Enter).
+Agents hear you anywhere in the world on their next turn, see it in their prompt as "The Human says ...", and can answer with
+`say` to "Human" (replies show in the world feed). What each agent heard is shown in its inspector history. No restart needed.
+
 ## Usage counter
 The hub header shows API calls and input/output tokens used this run (hover for a per-model breakdown).
 For a dollar estimate, give prices in USD per million tokens: `python serve.py --price claude-haiku-5-5=IN,OUT --price claude-opus-5-5=IN,OUT`

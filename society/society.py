@@ -68,6 +68,7 @@ class Society:
             agents = list(self.agents.values())
             names = list(self.agents)
             jobs = [(a, a.observe(self.world, agents, tick), [n for n in names if n != a.name]) for a in agents]
+            heard_by = {a.name: list(a.heard) for a in agents}
             for a in agents:
                 a.heard = []
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:  # LLM calls run outside the lock
@@ -80,7 +81,8 @@ class Society:
                 agent.hunger = min(100.0, agent.hunger + HUNGER_PER_TICK)
                 result = self._apply(agent, act, tick)
                 agent.history.append({"tick": tick, "x": agent.x, "y": agent.y, "hunger": int(agent.hunger),
-                                      "thought": act["thought"], "action": act["action"], "result": result})
+                                      "thought": act["thought"], "action": act["action"], "result": result,
+                                      "heard": heard_by[agent.name]})
 
     def _event(self, tick, agent, text):
         self.events.append({"tick": tick, "agent": agent.name, "text": text, "color": agent.color})
@@ -138,6 +140,22 @@ class Society:
             self._event(tick, a, f"gave food to {o.name}")
             return f"gave food to {o.name}"
         return "waited"
+
+    def human_say(self, targets, message: str) -> list[str]:
+        """The human speaks to agents (anywhere in the world); they hear it on their next turn."""
+        message = message.strip()
+        with self.lock:
+            chosen = list(self.agents.values()) if targets in ("all", None) else \
+                [self.agents[n] for n in targets if n in self.agents]
+            if not message or not chosen:
+                return []
+            everyone = len(chosen) == len(self.agents)
+            for a in chosen:
+                a.heard.append(f'The Human says{" to everyone" if everyone else " to you"}: "{message}"')
+            to = "everyone" if everyone else ", ".join(a.name for a in chosen)
+            self.events.append({"tick": self.tick, "agent": "You", "text": f'to {to}: "{message}"',
+                                "color": "#ffffff", "human": True})
+            return [a.name for a in chosen]
 
     def run(self, ticks: int):
         for _ in range(ticks):

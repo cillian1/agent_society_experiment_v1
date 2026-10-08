@@ -63,6 +63,9 @@ def serve(society, host: str, port: int, interval: float):
                 if "interval" in data:
                     ctl["interval"] = max(0.1, float(data["interval"]))
                 self._json(ctl)
+            elif urlparse(self.path).path == "/api/speak":
+                data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                self._json({"delivered": society.human_say(data.get("to", "all"), str(data.get("message", "")))})
             else:
                 self._json({"error": "not found"}, 404)
 
