@@ -1,10 +1,12 @@
 """LLM backends: Claude via the Anthropic API, or an offline mock for testing."""
+import json
 import os
 import random
+import re
 
 
 class ClaudeLLM:
-    def __init__(self, model: str = "claude-haiku-5-5", max_tokens: int = 300):
+    def __init__(self, model: str = "claude-haiku-5-5", max_tokens: int = 350):
         import anthropic  # imported lazily so the mock works without the SDK
 
         self.client = anthropic.Anthropic()
@@ -22,18 +24,34 @@ class ClaudeLLM:
 
 
 class MockLLM:
-    """Deterministic-ish stand-in so the simulation runs with no API key."""
+    """Offline stand-in: seeks food, eats when hungry, wanders and chats a little."""
+
+    LINES = ["Found some berries over here!", "Anyone seen water nearby?",
+             "Let's stick together.", "I'll look around the east side.", "Careful, rocks ahead."]
 
     def __init__(self, seed: int = 0):
         self.rng = random.Random(seed)
 
     def complete(self, system: str, prompt: str, model: str | None = None) -> str:
-        line = self.rng.choice(
-            ["Let's pool our resources.", "I disagree with that plan.",
-             "What does everyone think we should build first?",
-             "I'll take care of that.", "Can we agree on some rules?"]
-        )
-        return f'{{"to": "all", "message": "{line}"}}'
+        hunger = int(re.search(r"Hunger: (\d+)", prompt).group(1))
+        carried = int(re.search(r"Food carried: (\d+)", prompt).group(1))
+        reach = "reach to gather: yes" in prompt
+        m = re.search(r"Nearest food: dx=(-?\d+) dy=(-?\d+)", prompt)
+        if carried and hunger > 50:
+            d = dict(thought="I'm getting hungry, time to eat.", action="eat")
+        elif reach:
+            d = dict(thought="Food is right here, grabbing it.", action="gather")
+        elif m and self.rng.random() < 0.9:
+            dx, dy = int(m.group(1)), int(m.group(2))
+            dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
+            d = dict(thought="I can sense food nearby, heading for it.", action="move", direction=dirn)
+        elif self.rng.random() < 0.2:
+            d = dict(thought="Let me tell the others something.", action="say", to="all",
+                     message=self.rng.choice(self.LINES))
+        else:
+            d = dict(thought="Nothing in sight, wandering.", action="move",
+                     direction=self.rng.choice(["north", "south", "east", "west"]))
+        return json.dumps(d)
 
 
 def make_llm(mock: bool = False, model: str | None = None):
