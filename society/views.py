@@ -1,7 +1,7 @@
 """JSON views of a society for the hub: a light state for polling, and full detail for one agent."""
 from .config import ADULT_AGE, LOVE_BOND, OLD_AGE
 from .engine import Society, tier_of
-from .models import Agent
+from .models import ABILITY_INFO, Agent
 
 
 def _brief(sim: Society, a: Agent) -> dict:
@@ -55,7 +55,8 @@ def agent_detail(sim: Society, name: str) -> dict | None:
         return {
             **_brief(sim, a), "alive": not dead, "goal": a.goal, "traits": vars(a.traits),
             "seeds": a.seeds, "wood": a.wood, "stone": a.stone, "items": a.items, "discoveries": a.discoveries,
-            "parents": a.parents, "children": a.children, "pregnancy": a.pregnancy,
+            "parents": a.parents, "children": a.children, "pregnancy": a.pregnancy, "plan": a.plan,
+            "abilities": vars(a.abilities), "ability_info": ABILITY_INFO, "lifespan": a.abilities.lifespan(),
             "bonds": {k: int(v) for k, v in sorted(a.bonds.items(), key=lambda kv: -kv[1]) if v >= 1},
             "summary": a.summary, "log": a.log[-60:], "log_total": len(a.log),
             "orders": [o for o in a.orders if t - o[0] <= 30],

@@ -47,9 +47,19 @@ Keyboard: `Space` pause · `N` next day · `+`/`−` zoom · `0` fit · `F` foll
 - **Map:** 64×40 tiles of grass, sand, water, rock and forest. Trees give wood, rocks stone, berry bushes food (and seeds);
   bushes take 150 days to regrow.
 - **Survival:** hunger rises every day; at 100 an agent loses health and can starve. Elders (500+ days) may die of old age.
-- **Farming:** plant a seed, tend it; a second farmer within 6 days doubles the growth. Ripe crops give 3 food and replant.
+- **Farming:** plants grow by themselves (about 20 days, faster near water). Tending speeds them up once every few days,
+  and a second farmer doubles it. Ripe crops give 3 food and replant.
 - **Making things:** `build` anything (houses, signs, bridges — bridges can cross water) and `craft` objects. Tools work:
   axe = more wood, pickaxe = more stone, hoe = faster crops, fishing rod/net = fish from water.
+- **Abilities (1-10):** strength (extra wood & stone), speed (tiles per move), endurance (hunger rises slower),
+  perception (sight & smell range), intelligence (better farming, longer memory), charisma (people like you faster),
+  longevity (lifespan 680-1400 days). Settlers get a random mix; children inherit their parents' with a little variation.
+- **Staying alive:** settlers arrive with some food; anyone carrying food eats by instinct when very hungry; starvation
+  damage is slow; agents are told where the community has seen food.
+- **Families:** a woman and a man in love can conceive; she is pregnant for 10 days. Newborns stay with their mother,
+  don't think, and must be fed with `care` for 5 days; then they are children (on the local model) and adults at day 10.
+- **Thinking:** each turn an agent runs a short checklist (danger/hunger first, then its plan, then something creative),
+  keeps a plan from day to day, and gets one idea to consider for inspiration.
 - **Society:** no roles or family at the start. Agents claim their own roles, `invent` ideas everyone hears about, build
   friendships by talking, giving and farming together, and when two adults love each other (50+ both ways) they can have
   a child, who inherits a mix of their personalities.

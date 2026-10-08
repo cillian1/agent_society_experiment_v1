@@ -23,11 +23,70 @@ class Traits:
         return ", ".join(f"{k} {lvl(v)}" for k, v in vars(self).items())
 
 
+ABILITY_INFO = {   # what each ability does - shown to the agents and in the hub
+    "strength": "extra wood & stone when gathering",
+    "speed": "tiles per move",
+    "endurance": "gets hungry more slowly",
+    "perception": "sees and smells further",
+    "intelligence": "better farmer, remembers more",
+    "charisma": "others warm to them faster",
+    "longevity": "lives longer",
+}
+
+
+@dataclass
+class Abilities:
+    """Body and mind, each 1-10. Unlike personality these change what an agent can actually do."""
+    strength: int = 5
+    speed: int = 5
+    endurance: int = 5
+    perception: int = 5
+    intelligence: int = 5
+    charisma: int = 5
+    longevity: int = 5
+
+    @classmethod
+    def random(cls, rng) -> "Abilities":
+        return cls(**{k: rng.randint(2, 9) for k in ABILITY_INFO})
+
+    @classmethod
+    def inherit(cls, mum: "Abilities", dad: "Abilities", rng) -> "Abilities":
+        return cls(**{k: max(1, min(10, round((getattr(mum, k) + getattr(dad, k)) / 2 + rng.choice([-1, 0, 0, 1]))))
+                      for k in ABILITY_INFO})
+
+    # ---- effects ----
+    def steps(self) -> int:
+        return 2 + self.speed // 4                       # 2-4 tiles per move
+
+    def view(self) -> int:
+        return 4 + (self.perception + 1) // 3            # 4-7 tiles
+
+    def smell(self) -> int:
+        return 6 + self.perception                       # 7-16 tiles
+
+    def hunger_factor(self) -> float:
+        return 1.25 - self.endurance * 0.05              # 1.2x (1) .. 0.75x (10)
+
+    def charm(self) -> float:
+        return 0.6 + self.charisma * 0.08                # 0.68x .. 1.4x bond gains
+
+    def memory(self) -> int:
+        return 15 + 2 * self.intelligence                # memories recalled word for word
+
+    def lifespan(self) -> int:
+        return 600 + 80 * self.longevity                 # 680 .. 1400 days
+
+    def describe(self) -> str:
+        return ", ".join(f"{k} {getattr(self, k)} ({ABILITY_INFO[k]})" for k in ABILITY_INFO)
+
+
 @dataclass
 class Agent:
     name: str
     traits: Traits
     sex: str = "female"                # "female" | "male" - a woman carries the baby
+    abilities: Abilities = field(default_factory=Abilities)
+    plan: str = ""                     # the agent's own current plan, kept from day to day
     role: str = ""                     # agents invent and claim their own roles
     goal: str = DEFAULT_GOAL
     model: str | None = None           # brain: "local", "local:<name>", or a Claude model id
@@ -82,7 +141,8 @@ class Agent:
 
     def stage(self, tick: int) -> str:
         age = self.age(tick)
-        return "baby" if age < BABY_DAYS else "child" if age < ADULT_AGE else "elder" if age >= OLD_AGE else "adult"
+        return "baby" if age < BABY_DAYS else "child" if age < ADULT_AGE else \
+            "elder" if age >= min(OLD_AGE, self.abilities.lifespan() - 150) else "adult"
 
     def word(self, tick: int | None = None) -> str:
         young = tick is not None and not self.adult(tick)
@@ -135,4 +195,5 @@ class Agent:
         known = {f.name for f in fields(cls)}
         d = {k: v for k, v in d.items() if k in known}
         d["traits"] = Traits(**d.get("traits", {}))
+        d["abilities"] = Abilities(**d.get("abilities", {}))
         return cls(**d)

@@ -103,7 +103,7 @@ textarea { resize: vertical; width: 100%; }
 .subtabs button.on { color: var(--text); border-color: var(--accent); background: #16324f; }
 .kv { display: grid; grid-template-columns: 96px 1fr; gap: 5px 10px; font-size: 13px; }
 .kv > :nth-child(odd) { color: var(--muted); }
-.meter { display: grid; grid-template-columns: 70px 1fr 34px; gap: 8px; align-items: center; font-size: 12px; margin: 4px 0; }
+.meter { display: grid; grid-template-columns: 92px 1fr 40px; gap: 8px; align-items: center; font-size: 12px; margin: 4px 0; }
 .meter span:last-child { text-align: right; color: var(--text-2); }
 .card { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin: 8px 0; }
 .thought { border-left: 3px solid var(--gold); }

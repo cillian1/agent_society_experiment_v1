@@ -1,15 +1,32 @@
 """How an agent thinks: what it is told (prompts), how it answers (parsing) and calls to its model."""
 import json
+import random
 import re
 
-from .config import (ADULT_AGE, BABY_DAYS, BUILD_COST, CHILD_FOOD_COST, COMPACT_AFTER, CRAFT_COST, FRIEND_BOND,
-                     HUNGER_WARNING, KEEP_RECENT, LOVE_BOND, MAX_ITEMS, MAX_STEPS, ORDER_MEMORY_DAYS, PREGNANCY_DAYS,
-                     SMELL_RADIUS, VIEW_RADIUS)
+from .config import (ADULT_AGE, BABY_DAYS, BUILD_COST, CHILD_FOOD_COST, CRAFT_COST, FRIEND_BOND, HUNGER_WARNING,
+                     KEEP_RECENT, LOVE_BOND, MAX_ITEMS, ORDER_MEMORY_DAYS, PREGNANCY_DAYS)
 from .models import Agent
 
 DIRS = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
 ACTIONS = ("move", "gather", "eat", "say", "give", "plant", "tend", "build", "craft", "court", "procreate",
            "care", "invent", "wait")
+
+INSPIRATION = [   # one is offered each day to spark creativity
+    "Could you name a place - a lake, a hill, your camp - and put up a sign?",
+    "Is there a custom, festival or ritual your community could start?",
+    "Could you teach a child something, or tell someone a story?",
+    "Is there a tool nobody has made yet that would help?",
+    "Could you build something everyone can use: a meeting place, a storehouse, a bridge, a path?",
+    "Is anyone lonely, hungry or struggling? Could you help them?",
+    "Could you propose a rule or a fair way to share food?",
+    "What lies beyond the area you know? Maybe organise an expedition.",
+    "Could you trade - your surplus for something you lack?",
+    "Could you start or expand a farm with others, and agree who looks after it?",
+    "Could you write down (invent) something you have learned, so others know it too?",
+    "Is there a job your community needs that nobody does yet? Maybe that's your role.",
+    "Could you plan something with a friend for the coming days?",
+    "Could you make something beautiful - art, a monument, a garden?",
+]
 
 HUMAN_NOTES = {
     "leader": ("The Human is the founder and leader of your community, a voice from outside the world. When the Human tells "
@@ -35,12 +52,17 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         f"(the others: {', '.join(others) or 'nobody yet'}). Nobody has a job or a role until they invent one; "
         "nobody is anybody's family until children are born. You are free to do what you want: explore, "
         "talk, make friends (or enemies), plan together, farm, build, invent customs, tools, jobs and laws. "
-        "Be creative and resourceful, and think about how to solve your problems in new ways. "
+        "Be creative and resourceful: try new things, combine ideas, invent, build, organise, specialise - "
+        "a thriving society needs more than gathering food. "
         "Talking is valuable: answer people who speak to you, share what you know, ask questions, make deals. "
         "You remember everything that has happened to you. Survival comes first: eat before you get very hungry, "
         "and keep some food on you. Don't repeat or echo what others just said, and don't repeat your own last action "
         "if it isn't working - try something new, specific and concrete.\n"
-        f"Goal: {a.goal}\nPersonality: {a.traits.describe()}\n\n"
+        "Before you choose, think briefly: (1) Am I - or a baby I'm responsible for - hungry or in danger? Deal with "
+        "that first. (2) What is my plan, and is it working? (3) What creative step would make life better for me "
+        "or my community? Plants grow by themselves: tending once every few days is plenty, so don't hover over them.\n"
+        f"Goal: {a.goal}\nPersonality: {a.traits.describe()}\n"
+        f"Abilities (1-10): {a.abilities.describe()}. Use your strengths and let others cover your weaknesses.\n\n"
         "World: g grass, . sand, ~ water (impassable), # rock (impassable), ^ tree (impassable), f wild food bush "
         "(slow to regrow), , young plant, * ripe crop, & a structure someone built. North is up (y decreases), "
         "east is right. Uppercase letters are agents (you are @). "
@@ -49,16 +71,16 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         "Hunger rises every day; at 100 you take damage and can starve. Eating food lowers hunger. "
         "Life lasts roughly 500-700 days; one turn is one day.\n"
         "Each turn pick ONE action:\n"
-        f'  move    - {{"direction": "north|south|east|west", "steps": 1-{MAX_STEPS}}} walk several tiles (stops at obstacles)\n'
+        f'  move    - {{"direction": "north|south|east|west", "steps": 1-{a.abilities.steps()}}} walk several tiles (stops at obstacles)\n'
         "  gather  - take from an adjacent/own-tile food bush or ripe crop (food, sometimes seeds), tree (wood) or rock "
         "(stone); next to water with a fishing tool you catch fish (food)\n"
         "  eat     - eat one carried food (hunger -40)\n"
         '  say     - {"to": "<name or all>", "message": "..."} heard within 8 tiles; talk to people!\n'
         '  give    - {"to": "<name>", "title": "<object name, optional>"} hand one food (or that object) to an adjacent agent\n'
         '  plant   - {"direction": "..."} put a carried seed into an adjacent grass tile\n'
-        "  tend    - work on a young plant within reach to help it grow (faster with a helper)\n"
+        "  tend    - speed up a young plant within reach (helps once every few days; plants also grow on their own)\n"
         f'  build   - {{"direction": "...", "title": "<house, wall, bridge, sign, anything>", "message": "<description or sign text>"}} '
-        f"costs {BUILD_COST} wood/stone; bridges/paths/floors can be walked on, everything else blocks. Water only takes bridges/docks.\n"
+        f"costs {BUILD_COST} wood/stone; you can walk into or over what you build, except walls and fences. Water only takes bridges/docks.\n"
         f'  craft   - {{"title": "<axe, pickaxe, hoe, fishing rod, basket, anything>", "message": "what it is for"}} costs '
         f"{CRAFT_COST} wood/stone; you carry it (max {MAX_ITEMS}). Objects matter: an axe/hatchet gets extra wood, a "
         "pickaxe/hammer extra stone, a hoe/shovel/rake speeds up plants, a fishing rod/net/spear catches fish from water.\n"
@@ -71,9 +93,10 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         '  invent  - {"title": "...", "message": "describe your idea, custom, tool or law"} shared with the whole society\n'
         "  wait\n"
         + HUMAN_NOTES[a.authority] + " (Talking with the Human happens in a separate chat, so it does not use up your turn.)\n"
-        "Reply ONLY with JSON. Optional extra fields: \"remember\" (a note to your future self) and \"role\" "
-        "(claim or change your own role/title whenever you like), e.g.\n"
-        '{"thought": "<1-2 sentences of private reasoning>", "action": "say", "to": "Ada", "message": "Want to farm together?", "role": "farmer"}'
+        "Reply ONLY with JSON. Optional extra fields: \"plan\" (your plan for the coming days - you'll see it again "
+        "tomorrow), \"remember\" (a note to your future self) and \"role\" (claim or change your own role/title), e.g.\n"
+        '{"thought": "<1-2 sentences of private reasoning>", "action": "say", "to": "Ada", "message": "Want to farm '
+        'together?", "plan": "start a farm by the lake with Ada, then build a storehouse", "role": "farmer"}'
     )
 
 
@@ -82,11 +105,14 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
     others = {(o.x, o.y): o.symbol for o in agents if o is not a}
     stage = {"child": f"a child - you become an adult at {ADULT_AGE} days", "adult": "an adult",
              "elder": "an elder", "baby": "a baby"}[a.stage(tick)]
+    view, smell = a.abilities.view(), a.abilities.smell()
     lines = [f"Day {tick}. You are at ({a.x}, {a.y}). You are a {a.word(tick)}, {a.age(tick)} days old ({stage}).",
              "Your role: " + (a.role or 'none yet - claim one by adding "role" to your reply, or stay free') + ".",
              f"Hunger: {int(a.hunger)}/100. Health: {int(a.health)}/100. Food carried: {a.food}. "
              f"Seeds: {a.seeds}. Wood: {a.wood}. Stone: {a.stone}.",
-             f"Your surroundings (@ = you):\n{world.view(a.x, a.y, VIEW_RADIUS, others)}"]
+             f"Your surroundings (@ = you):\n{world.view(a.x, a.y, view, others)}"]
+    if a.plan:
+        lines.insert(2, f"Your current plan: {a.plan} (keep following it, or change it with \"plan\")")
     if a.hunger >= HUNGER_WARNING:
         lines.insert(1, f"!!! YOU ARE HUNGRY ({int(a.hunger)}/100) - at 100 you start losing health and die. "
                      + ("EAT NOW: choose the eat action (you carry food)." if a.food else
@@ -94,29 +120,32 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
                         "Everything else can wait."))
     near = [f"{o.name} [{o.symbol}] dx={o.x - a.x} dy={o.y - a.y}, {o.word(tick)}" + (f", role: {o.role}" if o.role else "")
             + f", {o.age(tick)} days old" + {"baby": " (BABY)", "child": " (child)"}.get(o.stage(tick), "")
-            + (" (pregnant)" if o.pregnancy else "") for o in agents if o is not a and a.dist(o) <= VIEW_RADIUS]
+            + (" (pregnant)" if o.pregnancy else "") for o in agents if o is not a and a.dist(o) <= view]
     lines.append("Agents in view: " + ("; ".join(near) or "none"))
     if a.pregnancy:
         lines.append(f"You are PREGNANT by {a.pregnancy['father']}: the baby is due on day {a.pregnancy['due']} "
                      f"(in {a.pregnancy['due'] - tick} days). Eat well and stay safe.")
     for b in agents:                           # babies who need someone - your own wherever they are, others nearby
         mine = a.name in b.parents
-        if b is not a and b.is_baby(tick) and (mine or a.dist(b) <= VIEW_RADIUS):
+        if b is not a and b.is_baby(tick) and (mine or a.dist(b) <= view):
             urgent = " - HUNGRY, feed them now!" if b.hunger >= 50 else ""
             lines.append(f"{'Your' if mine else 'A'} baby {b.name} is at dx={b.x - a.x} dy={b.y - a.y}: hunger "
                          f"{int(b.hunger)}/100, health {int(b.health)}/100{urgent} (stand next to them and use care)")
     built = [f"{s['kind']} at dx={dx} dy={dy}" + (f' ("{s["text"]}")' if s["text"] else "") + f" built by {s['by']}"
-             for dx, dy, s in world.structures_near(a.x, a.y, VIEW_RADIUS)][:6]
+             for dx, dy, s in world.structures_near(a.x, a.y, view)][:6]
     if built:
         lines.append("Structures in view: " + "; ".join(built))
-    food = world.food_near(a.x, a.y, SMELL_RADIUS)
+    food = world.food_near(a.x, a.y, smell)
     if food:
         dx, dy = food[0][0] - a.x, food[0][1] - a.y
         where = ", ".join(p for p in (f"{abs(dx)} east" if dx > 0 else f"{abs(dx)} west" if dx < 0 else "",
                                       f"{abs(dy)} south" if dy > 0 else f"{abs(dy)} north" if dy < 0 else "") if p)
         lines.append(f"Nearest food: dx={dx} dy={dy} ({where or 'right here'})")
     else:
-        lines.append("Nearest food: none sensed")
+        known = world.known_food(a.x, a.y)
+        lines.append("Nearest food: none sensed nearby." + (" Food your community has seen: " + "; ".join(
+            f"{k} at dx={dx} dy={dy} ({compass(dx, dy)})" for dx, dy, k in known) if known else
+            " Nobody has found food yet - explore!"))
     un = world.nearest_unexplored(a.x, a.y)
     if un:
         dx, dy = un
@@ -131,7 +160,12 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
     lines.append(f"Food within reach to gather: {'yes' if world.food_near(a.x, a.y, 1) else 'no'}")
     mats = [p for p in world.gather_options(a.x, a.y) if world.tile(*p) in ("tree", "rock")]
     lines.append(f"Materials (trees/rocks) within reach: {len(mats)}")
-    lines.append(f"Young plants within reach to tend: {len(world.plants_near(a.x, a.y, 1))}")
+    plants = world.plants_near(a.x, a.y, 1)
+    if plants:
+        todo = sum(world.needs_tending(x, y, tick) for x, y in plants)
+        soonest = min(world.days_to_ripe(x, y) for x, y in plants)
+        lines.append(f"Young plants within reach: {len(plants)}, could use tending: {todo} (the nearest ripens in about "
+                     f"{soonest} days on its own - no need to stay and watch)")
     feelings = sorted(((b, n) for n, b in a.bonds.items() if b >= 10), reverse=True)
     if feelings:
         lines.append("Your feelings toward others: " + ", ".join(
@@ -149,10 +183,11 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
         lines.append("What you remember of your earlier life (summary):\n" + a.summary)
     if a.log[a.sum_upto:]:
         lines.append("Your recent memories (oldest first):\n" + "\n".join(
-            "- " + m for m in a.log[max(a.sum_upto, len(a.log) - KEEP_RECENT - COMPACT_AFTER):]))
+            "- " + m for m in a.log[max(a.sum_upto, len(a.log) - a.abilities.memory()):]))
     if ideas:
         lines.append("Ideas invented by the society so far:\n" + "\n".join("- " + i for i in ideas))
     lines.append("Messages heard this turn:\n" + ("\n".join(a.heard) or "(none)"))
+    lines.append("An idea to consider (only if it fits): " + random.Random(hash((a.name, tick))).choice(INSPIRATION))
     recent = [f"t{h['tick']}: {h['action']} -> {h['result']}" for h in a.history[-4:]]
     lines.append("Your last few actions:\n" + ("\n".join(recent) or "(none yet)"))
     return "\n".join(lines) + "\n\nWhat do you do?"
@@ -195,7 +230,7 @@ def parse_action(raw: str, others: list[str]) -> dict:
     return {"thought": s("thought") or raw[:200].strip(),
             "action": data.get("action") if data.get("action") in ACTIONS else "wait",
             "direction": data.get("direction"), "to": to, "message": s("message"), "title": s("title"),
-            "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"),
+            "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role"), "plan": s("plan"),
             "steps": data.get("steps") if isinstance(data.get("steps"), int) else 1}
 
 

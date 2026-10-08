@@ -106,6 +106,33 @@ class FamilyTests(unittest.TestCase):
         self.assertIn("woman and a man", apply(sim, ada, parse_action('{"action": "procreate", "to": "Cleo"}', ["Cleo"]), 0))
 
 
+class AbilityTests(unittest.TestCase):
+    def test_settlers_get_varied_abilities_and_food(self):
+        sim = make()
+        abilities = {tuple(vars(a.abilities).values()) for a in sim.agents.values()}
+        self.assertGreater(len(abilities), 1)
+        self.assertTrue(all(a.food >= 3 for a in sim.agents.values()))
+
+    def test_instinct_eats_when_starving(self):
+        sim = make()
+        ada = sim.agents["Ada"]
+        ada.hunger, ada.food = 90, 2
+        sim.begin_day()
+        self.assertLess(ada.hunger, 75)
+        self.assertEqual(ada.food, 1)
+
+    def test_tending_has_a_cooldown_and_plants_grow_alone(self):
+        sim = make()
+        w = sim.world
+        x, y = next((x, y) for y in range(w.height) for x in range(w.width) if w.tiles[y][x] == "grass")
+        w.plant(x, y)
+        self.assertTrue(w.tend(x, y, "Ada", 1)[2])
+        self.assertFalse(w.tend(x, y, "Brix", 2)[2])        # too soon - it just needs time
+        for t in range(40):
+            w.update(t)
+        self.assertEqual(w.tiles[y][x], "crop")
+
+
 class SaveTests(unittest.TestCase):
     def test_round_trip_and_continue(self):
         sim = make(60)

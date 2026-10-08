@@ -360,8 +360,11 @@ function overview(a) {
     <span>Explored</span><span>${a.discoveries} tiles seen first</span>
     <span>Position</span><span>(${a.x}, ${a.y})</span></div>
     ${l ? `<div class="card thought">💭 ${esc(l.thought)}<div class="tag" style="margin-top:4px">▶ ${esc(l.action)} → ${esc(l.result)}</div></div>` : ''}
+    ${a.plan ? `<div class="card" style="border-left:3px solid var(--accent)">🗺️ <b>Plan:</b> ${esc(a.plan)}</div>` : ''}
+    <h3>Abilities</h3>${Object.entries(a.abilities).map(([k, v]) => `<div title="${esc(a.ability_info[k])}">${meter(k[0].toUpperCase() + k.slice(1), v * 10, v >= 7 ? 'var(--good)' : v <= 3 ? 'var(--warn)' : 'var(--accent)').replace(`<span>${v * 10}</span></div>`, `<span>${v}/10</span></div>`)}</div>`).join('')}
+    <p class="muted small">Hover an ability to see what it does. Expected lifespan: about ${a.lifespan} days.</p>
     ${a.orders.length ? `<h3>You asked</h3>${a.orders.map(o => `<div class="card">“${esc(o[1])}” <span class="tag">day ${o[0]}</span></div>`).join('')}` : ''}
-    <h3>Personality</h3>${Object.entries(a.traits).map(([k, v]) => meter(k.slice(0, 1).toUpperCase() + k.slice(1, 7), Math.round(v * 100), 'var(--accent)')).join('')}`;
+    <h3>Personality</h3>${Object.entries(a.traits).map(([k, v]) => meter({ openness: 'Openness', conscientiousness: 'Diligence', extraversion: 'Outgoing', agreeableness: 'Kindness', neuroticism: 'Anxiety' }[k] || k, Math.round(v * 100), 'var(--accent)')).join('')}`;
 }
 
 function timeline(a) {

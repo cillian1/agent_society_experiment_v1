@@ -34,8 +34,8 @@ class MockLLM(UsageMixin):
         mat_have = sum(int(x) for x in re.findall(r"(?:Wood|Stone): (\d+)", prompt))
         friend = re.search(r"Agents in view: (\w+) \[", prompt)
         unexp = re.search(r"Nearest unexplored area: dx=(-?\d+) dy=(-?\d+)", prompt)
-        tendable = int(re.search(r"to tend: (\d+)", prompt).group(1))
-        m = re.search(r"Nearest food: dx=(-?\d+) dy=(-?\d+)", prompt)
+        tendable = int((re.search(r"could use tending: (\d+)", prompt) or [0, 0])[1])
+        m = re.search(r"Nearest food: dx=(-?\d+) dy=(-?\d+)", prompt) or re.search(r"seen: [\w ]+ at dx=(-?\d+) dy=(-?\d+)", prompt)
         partner = re.search(r"have a child right now with: (\w+)", prompt)
         asked = re.search(r"Choose procreate with to=(\w+)", prompt)
         me = "woman" if "You are a woman" in prompt else "man"
@@ -51,6 +51,10 @@ class MockLLM(UsageMixin):
                 return json.dumps(dict(thought=f"{baby.group(1)} is hungry, I'll feed them.", action="care", to=baby.group(1)))
             dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
             return json.dumps(dict(thought=f"I must get to baby {baby.group(1)}.", action="move", direction=dirn, steps=3))
+        if hunger > 55 and not carried and not reach and m:     # hungry: food first, like the prompt says
+            dx, dy = int(m.group(1)), int(m.group(2))
+            dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
+            return json.dumps(dict(thought="I'm hungry - food first.", action="move", direction=dirn, steps=3))
         if carried and hunger > 45:
             d = dict(thought="I'm getting hungry, time to eat.", action="eat")
         elif reach and hunger > 20:

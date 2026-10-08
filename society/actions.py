@@ -3,7 +3,7 @@ string that the agent sees next turn. Register new actions with @action("name") 
 import re
 
 from .config import (BUILD_COST, CARE_RELIEF, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN,
-                     GROW_NEEDED, HEARING_RADIUS, LOVE_BOND, MAX_ITEMS, MAX_STEPS)
+                     GROW_NEEDED, HEARING_RADIUS, LOVE_BOND, MAX_ITEMS)
 from .mind import DIRS
 
 HANDLERS = {}
@@ -35,7 +35,7 @@ def move(sim, a, act, tick):
     if (dx, dy) == (0, 0):
         return "invalid direction"
     w, moved, why = sim.world, 0, ""
-    for _ in range(max(1, min(MAX_STEPS, act.get("steps") or 1))):
+    for _ in range(max(1, min(a.abilities.steps(), act.get("steps") or 1))):
         nx, ny = a.x + dx, a.y + dy
         if not w.in_bounds(nx, ny):
             why = "edge of the world"
@@ -63,6 +63,9 @@ def gather(sim, a, act, tick):
         if not got:
             continue
         bonus = ""
+        if (got["wood"] or got["stone"]) and sim.rng.random() < a.abilities.strength / 12:
+            got["wood" if got["wood"] else "stone"] += 1
+            bonus = " (strong arms)"
         if got["wood"] and a.has_tool("wood"):
             got["wood"] += 1
             bonus = " (axe bonus)"
@@ -163,10 +166,16 @@ def tend(sim, a, act, tick):
     near = w.plants_near(a.x, a.y, 1)
     if not near:
         return "no young plants within reach"
-    x, y = near[0]
-    growth, partners = w.tend(x, y, a.name, tick)
-    if a.has_tool("farm") and w.tiles[y][x] == "sprout":
-        growth = w.boost(x, y, 1)
+    todo = [p for p in near if w.needs_tending(*p, tick)]
+    if not todo:
+        days = min(w.days_to_ripe(*p) for p in near)
+        return (f"these plants were tended recently - they grow by themselves now (ripe in about {days} days). "
+                "Go and do something else meanwhile")
+    x, y = todo[0]
+    growth, partners, _ = w.tend(x, y, a.name, tick)
+    extra = (1 if a.has_tool("farm") else 0) + (0.5 if a.abilities.intelligence >= 7 else 0)
+    if extra and w.tiles[y][x] == "sprout":
+        growth = w.boost(x, y, extra)
     ripe = growth >= GROW_NEEDED
     if partners:
         for n in partners:
@@ -178,6 +187,7 @@ def tend(sim, a, act, tick):
     if ripe:
         sim.event(tick, a, f"grew a ripe crop at ({x}, {y})!", "farm")
     return (f"tended the plant at ({x}, {y}): growth {min(growth, GROW_NEEDED):.0f}/{GROW_NEEDED:.0f}"
+            + ("" if ripe else f", ripe in about {w.days_to_ripe(x, y)} days on its own - no need to stay")
             + (f" - teamwork with {', '.join(partners)} doubled the effect!" if partners else "")
             + (" It is now ripe!" if ripe else ""))
 

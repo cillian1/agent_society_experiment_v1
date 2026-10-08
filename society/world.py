@@ -4,10 +4,11 @@ import random
 GRASS, WATER, SAND, ROCK, FOOD, SPROUT, CROP = "grass", "water", "sand", "rock", "food", "sprout", "crop"
 TREE, STRUCTURE = "tree", "structure"
 GLYPH = {GRASS: "g", WATER: "~", SAND: ".", ROCK: "#", FOOD: "f", SPROUT: ",", CROP: "*", TREE: "^", STRUCTURE: "&"}
-from .config import FOOD_REGROW_DAYS, GROW_NEEDED, TEAMWORK_WINDOW, TREE_REGROW_DAYS, WORLD_H, WORLD_W
+from .config import (FOOD_REGROW_DAYS, GROW_NEEDED, IRRIGATED_GROWTH_PER_DAY, PLANT_GROWTH_PER_DAY, TEAMWORK_WINDOW,
+                     TEND_COOLDOWN, TREE_REGROW_DAYS, WORLD_H, WORLD_W)
 
 WALKABLE = (GRASS, SAND, FOOD, SPROUT, CROP)
-WALK_WORDS = ("bridge", "path", "road", "floor", "gate", "door", "bed", "bench", "dock", "stair", "plaza", "carpet")
+BLOCK_WORDS = ("wall", "fence", "barrier", "palisade", "barricade")   # everything else can be walked into/over
 WATER_OK_WORDS = ("bridge", "dock", "pier", "raft", "path")
 
 
@@ -125,14 +126,31 @@ class World:
         return False
 
     def tend(self, x: int, y: int, who: str, tick: int):
-        """Work a sprout. A second farmer within TEAMWORK_WINDOW turns doubles the effect."""
+        """Work a sprout -> (growth, partners, helped). Helps at most once every TEND_COOLDOWN days; a different
+        farmer having tended it within TEAMWORK_WINDOW days doubles the effect."""
         p = self.plants[(x, y)]
+        if tick - p.get("last", -99) < TEND_COOLDOWN:
+            return p["growth"], [], False
         partners = [n for n, t in p["tended"].items() if n != who and tick - t <= TEAMWORK_WINDOW]
         p["growth"] += 2 if partners else 1
-        p["tended"][who] = tick
+        p["tended"][who] = p["last"] = tick
         if p["growth"] >= GROW_NEEDED:
             self.tiles[y][x] = CROP
-        return p["growth"], partners
+        return p["growth"], partners, True
+
+    def needs_tending(self, x: int, y: int, tick: int) -> bool:
+        return tick - self.plants.get((x, y), {}).get("last", -99) >= TEND_COOLDOWN
+
+    def days_to_ripe(self, x: int, y: int) -> int:
+        p = self.plants[(x, y)]
+        rate = IRRIGATED_GROWTH_PER_DAY if (x, y) in self.irrigated else PLANT_GROWTH_PER_DAY
+        return max(0, round((GROW_NEEDED - p["growth"]) / rate))
+
+    def known_food(self, x: int, y: int, limit: int = 3):
+        """Nearest food anyone has seen (the community's shared map) -> [(dx, dy, kind)]."""
+        spots = [(max(abs(fx - x), abs(fy - y)), fx - x, fy - y, self.tiles[fy][fx]) for fx, fy in self.explored
+                 if self.tiles[fy][fx] in (FOOD, CROP)]
+        return [(dx, dy, "ripe crop" if t == CROP else "berry bush") for _, dx, dy, t in sorted(spots)[:limit]]
 
     def boost(self, x: int, y: int, amount: float) -> float:
         """Extra growth (e.g. from a hoe); returns the new growth."""
@@ -158,7 +176,7 @@ class World:
         if t not in (GRASS, SAND, WATER):
             return False, f"can't build on {t}"
         self.structures[(x, y)] = {"kind": kind, "text": text, "by": who, "tick": tick, "under": t,
-                                   "walkable": any(w in k for w in WALK_WORDS)}
+                                   "walkable": not any(w in k for w in BLOCK_WORDS)}
         self.tiles[y][x] = STRUCTURE
         return True, ""
 
@@ -216,7 +234,7 @@ class World:
                 del self.regrow[pos]
         for (x, y), p in self.plants.items():
             if self.tiles[y][x] == SPROUT:
-                p["growth"] += 0.2 if (x, y) in self.irrigated else 0.05   # nature helps a little
+                p["growth"] += IRRIGATED_GROWTH_PER_DAY if (x, y) in self.irrigated else PLANT_GROWTH_PER_DAY
                 if p["growth"] >= GROW_NEEDED:
                     self.tiles[y][x] = CROP
 

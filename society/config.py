@@ -7,9 +7,12 @@ TIERS = {"local": LOCAL, "haiku": HAIKU, "sonnet": SONNET, "opus": OPUS}
 
 # ---- world ----
 WORLD_W, WORLD_H = 64, 40
-FOOD_REGROW_DAYS = 150                # wild bushes come back slowly
+FOOD_REGROW_DAYS = 100                # wild bushes come back slowly
 TREE_REGROW_DAYS = 300
 GROW_NEEDED = 8.0                     # growth points for a planted sprout to ripen
+PLANT_GROWTH_PER_DAY = 0.4            # plants grow by themselves (~20 days)...
+IRRIGATED_GROWTH_PER_DAY = 0.6        # ...faster near water (~13 days)
+TEND_COOLDOWN = 3                     # tending helps at most once every few days - then it just needs time
 TEAMWORK_WINDOW = 6                   # days within which a second farmer counts as "working together"
 
 # ---- senses ----
@@ -20,12 +23,14 @@ HEARING_RADIUS = 8
 # ---- body & life ----
 HUNGER_PER_DAY = 1.5
 EAT_RELIEF = 40
-STARVE_DAMAGE = 4
+STARVE_DAMAGE = 2                     # health lost per day at hunger 100 (50 days to die)
+INSTINCT_EAT_AT = 75                  # agents carrying food eat by reflex at this hunger (no turn used)
+START_FOOD = 3                        # settlers arrive with a little food
 HUNGER_WARNING = 55
 BABY_DAYS = 5                         # newborns can't think or feed themselves; others must care for them
 ADULT_AGE = 10                        # child from BABY_DAYS, adult from ADULT_AGE (days since birth)
-OLD_AGE = 500
-OLD_AGE_DEATH_CHANCE = 0.015
+OLD_AGE = 600                         # elders from this age; actual lifespan grows with longevity (see models.py)
+OLD_AGE_DEATH_CHANCE = 0.005          # per day once past one's lifespan
 
 # ---- relationships & family ----
 LOVE_BOND = 50
