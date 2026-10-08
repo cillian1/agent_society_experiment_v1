@@ -3,14 +3,21 @@ import re
 from dataclasses import dataclass, field
 
 DIRS = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
-ACTIONS = ("move", "gather", "eat", "say", "give", "plant", "tend", "court", "procreate", "invent", "wait")
-VIEW_RADIUS = 5
+ACTIONS = ("move", "gather", "eat", "say", "give", "plant", "tend", "build", "court", "procreate", "invent", "wait")
+VIEW_RADIUS = 6
 SMELL_RADIUS = 10   # how far an agent can sense the nearest food
 HEARING_RADIUS = 8
-ADULT_AGE = 40          # turns before an agent can have children
+ADULT_AGE = 40          # days before an agent can have children
+OLD_AGE = 500           # days after which an agent may die of old age
 LOVE_BOND = 50          # mutual bond needed to have a child
+FRIEND_BOND = 25
 CHILD_FOOD_COST = 2     # each parent pays this much food
 CHILD_COOLDOWN = 50
+BUILD_COST = 2          # wood/stone needed per structure
+KEEP_RECENT = 25        # memory lines shown verbatim; older ones are folded into the summary
+COMPACT_AFTER = 20      # unsummarised old lines that trigger a summarisation
+DEFAULT_GOAL = ("Survive, make friends, and build a life and a society together with the others. "
+                "Nobody tells you what to do or who to be - decide for yourselves what matters.")
 
 
 @dataclass
@@ -31,9 +38,9 @@ class Traits:
 @dataclass
 class Agent:
     name: str
-    role: str
-    goal: str
     traits: Traits
+    role: str = ""            # no assigned role: agents invent and claim their own
+    goal: str = DEFAULT_GOAL
     skills: list[str] = field(default_factory=list)
     model: str | None = None  # per-agent Claude model override (None = society default)
     color: str = "#ffffff"
@@ -44,21 +51,26 @@ class Agent:
     health: float = 100.0
     food: int = 0             # food items carried
     seeds: int = 0
-    born: int = -999          # turn of birth (original agents are adults from the start)
+    wood: int = 0
+    stone: int = 0
+    born: int = -999          # turn of birth (age = tick - born); originals get a random age at spawn
     parents: list[str] = field(default_factory=list)
     children: list[str] = field(default_factory=list)
     bonds: dict[str, float] = field(default_factory=dict)  # how much this agent likes/loves others (0-100)
-    memory: list[str] = field(default_factory=list)        # long-term notes the agent chose to remember
+    log: list[str] = field(default_factory=list)           # lifelong memory: everything notable that happened to it
+    summary: str = ""                                      # compressed version of the oldest part of the log
+    sum_upto: int = 0                                      # log[:sum_upto] is covered by the summary
     pending: tuple | None = None                           # (partner, tick) of an outstanding procreate request
     last_child_tick: int = -999
     heart_tick: int = -99
     heard: list[str] = field(default_factory=list)      # messages not yet acted on
     history: list[dict] = field(default_factory=list)   # every thought + action so far
     last_say: str = ""
+    last_say_to: str = "all"
     last_say_tick: int = -99
     chat: list[tuple[str, str]] = field(default_factory=list)  # (speaker, text) conversation with the Human
 
-    # ---- family / love ----
+    # ---- family / age ----
     def age(self, tick: int) -> int:
         return tick - self.born
 
@@ -82,24 +94,32 @@ class Agent:
                 and max(abs(o.x - self.x), abs(o.y - self.y)) <= 2
                 and self.bonds.get(o.name, 0) >= LOVE_BOND and o.bonds.get(self.name, 0) >= LOVE_BOND]
 
+    # ---- prompts ----
     def system_prompt(self, others: list[str]) -> str:
         return (
             f"You are {self.name}, one of {len(others) + 1} agents living in a 2D tile world "
-            f"(the others: {', '.join(others) or 'nobody yet'}). You are building a society together, with no instructions "
-            "beyond your own goals - use your imagination: invent customs, names, tools, jobs, laws, friendships.\n"
-            f"Role: {self.role}\nGoal: {self.goal}\n"
-            f"Personality: {self.traits.describe()}\nSkills: {', '.join(self.skills) or 'none'}\n\n"
-            "World: g grass, . sand, ~ water (impassable), # rock (impassable), f wild food bush (slow to regrow), "
-            ", young plant, * ripe crop. North is up (y decreases), east is right. Uppercase letters are agents (you are @). "
-            "Hunger rises every turn; at 100 you take damage and can die. Eating food lowers hunger.\n"
+            f"(the others: {', '.join(others) or 'nobody yet'}). Nobody has a job or a role until they invent one; "
+            "nobody is anybody's family until children are born. You are free to do what you want: explore, "
+            "talk, make friends (or enemies), plan together, farm, build, invent customs, tools, jobs and laws. "
+            "Be creative and resourceful, and think about how to solve your problems in new ways. "
+            "Talking is valuable: answer people who speak to you, share what you know, ask questions, make deals. "
+            "You remember everything that has happened to you.\n"
+            f"Goal: {self.goal}\nPersonality: {self.traits.describe()}\n\n"
+            "World: g grass, . sand, ~ water (impassable), # rock (impassable), ^ tree (impassable), f wild food bush "
+            "(slow to regrow), , young plant, * ripe crop, & a structure someone built. North is up (y decreases), "
+            "east is right. Uppercase letters are agents (you are @). "
+            "Hunger rises every turn; at 100 you take damage and can starve. Eating food lowers hunger. "
+            "Life lasts roughly 500-700 days; one turn is one day.\n"
             "Each turn pick ONE action:\n"
             '  move    - {"direction": "north|south|east|west"}\n'
-            "  gather  - pick food from a bush / ripe crop on your tile or adjacent (bushes sometimes yield a seed)\n"
+            "  gather  - take from an adjacent/own-tile food bush or ripe crop (food, sometimes seeds), tree (wood) or rock (stone)\n"
             "  eat     - eat one carried food (hunger -40)\n"
-            '  say     - {"to": "<name, all, or Human>", "message": "..."} heard within 8 tiles\n'
+            '  say     - {"to": "<name or all>", "message": "..."} heard within 8 tiles; talk to people!\n'
             '  give    - {"to": "<name>"} hand one carried food to an adjacent agent\n'
             '  plant   - {"direction": "..."} put a carried seed into an adjacent grass tile\n'
-            "  tend    - work on a young plant within reach to help it grow\n"
+            "  tend    - work on a young plant within reach to help it grow (faster with a helper)\n"
+            f'  build   - {{"direction": "...", "title": "<what you build: house, wall, bridge, sign, anything>", "message": "<description or sign text>"}} '
+            f"costs {BUILD_COST} wood/stone; bridges/paths/floors can be walked on, everything else blocks. Water only takes bridges/docks.\n"
             '  court   - {"to": "<name>", "message": "..."} show affection to an agent within 3 tiles\n'
             f'  procreate - {{"to": "<name>", "baby_name": "..."}} both partners must choose it (needs mutual love >= {LOVE_BOND}, '
             f"adults, nearby, each pays {CHILD_FOOD_COST} food)\n"
@@ -107,20 +127,28 @@ class Agent:
             "  wait\n"
             "A human observer outside the world sometimes talks to you; you answer them directly and in character "
             "(that happens in a separate chat, so it does not use up your turn).\n"
-            "Reply ONLY with JSON; add an optional \"remember\" string for something worth keeping in long-term memory, e.g.\n"
-            '{"thought": "<1-2 sentences of private reasoning>", "action": "move", "direction": "east", "remember": "berries near the lake"}'
+            "Reply ONLY with JSON. Optional extra fields: \"remember\" (a note to your future self) and \"role\" "
+            "(claim or change your own role/title whenever you like), e.g.\n"
+            '{"thought": "<1-2 sentences of private reasoning>", "action": "say", "to": "Ada", "message": "Want to farm together?", "role": "farmer"}'
         )
 
     def observe(self, world, agents: list["Agent"], tick: int, ideas: list[str]) -> str:
         others = {(a.x, a.y): a.symbol for a in agents if a is not self}
         age = self.age(tick)
-        lines = [f"Turn {tick}. You are at ({self.x}, {self.y})."
-                 + ("" if self.adult(tick) else f" You are a child ({age} turns old); you become an adult at {ADULT_AGE}."),
-                 f"Hunger: {int(self.hunger)}/100. Health: {int(self.health)}/100. Food carried: {self.food}. Seeds: {self.seeds}.",
+        stage = "adult" if self.adult(tick) else f"child - you become an adult at {ADULT_AGE}"
+        lines = [f"Day {tick}. You are at ({self.x}, {self.y}). You are {age} days old ({stage}).",
+                 "Your role: " + (self.role or 'none yet - claim one by adding "role" to your reply, or stay free') + ".",
+                 f"Hunger: {int(self.hunger)}/100. Health: {int(self.health)}/100. Food carried: {self.food}. "
+                 f"Seeds: {self.seeds}. Wood: {self.wood}. Stone: {self.stone}.",
                  f"Your surroundings (@ = you):\n{world.view(self.x, self.y, VIEW_RADIUS, others)}"]
-        near = [f"{a.name} [{a.symbol}] dx={a.x - self.x} dy={a.y - self.y}" for a in agents
+        near = [f"{a.name} [{a.symbol}] dx={a.x - self.x} dy={a.y - self.y}" + (f", role: {a.role}" if a.role else "")
+                + f", {a.age(tick)} days old" for a in agents
                 if a is not self and max(abs(a.x - self.x), abs(a.y - self.y)) <= VIEW_RADIUS]
         lines.append("Agents in view: " + ("; ".join(near) or "none"))
+        built = [f"{s['kind']} at dx={dx} dy={dy}" + (f' ("{s["text"]}")' if s["text"] else "") + f" built by {s['by']}"
+                 for dx, dy, s in world.structures_near(self.x, self.y, VIEW_RADIUS)][:6]
+        if built:
+            lines.append("Structures in view: " + "; ".join(built))
         food = world.food_near(self.x, self.y, SMELL_RADIUS)
         if food:
             fx, fy = food[0]
@@ -128,25 +156,48 @@ class Agent:
         else:
             lines.append("Nearest food: none sensed")
         lines.append(f"Food within reach to gather: {'yes' if world.food_near(self.x, self.y, 1) else 'no'}")
+        mats = [o for o in world.gather_options(self.x, self.y) if world.tile(*o) in ("tree", "rock")]
+        lines.append(f"Materials (trees/rocks) within reach: {len(mats)}")
         lines.append(f"Young plants within reach to tend: {len(world.plants_near(self.x, self.y, 1))}")
         feelings = sorted(((b, n) for n, b in self.bonds.items() if b >= 10), reverse=True)
         if feelings:
             lines.append("Your feelings toward others: " + ", ".join(
-                f"{n} {int(b)}" + (" (in love)" if b >= LOVE_BOND else "") for b, n in feelings))
+                f"{n} {int(b)}" + (" (in love)" if b >= LOVE_BOND else " (friend)" if b >= FRIEND_BOND else "")
+                for b, n in feelings))
         partners = self.child_partners(agents, tick)
         if partners:
             lines.append("You could have a child right now with: " + ", ".join(partners))
         if self.parents or self.children:
             lines.append(f"Family - parents: {', '.join(self.parents) or 'none'}; children: {', '.join(self.children) or 'none'}")
-        if self.memory:
-            lines.append("Your long-term memory:\n" + "\n".join("- " + m for m in self.memory[-10:]))
+        if self.summary:
+            lines.append("What you remember of your earlier life (summary):\n" + self.summary)
+        if self.log[self.sum_upto:]:
+            lines.append("Your recent memories (oldest first):\n" + "\n".join(
+                "- " + m for m in self.log[max(self.sum_upto, len(self.log) - KEEP_RECENT - COMPACT_AFTER):]))
         if ideas:
             lines.append("Ideas invented by the society so far:\n" + "\n".join("- " + i for i in ideas))
-        lines.append("Messages heard:\n" + ("\n".join(self.heard) or "(none)"))
+        lines.append("Messages heard this turn:\n" + ("\n".join(self.heard) or "(none)"))
         recent = [f"t{h['tick']}: {h['action']} -> {h['result']}" for h in self.history[-4:]]
-        lines.append("Your recent actions:\n" + ("\n".join(recent) or "(none yet)"))
+        lines.append("Your last few actions:\n" + ("\n".join(recent) or "(none yet)"))
         return "\n".join(lines) + "\n\nWhat do you do?"
 
+    # ---- memory ----
+    def needs_compaction(self) -> bool:
+        return len(self.log) - self.sum_upto > KEEP_RECENT + COMPACT_AFTER
+
+    def compact(self, llm, model: str | None = None):
+        """Fold the oldest unsummarised memories into the running summary (keeps prompts small, loses nothing)."""
+        upto = len(self.log) - KEEP_RECENT
+        old = self.log[self.sum_upto:upto]
+        prompt = ("SUMMARIZE_MEMORIES\nYou are keeping the memory of a person named " + self.name + ".\n"
+                  f"Current summary of their earlier life:\n{self.summary or '(none)'}\n\nNew memories to fold in:\n"
+                  + "\n".join(old) + "\n\nWrite the updated summary in the first person, under 200 words. Keep names, "
+                  "relationships, promises, places, inventions and anything important; drop trivia.")
+        text = llm.complete("You write concise, faithful memory summaries.", prompt, model=model).strip()
+        if text:
+            self.summary, self.sum_upto = text, upto
+
+    # ---- decisions ----
     def decide(self, llm, prompt: str, others: list[str]) -> dict:
         raw = llm.complete(self.system_prompt(others), prompt, model=self.model)
         return self.parse(raw, others)
@@ -185,9 +236,7 @@ class Agent:
         to = data.get("to", "all")
         if to not in ("all", "Human") and to not in others:
             to = "all"
-        return {"thought": str(data.get("thought") or raw[:200]).strip(), "action": action,
-                "direction": data.get("direction"), "to": to,
-                "message": str(data.get("message") or "").strip(),
-                "title": str(data.get("title") or "").strip(),
-                "baby_name": str(data.get("baby_name") or "").strip(),
-                "remember": str(data.get("remember") or "").strip()}
+        s = lambda k: str(data.get(k) or "").strip()
+        return {"thought": s("thought") or raw[:200].strip(), "action": action,
+                "direction": data.get("direction"), "to": to, "message": s("message"), "title": s("title"),
+                "baby_name": s("baby_name"), "remember": s("remember"), "role": s("role")}

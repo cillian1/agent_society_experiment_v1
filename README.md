@@ -10,15 +10,20 @@ python run.py --ticks 10         # headless: prints each agent's thoughts/action
 ```
 
 ## The world
-A procedurally generated 40x26 tile map (`society/world.py`): grass, sand, water and rock (the last two impassable),
+A procedurally generated 64x40 tile map (`society/world.py`): grass, sand, water, rock and forest (the last three impassable; trees give wood, rocks stone),
 plus berry-bush **food** tiles that regrow 40 turns after being picked. Pass `--seed N` for a repeatable map.
 
 ## The agents
-Six agents (Ada/Leader, Brix/Builder, Cleo/Explorer, Dov/Trader, Eli/Skeptic, Fenn/Mediator on `claude-opus-5-5`)
-with roles, goals, skills and Big-Five traits (`society/society.py`). Each turn an agent sees an 11x11 ASCII window
-of the map, its hunger, nearby agents and messages, then returns a private *thought* plus one action:
-`move`, `gather`, `eat`, `say` (heard within 8 tiles), `give` (food to an adjacent agent) or `wait`.
-Pass `--agents my.json` to define your own agents (name, role, goal, traits, skills, model).
+Six settlers (Ada, Brix, Cleo, Dov, Eli, Fenn) start with **nothing but a personality** (Big-Five traits), a random adult age,
+and no roles, no goals beyond "survive and build a society", and no family. They invent their own roles (any agent can add
+`"role": "..."` to a reply), talk, make friends, farm, build, invent customs and have children.
+Each turn an agent sees a 13x13 ASCII window of the map, its stats, nearby agents, structures, feelings, ideas and its memory,
+then returns a private *thought* plus one action: `move`, `gather` (food/wood/stone), `eat`, `say`, `give`, `plant`, `tend`,
+`build` (anything: houses, signs, bridges... costs 2 wood/stone), `court`, `procreate`, `invent` or `wait`.
+**They remember everything:** every notable event goes into a lifelong log; the newest ~25-45 lines are shown verbatim and older
+ones are folded into a running summary by a cheap Haiku call, so nothing is lost but prompts stay small.
+Ages are in days (1 turn = 1 day): adult at 40, elders may die of old age after 500.
+Pass `--agents my.json` to define your own agents (name, traits, optional goal/role/model).
 
 ## The hub
 Watch agents move on the map, with speech bubbles and a world feed. Click an agent (on the map or in the list)

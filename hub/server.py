@@ -44,6 +44,9 @@ def serve(society, host: str, port: int, interval: float):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif url.path == "/favicon.ico":
+                self.send_response(204)
+                self.end_headers()
             elif url.path == "/api/world":
                 self._json(society.world_data())
             elif url.path == "/api/state":

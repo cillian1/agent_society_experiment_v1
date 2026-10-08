@@ -6,8 +6,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from .agent import (ADULT_AGE, CHILD_COOLDOWN, CHILD_FOOD_COST, DIRS, HEARING_RADIUS, LOVE_BOND,
-                    Agent, Traits)
+from .agent import (ADULT_AGE, BUILD_COST, CHILD_COOLDOWN, CHILD_FOOD_COST, DIRS, HEARING_RADIUS, LOVE_BOND,
+                    OLD_AGE, Agent, Traits)
 from .world import GRASS, GROW_NEEDED, World
 
 PALETTE = ["#ff6b6b", "#ffd93d", "#6bcB77", "#4d96ff", "#c77dff", "#ff9f45", "#2ec4b6", "#f15bb5"]
@@ -18,28 +18,24 @@ BABY_NAMES = ["Nova", "Pip", "Juno", "Kit", "Rue", "Sol", "Tove", "Wren", "Zed",
 HUNGER_PER_TICK = 1.5
 EAT_RELIEF = 40
 STARVE_DAMAGE = 4
-MAX_IDEAS_IN_PROMPT = 6
+MAX_IDEAS_IN_PROMPT = 10
+OLD_AGE_DEATH_CHANCE = 0.015
 
 
 def default_agents() -> list[Agent]:
+    """Six settlers with different personalities and nothing else: no roles, no goals, no family."""
     return [
-        Agent("Ada", "Leader", "Organise the group and keep everyone working toward a shared plan.",
-              Traits(0.6, 0.8, 0.9, 0.6, 0.2), ["planning", "persuasion"], model=HAIKU),
-        Agent("Brix", "Builder", "Stay near the group's food and find ways to make it more reliable.",
-              Traits(0.4, 0.9, 0.4, 0.5, 0.3), ["construction", "engineering"], model=HAIKU),
-        Agent("Cleo", "Explorer", "Discover new areas of the map and report what you find.",
-              Traits(0.95, 0.3, 0.7, 0.6, 0.4), ["scouting", "mapping"], model=HAIKU),
-        Agent("Dov", "Trader", "Accumulate food through deals; trade for advantage.",
-              Traits(0.5, 0.6, 0.7, 0.2, 0.5), ["negotiation", "accounting"], model=HAIKU),
-        Agent("Eli", "Skeptic", "Question plans, find flaws, and protect the group from bad decisions.",
-              Traits(0.7, 0.7, 0.3, 0.2, 0.7), ["critical thinking", "history"], model=HAIKU),
-        Agent("Fenn", "Mediator", "Resolve conflicts, find common ground, and steer the group toward long-term wellbeing.",
-              Traits(0.85, 0.7, 0.5, 0.9, 0.2), ["diplomacy", "ethics", "synthesis"], model=OPUS),
+        Agent("Ada", Traits(0.6, 0.8, 0.9, 0.6, 0.2), model=HAIKU),
+        Agent("Brix", Traits(0.4, 0.9, 0.4, 0.5, 0.3), model=HAIKU),
+        Agent("Cleo", Traits(0.95, 0.3, 0.7, 0.6, 0.4), model=HAIKU),
+        Agent("Dov", Traits(0.5, 0.6, 0.7, 0.2, 0.5), model=HAIKU),
+        Agent("Eli", Traits(0.7, 0.7, 0.3, 0.2, 0.7), model=HAIKU),
+        Agent("Fenn", Traits(0.85, 0.7, 0.5, 0.9, 0.2), model=OPUS),
     ]
 
 
 def load_agents(path: str) -> list[Agent]:
-    """Load agents from a JSON list of {name, role, goal, traits{...}, skills[], model}."""
+    """Load agents from a JSON list of {name, traits{...}, goal?, role?, model?}."""
     out = []
     for d in json.loads(Path(path).read_text()):
         d["traits"] = Traits(**d.get("traits", {}))
@@ -65,6 +61,7 @@ class Society:
         self.events: list[dict] = []
         self.inventions: list[dict] = []
         self.chat: list[dict] = []   # conversation between the human and the agents
+        self.talk: list[dict] = []   # conversations among the agents themselves
         self.lock = threading.RLock()
         self._spawn()
 
@@ -72,12 +69,14 @@ class Society:
         cx, cy = self.world.width // 2, self.world.height // 2
         spots = sorted(((x, y) for y in range(self.world.height) for x in range(self.world.width)
                         if self.world.walkable(x, y)),
-                       key=lambda p: abs(p[0] - cx) + abs(p[1] - cy) + self.rng.random() * 6)
+                       key=lambda p: abs(p[0] - cx) + abs(p[1] - cy) + self.rng.random() * 14)
         for i, (agent, (x, y)) in enumerate(zip(self.agents.values(), spots)):
             agent.x, agent.y = x, y
             if agent.color == "#ffffff":
                 agent.color = PALETTE[i % len(PALETTE)]
             agent.symbol = self._symbol_for(agent.name)
+            if agent.born == -999:                      # original settlers start as adults of varied age
+                agent.born = -self.rng.randint(60, 140)
 
     def _symbol_for(self, name: str) -> str:
         used = {a.symbol for a in self.agents.values()} | {d["agent"].symbol for d in self.dead.values()}
@@ -100,8 +99,18 @@ class Society:
             heard_by = {a.name: list(a.heard) for a in agents}
             for a in agents:
                 a.heard = []
+        def work(job):
+            a, prompt, others = job
+            act = a.decide(self.llm, prompt, others)
+            if a.needs_compaction():      # fold old memories into the summary with a cheap model
+                try:
+                    a.compact(self.llm, HAIKU)
+                except Exception as e:
+                    print(f"memory compaction failed for {a.name}: {e}")
+            return act
+
         with ThreadPoolExecutor(max_workers=len(jobs)) as pool:  # LLM calls run outside the lock
-            acts = list(pool.map(lambda j: j[0].decide(self.llm, j[1], j[2]), jobs))
+            acts = list(pool.map(work, jobs))
         with self.lock:
             self.world.update(tick)
             order = list(zip(agents, acts))
@@ -121,10 +130,16 @@ class Society:
                 if agent.health <= 0:
                     self._die(agent, tick, "starvation")
                     continue
+                if agent.age(tick) >= OLD_AGE and self.rng.random() < OLD_AGE_DEATH_CHANCE:
+                    self._die(agent, tick, "old age")
+                    continue
                 result = self._apply(agent, act, tick)
+                if act["role"] and act["role"][:40] != agent.role:
+                    agent.role = act["role"][:40]
+                    self._event(tick, agent, f'took on a new role: "{agent.role}"', role=True)
+                    self._note(agent, tick, f'I decided my role is "{agent.role}".')
                 if act["remember"]:
-                    agent.memory.append(act["remember"][:200])
-                    del agent.memory[:-10]
+                    self._note(agent, tick, "(note to self) " + act["remember"][:200])
                 agent.history.append({"tick": tick, "x": agent.x, "y": agent.y, "hunger": int(agent.hunger),
                                       "thought": act["thought"], "action": act["action"], "result": result,
                                       "heard": heard_by[agent.name]})
@@ -137,6 +152,12 @@ class Society:
         self._event(tick, a, f"died of {cause} at ({a.x}, {a.y})")
         for o in self.agents.values():
             o.heard.append(f"{a.name} has died ({cause}).")
+            self._note(o, tick, f"{a.name} died of {cause}" + (" - my own child." if a.name in o.children else "."))
+
+    @staticmethod
+    def _note(a: Agent, tick: int, text: str):
+        """Everything notable goes into the agent's lifelong memory log."""
+        a.log.append(f"t{tick}: {text[:260]}")
 
     def _event(self, tick, agent, text, **extra):
         self.events.append({"tick": tick, "agent": agent.name, "text": text, "color": agent.color, **extra})
@@ -165,17 +186,16 @@ class Society:
             a.x, a.y = nx, ny
             return f"moved {act['direction']} to ({nx}, {ny})"
         if kind == "gather":
-            for fx, fy in w.food_near(a.x, a.y, 1):
+            for fx, fy in w.gather_options(a.x, a.y):
                 got = w.harvest(fx, fy, tick)
                 if got:
-                    food, seeds, tile = got
-                    a.food += food
-                    a.seeds += seeds
-                    what = "a ripe crop" if tile == "crop" else "a wild bush"
-                    msg = f"harvested {what} at ({fx}, {fy}): +{food} food" + (f", +{seeds} seed" if seeds else "")
-                    self._event(tick, a, msg)
+                    a.food += got["food"]; a.seeds += got["seeds"]; a.wood += got["wood"]; a.stone += got["stone"]
+                    gains = ", ".join(f"+{got[k]} {k}" for k in ("food", "seeds", "wood", "stone") if got[k])
+                    msg = f"took from {got['what']} at ({fx}, {fy}): {gains}"
+                    if got["food"]:
+                        self._event(tick, a, msg)
                     return msg
-            return "no food within reach"
+            return "nothing to gather within reach"
         if kind == "eat":
             if a.food <= 0:
                 return "no food to eat"
@@ -194,8 +214,13 @@ class Society:
                 if act["to"] == o.name:
                     self._bond(o, a, 2)
                     self._bond(a, o, 1)
-            a.last_say, a.last_say_tick = act["message"], tick
-            self._event(tick, a, f'to {act["to"]}: "{act["message"]}"')
+            a.last_say, a.last_say_to, a.last_say_tick = act["message"], act["to"], tick
+            self._note(a, tick, f'I said to {act["to"]}: "{act["message"]}"')
+            for o in targets:
+                self._note(o, tick, f'{a.name} said to {"everyone nearby" if act["to"] == "all" else "me"}: "{act["message"]}"')
+            self.talk.append({"tick": tick, "from": a.name, "to": act["to"], "text": act["message"], "color": a.color})
+            del self.talk[:-150]
+            self._event(tick, a, f'to {act["to"]}: "{act["message"]}"', talk=True)
             return f'said "{act["message"]}" to {act["to"]} ({len(targets)} heard)'
         if kind == "give":
             o = self.agents.get(act["to"])
@@ -208,6 +233,8 @@ class Society:
             self._bond(o, a, 10)
             self._bond(a, o, 3)
             o.heard.append(f"{a.name} gave you one food.")
+            self._note(a, tick, f"I gave food to {o.name}.")
+            self._note(o, tick, f"{a.name} gave me food.")
             self._event(tick, a, f"gave food to {o.name}")
             return f"gave food to {o.name}"
         if kind == "plant":
@@ -219,6 +246,7 @@ class Society:
                 if not self._occupied(x, y) and w.plant(x, y):
                     a.seeds -= 1
                     self._event(tick, a, f"planted a seed at ({x}, {y})")
+                    self._note(a, tick, f"I planted a seed at ({x}, {y}).")
                     return f"planted a seed at ({x}, {y}); it needs tending to ripen"
             return "nowhere to plant: needs an empty, adjacent grass tile"
         if kind == "tend":
@@ -234,11 +262,35 @@ class Society:
                         self._bond(a, self.agents[n], 1)
                         self._bond(self.agents[n], a, 1)
                 self._event(tick, a, f"and {', '.join(partners)} worked together on the plant at ({x}, {y})")
+                self._note(a, tick, f"I farmed together with {', '.join(partners)} at ({x}, {y}).")
             if ripe:
                 self._event(tick, a, f"the plant at ({x}, {y}) is ripe!")
             return (f"tended the plant at ({x}, {y}): growth {min(growth, GROW_NEEDED):.0f}/{GROW_NEEDED:.0f}"
                     + (f" - teamwork with {', '.join(partners)} doubled the effect!" if partners else "")
                     + (" It is now ripe!" if ripe else ""))
+        if kind == "build":
+            if a.wood + a.stone < BUILD_COST:
+                return f"need {BUILD_COST} wood/stone to build (you have {a.wood} wood, {a.stone} stone)"
+            title = act["title"] or "structure"
+            spots = [DIRS[act["direction"]]] if act["direction"] in DIRS else list(DIRS.values())
+            why = "no adjacent tile given"
+            for dx, dy in spots:
+                x, y = a.x + dx, a.y + dy
+                if self._occupied(x, y):
+                    why = "an agent is standing there"
+                    continue
+                ok, why = w.build(x, y, title, act["message"], a.name, tick)
+                if ok:
+                    use_w = min(a.wood, BUILD_COST)
+                    a.wood -= use_w
+                    a.stone -= BUILD_COST - use_w
+                    self._event(tick, a, f'built "{title}" at ({x}, {y})' + (f': {act["message"]}' if act["message"] else ""), build=True)
+                    for o in self.agents.values():
+                        if o is not a and max(abs(o.x - x), abs(o.y - y)) <= 8:
+                            self._note(o, tick, f'{a.name} built a "{title}" at ({x}, {y}).')
+                    self._note(a, tick, f'I built a "{title}" at ({x}, {y}).')
+                    return f'built a {title} at ({x}, {y})'
+            return f"couldn't build: {why}"
         if kind == "court":
             o = self.agents.get(act["to"])
             if not o or o is a or max(abs(o.x - a.x), abs(o.y - a.y)) > 3:
@@ -247,6 +299,8 @@ class Society:
             self._bond(a, o, 3)
             a.heart_tick = o.heart_tick = tick
             o.heard.append(f'{a.name} is courting you' + (f': "{act["message"]}"' if act["message"] else "."))
+            self._note(a, tick, f"I courted {o.name}.")
+            self._note(o, tick, f'{a.name} courted me' + (f': "{act["message"]}"' if act["message"] else "."))
             self._event(tick, a, f"is courting {o.name}" + (f': "{act["message"]}"' if act["message"] else ""), heart=True)
             return f"courted {o.name} (their feelings toward you: {int(o.bonds.get(a.name, 0))})"
         if kind == "procreate":
@@ -258,6 +312,9 @@ class Society:
                     "text": act["message"] or act["title"]}
             self.inventions.append(idea)
             self._event(tick, a, f'invented "{idea["title"]}": {idea["text"]}', idea=True)
+            for o in self.agents.values():
+                self._note(o, tick, f'{a.name} proposed the idea "{idea["title"]}": {idea["text"]}' if o is not a
+                           else f'I proposed the idea "{idea["title"]}": {idea["text"]}')
             return f'invented "{idea["title"]}"'
         return "waited"
 
@@ -305,6 +362,9 @@ class Society:
         for o in self.agents.values():
             if o is not baby:
                 o.heard.append(f"{a.name} and {b.name} had a baby named {baby.name}.")
+                self._note(o, tick, f"{a.name} and {b.name} had a baby, {baby.name}." if o not in (a, b)
+                           else f"{a.name if o is b else b.name} and I had a baby, {baby.name}!")
+        self._note(baby, tick, f"I was born to {a.name} and {b.name}.")
         return f"had a baby with {b.name}: {baby.name}"
 
     def _make_baby(self, a: Agent, b: Agent, spot, name: str, tick: int) -> Agent:
@@ -315,8 +375,7 @@ class Society:
             name = self.rng.choice(free) if free else f"Baby{len(taken)}"
         mix = lambda x, y: min(1.0, max(0.0, (x + y) / 2 + self.rng.gauss(0, 0.1)))
         traits = Traits(**{k: mix(getattr(a.traits, k), getattr(b.traits, k)) for k in vars(a.traits)})
-        baby = Agent(name, "Child", "Grow up, learn from your parents and find your own place in society.",
-                     traits, skills=(a.skills[:1] + b.skills[:1]), model=HAIKU, color=_mix(a.color, b.color),
+        baby = Agent(name, traits, model=HAIKU, color=_mix(a.color, b.color),
                      x=spot[0], y=spot[1], hunger=10.0, born=tick, parents=[a.name, b.name],
                      bonds={a.name: 60.0, b.name: 60.0})
         baby.symbol = self._symbol_for(name)
@@ -366,7 +425,8 @@ class Society:
             if err is None:
                 a.chat += [("Human", message), ("You", text)]
                 del a.chat[:-16]
-                a.last_say, a.last_say_tick = text, self.tick
+                a.last_say, a.last_say_to, a.last_say_tick = text, "Human", self.tick
+                self._note(a, self.tick, f'The Human said to me: "{message}" and I answered: "{text}"')
                 self._event(self.tick, a, f'replied to You: "{text}"', reply=True)
             a.heard.append(f'The Human said to you: "{message}"' + (f' - you replied: "{text}"' if err is None else ""))
             a.history.append({"tick": self.tick, "x": a.x, "y": a.y, "hunger": int(a.hunger),
@@ -411,8 +471,9 @@ class Society:
             "name": a.name, "role": a.role, "goal": a.goal, "color": a.color, "symbol": a.symbol,
             "model": a.model, "tier": self._tier(a.model), "x": a.x, "y": a.y, "hunger": int(a.hunger),
             "health": int(a.health), "food": a.food, "seeds": a.seeds, "skills": a.skills,
-            "traits": vars(a.traits), "age": a.age(t) if a.born > -999 else None, "adult": a.adult(t),
-            "parents": a.parents, "children": a.children, "memory": a.memory[-10:],
+            "traits": vars(a.traits), "age": a.age(t), "adult": a.adult(t), "wood": a.wood, "stone": a.stone,
+            "parents": a.parents, "children": a.children, "log": a.log[-25:], "log_total": len(a.log),
+            "summary": a.summary, "say_to": a.last_say_to,
             "bonds": {k: int(v) for k, v in sorted(a.bonds.items(), key=lambda kv: -kv[1]) if v >= 1},
             "heart": t - a.heart_tick <= 3,
             "say": a.last_say if t - a.last_say_tick <= 3 else "",
@@ -428,9 +489,12 @@ class Society:
                          for d in self.dead.values()],
                 "events": self.events[-60:],
                 "chat": self.chat[-60:],
+                "talk": self.talk[-40:],
+                "structures": [{"x": x, **{k: v for k, v in st.items() if k != "under"}}
+                               | {"y": y} for (x, y), st in self.world.structures.items()],
                 "inventions": self.inventions[-30:],
                 "usage": self.llm.usage(),
-                "limits": {"max_agents": self.max_agents, "adult_age": ADULT_AGE, "love": LOVE_BOND},
+                "limits": {"max_agents": self.max_agents, "adult_age": ADULT_AGE, "love": LOVE_BOND, "old_age": OLD_AGE},
             }
 
     def world_data(self) -> dict:
