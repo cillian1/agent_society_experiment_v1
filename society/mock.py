@@ -38,10 +38,19 @@ class MockLLM(UsageMixin):
         m = re.search(r"Nearest food: dx=(-?\d+) dy=(-?\d+)", prompt)
         partner = re.search(r"have a child right now with: (\w+)", prompt)
         asked = re.search(r"Choose procreate with to=(\w+)", prompt)
-        near = re.search(r"Agents in view: (\w+) \[", prompt)
+        me = "woman" if "You are a woman" in prompt else "man"
+        mates = [n for n, sex in re.findall(r"(\w+) \[\w\] dx=-?\d+ dy=-?\d+, (woman|man)\b", prompt) if sex != me]
+        near = re.match(r"(\w+)", mates[0]) if mates else None
         if partner or asked:
             return json.dumps(dict(thought="We love each other; let's have a child.", action="procreate",
                                    to=(partner or asked).group(1), baby_name=rng.choice(["Tiko", "Mara", "Bo", "Lio"])))
+        baby = re.search(r"baby (\w+) is at dx=(-?\d+) dy=(-?\d+): hunger (\d+)", prompt)
+        if baby and int(baby.group(4)) >= 40 and carried and not (hunger > 70):
+            dx, dy = int(baby.group(2)), int(baby.group(3))
+            if max(abs(dx), abs(dy)) <= 1:
+                return json.dumps(dict(thought=f"{baby.group(1)} is hungry, I'll feed them.", action="care", to=baby.group(1)))
+            dirn = ("east" if dx > 0 else "west") if abs(dx) >= abs(dy) and dx else ("south" if dy > 0 else "north")
+            return json.dumps(dict(thought=f"I must get to baby {baby.group(1)}.", action="move", direction=dirn, steps=3))
         if carried and hunger > 45:
             d = dict(thought="I'm getting hungry, time to eat.", action="eat")
         elif reach and hunger > 20:

@@ -2,13 +2,14 @@
 import json
 import re
 
-from .config import (BUILD_COST, CHILD_FOOD_COST, COMPACT_AFTER, CRAFT_COST, FRIEND_BOND, HUNGER_WARNING,
-                     KEEP_RECENT, LOVE_BOND, MAX_ITEMS, MAX_STEPS, ORDER_MEMORY_DAYS, SMELL_RADIUS, VIEW_RADIUS)
+from .config import (ADULT_AGE, BABY_DAYS, BUILD_COST, CHILD_FOOD_COST, COMPACT_AFTER, CRAFT_COST, FRIEND_BOND,
+                     HUNGER_WARNING, KEEP_RECENT, LOVE_BOND, MAX_ITEMS, MAX_STEPS, ORDER_MEMORY_DAYS, PREGNANCY_DAYS,
+                     SMELL_RADIUS, VIEW_RADIUS)
 from .models import Agent
 
 DIRS = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
 ACTIONS = ("move", "gather", "eat", "say", "give", "plant", "tend", "build", "craft", "court", "procreate",
-           "invent", "wait")
+           "care", "invent", "wait")
 
 HUMAN_NOTES = {
     "leader": ("The Human is the founder and leader of your community, a voice from outside the world. When the Human tells "
@@ -30,7 +31,7 @@ def compass(dx: int, dy: int) -> str:
 # ---------------------------------------------------------------- prompts
 def system_prompt(a: Agent, others: list[str]) -> str:
     return (
-        f"You are {a.name}, one of {len(others) + 1} agents living in a 2D tile world "
+        f"You are {a.name}, a {a.word()}, one of {len(others) + 1} agents living in a 2D tile world "
         f"(the others: {', '.join(others) or 'nobody yet'}). Nobody has a job or a role until they invent one; "
         "nobody is anybody's family until children are born. You are free to do what you want: explore, "
         "talk, make friends (or enemies), plan together, farm, build, invent customs, tools, jobs and laws. "
@@ -62,8 +63,11 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         f"{CRAFT_COST} wood/stone; you carry it (max {MAX_ITEMS}). Objects matter: an axe/hatchet gets extra wood, a "
         "pickaxe/hammer extra stone, a hoe/shovel/rake speeds up plants, a fishing rod/net/spear catches fish from water.\n"
         '  court   - {"to": "<name>", "message": "..."} show affection to an agent within 3 tiles\n'
-        f'  procreate - {{"to": "<name>", "baby_name": "..."}} both partners must choose it (needs mutual love >= {LOVE_BOND}, '
-        f"adults, nearby, each pays {CHILD_FOOD_COST} food)\n"
+        f'  procreate - {{"to": "<name>", "baby_name": "..."}} a woman and a man who love each other (mutual love >= {LOVE_BOND}, '
+        f"adults, nearby, each pays {CHILD_FOOD_COST} food) both choose it; she is then pregnant for {PREGNANCY_DAYS} days\n"
+        f'  care    - {{"to": "<name>"}} feed (uses 1 of your food) and look after a baby next to you. Babies can\'t feed '
+        f"themselves for their first {BABY_DAYS} days and die if nobody cares for them; then they are children until "
+        f"day {ADULT_AGE}, then adults.\n"
         '  invent  - {"title": "...", "message": "describe your idea, custom, tool or law"} shared with the whole society\n'
         "  wait\n"
         + HUMAN_NOTES[a.authority] + " (Talking with the Human happens in a separate chat, so it does not use up your turn.)\n"
@@ -76,8 +80,9 @@ def system_prompt(a: Agent, others: list[str]) -> str:
 def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str]) -> str:
     """Everything the agent perceives and remembers this turn."""
     others = {(o.x, o.y): o.symbol for o in agents if o is not a}
-    stage = "adult" if a.adult(tick) else "child - you can't have children yet"
-    lines = [f"Day {tick}. You are at ({a.x}, {a.y}). You are {a.age(tick)} days old ({stage}).",
+    stage = {"child": f"a child - you become an adult at {ADULT_AGE} days", "adult": "an adult",
+             "elder": "an elder", "baby": "a baby"}[a.stage(tick)]
+    lines = [f"Day {tick}. You are at ({a.x}, {a.y}). You are a {a.word(tick)}, {a.age(tick)} days old ({stage}).",
              "Your role: " + (a.role or 'none yet - claim one by adding "role" to your reply, or stay free') + ".",
              f"Hunger: {int(a.hunger)}/100. Health: {int(a.health)}/100. Food carried: {a.food}. "
              f"Seeds: {a.seeds}. Wood: {a.wood}. Stone: {a.stone}.",
@@ -87,9 +92,19 @@ def observation(a: Agent, world, agents: list[Agent], tick: int, ideas: list[str
                      + ("EAT NOW: choose the eat action (you carry food)." if a.food else
                         "Find food first: gather from a bush/crop, fish if you can, or ask someone to give you some. "
                         "Everything else can wait."))
-    near = [f"{o.name} [{o.symbol}] dx={o.x - a.x} dy={o.y - a.y}" + (f", role: {o.role}" if o.role else "")
-            + f", {o.age(tick)} days old" for o in agents if o is not a and a.dist(o) <= VIEW_RADIUS]
+    near = [f"{o.name} [{o.symbol}] dx={o.x - a.x} dy={o.y - a.y}, {o.word(tick)}" + (f", role: {o.role}" if o.role else "")
+            + f", {o.age(tick)} days old" + {"baby": " (BABY)", "child": " (child)"}.get(o.stage(tick), "")
+            + (" (pregnant)" if o.pregnancy else "") for o in agents if o is not a and a.dist(o) <= VIEW_RADIUS]
     lines.append("Agents in view: " + ("; ".join(near) or "none"))
+    if a.pregnancy:
+        lines.append(f"You are PREGNANT by {a.pregnancy['father']}: the baby is due on day {a.pregnancy['due']} "
+                     f"(in {a.pregnancy['due'] - tick} days). Eat well and stay safe.")
+    for b in agents:                           # babies who need someone - your own wherever they are, others nearby
+        mine = a.name in b.parents
+        if b is not a and b.is_baby(tick) and (mine or a.dist(b) <= VIEW_RADIUS):
+            urgent = " - HUNGRY, feed them now!" if b.hunger >= 50 else ""
+            lines.append(f"{'Your' if mine else 'A'} baby {b.name} is at dx={b.x - a.x} dy={b.y - a.y}: hunger "
+                         f"{int(b.hunger)}/100, health {int(b.health)}/100{urgent} (stand next to them and use care)")
     built = [f"{s['kind']} at dx={dx} dy={dy}" + (f' ("{s["text"]}")' if s["text"] else "") + f" built by {s['by']}"
              for dx, dy, s in world.structures_near(a.x, a.y, VIEW_RADIUS)][:6]
     if built:

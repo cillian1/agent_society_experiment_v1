@@ -16,7 +16,9 @@ const store = {                       // per-browser conveniences only; the page
 const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n);
 const hungerColor = h => h > 70 ? 'var(--bad)' : h > 40 ? 'var(--warn)' : 'var(--good)';
 const TIER = { local: '🖥️', haiku: '🌱', sonnet: '⭐', opus: '👑', custom: '🔧' };
-const STAGE = { child: '👶', adult: '', elder: '🧓' };
+const STAGE = { baby: '🍼', child: '👶', adult: '', elder: '🧓' };
+const SEX = { female: '♀', male: '♂' };
+const extras = a => `${STAGE[a.stage] || ''}${a.pregnant ? '🤰' : ''}`;
 
 // ======================================================================= state
 const S = {
@@ -120,7 +122,7 @@ function pos(a) {
 }
 
 function drawAgent(a) {
-  const d = pos(a), px = d.x * T + T / 2, py = d.y * T + T / 2, r = (T / 2 - 3) * (a.adult ? 1 : .72);
+  const d = pos(a), px = d.x * T + T / 2, py = d.y * T + T / 2, r = (T / 2 - 3) * (a.stage === 'baby' ? .55 : a.adult ? 1 : .72);
   ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(px, py + r + 1, r * .9, r * .35, 0, 0, 7); ctx.fill();
   if (S.sel === a.name) { ctx.strokeStyle = '#ffd93d'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(px, py, r + 5, 0, 7); ctx.stroke(); }
   ctx.fillStyle = a.color; ctx.strokeStyle = '#111'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(px, py, r, 0, 7); ctx.fill(); ctx.stroke();
@@ -128,6 +130,8 @@ function drawAgent(a) {
   ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(px - 11, py - r - 9, 22, 5);             // hunger bar
   ctx.fillStyle = a.hunger > 70 ? '#e0525e' : a.hunger > 40 ? '#e0a252' : '#5cc46e'; ctx.fillRect(px - 10, py - r - 8, 20 * (1 - a.hunger / 100), 3);
   if (a.heart) { ctx.font = '15px system-ui'; ctx.fillText('❤️', px + r + 2, py - r - 12); }
+  if (a.pregnant) { ctx.font = '13px system-ui'; ctx.fillText('🤰', px + r + 3, py + 2); }
+  if (a.stage === 'baby') { ctx.font = '12px system-ui'; ctx.fillText('🍼', px + r + 3, py + 2); }
   if (a.slow) { ctx.font = '14px system-ui'; ctx.fillText('💭', px - r - 4, py - r - 10); }
   ctx.font = 'bold 11px system-ui';
   const tag = `${a.name} · ${a.age}`, nw = ctx.measureText(tag).width + 10;
@@ -136,7 +140,7 @@ function drawAgent(a) {
 }
 
 function drawBubble(a) {
-  const d = S.disp[a.name], px = d.x * T + T / 2, py = d.y * T + T / 2, r = (T / 2 - 3) * (a.adult ? 1 : .72);
+  const d = S.disp[a.name], px = d.x * T + T / 2, py = d.y * T + T / 2, r = (T / 2 - 3) * (a.stage === 'baby' ? .55 : a.adult ? 1 : .72);
   const tg = a.say_to && a.say_to !== 'all' && a.say_to !== 'Human' ? S.disp[a.say_to] : null;
   if (tg) { ctx.strokeStyle = a.color; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); ctx.globalAlpha = .8; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(tg.x * T + T / 2, tg.y * T + T / 2); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
   const label = `${a.name} → ${a.say_to === 'all' ? 'everyone' : a.say_to === 'Human' ? 'you' : a.say_to}`;
@@ -210,7 +214,7 @@ cv.addEventListener('mousemove', e => {
   const unseen = st.fog && st.fog[y][x] === '0';
   let html = `<div class="muted">(${x}, ${y}) · ${unseen ? 'Unexplored' : names[t]}</div>`;
   const a = agentAt(fx, fy, .8);
-  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${a.age} days old · hunger ${a.hunger} · ${a.food} food</div><div class="muted">${esc(a.doing)}</div>` + html;
+  if (a) html = `<b style="color:${a.color}">${esc(a.name)}</b> ${TIER[a.tier]} ${a.role ? '· ' + esc(a.role) : ''}${a.slow ? ' · 💭 still thinking' : ''}<div>${SEX[a.sex]} ${a.stage} ${extras(a)} · ${a.age} days old · hunger ${a.hunger} · ${a.food} food${a.pregnant ? ` · due day ${a.due}` : ''}</div><div class="muted">${esc(a.doing)}</div>` + html;
   const s = st.structures.find(q => q.x === x && q.y === y);
   if (s) html += `<div>${iconFor(s.kind)} <b>${esc(s.kind)}</b> by ${esc(s.by)}${s.text ? `<div class="muted">“${esc(s.text)}”</div>` : ''}</div>`;
   const g = st.dead.find(q => q.x === x && q.y === y);
@@ -272,7 +276,7 @@ function renderList(st) {
   $('list').innerHTML = rows.map(a => `
     <div class="person ${S.sel === a.name ? 'sel' : ''}" data-name="${esc(a.name)}">
       <div class="avatar" style="background:${a.color}">${esc(a.name[0])}</div>
-      <div><div class="name">${esc(a.name)} <span title="${a.tier}">${TIER[a.tier]}</span> ${STAGE[a.stage]}</div>
+      <div><div class="name">${esc(a.name)} <span class="muted" title="${a.sex}">${SEX[a.sex]}</span> <span title="${a.stage === 'baby' ? 'babies don\'t use a brain' : a.tier}">${a.stage === 'baby' ? '' : TIER[a.tier]}</span> ${extras(a)}</div>
         <div class="sub">${a.role ? esc(a.role) : '<i>no role yet</i>'} · ${esc(a.doing) || 'getting started'}</div></div>
       <div class="right">🎂 ${a.age}d<br>🍎 ${a.food}</div>
       <div class="bar" title="Hunger ${a.hunger}/100"><div style="width:${a.hunger}%;background:${hungerColor(a.hunger)}"></div></div>
@@ -326,8 +330,8 @@ function renderProfile() {
   }
   for (const b of $('pt').children) b.classList.toggle('on', b.dataset.k === S.ptab);
   $('ph').innerHTML = `<div class="avatar big" style="background:${a.color}">${esc(a.name[0])}</div>
-    <div><h2>${esc(a.name)} ${a.alive ? TIER[a.tier] : '🪦'}</h2>
-    <div class="muted">${a.role ? esc(a.role) : 'No role yet'} · ${a.age} days old · ${a.alive ? a.stage : `died of ${esc(a.cause)} on day ${a.died}`}</div></div>`;
+    <div><h2>${esc(a.name)} ${!a.alive ? '🪦' : a.stage === 'baby' ? '' : TIER[a.tier]}</h2>
+    <div class="muted">${SEX[a.sex]} ${a.adult ? (a.sex === 'female' ? 'woman' : 'man') : (a.sex === 'female' ? 'girl' : 'boy')} · ${a.role ? esc(a.role) : 'no role yet'} · ${a.age} days old · ${a.alive ? a.stage + ' ' + extras(a) : `died of ${esc(a.cause)} on day ${a.died}`}</div></div>`;
   $('pa').innerHTML = a.alive ? `<button class="btn" data-do="talk">💬 Talk</button><button class="btn" data-do="locate">📍 Find on map</button>
     <button class="btn" data-do="follow">${$('follow').checked ? '⏹ Stop following' : '👁 Follow'}</button>
     <button class="btn" data-gift="food" title="Give 3 food">🎁 🍎</button><button class="btn" data-gift="seeds" title="Give 3 seeds">🎁 🌱</button>
@@ -347,7 +351,10 @@ const meter = (label, v, color) => `<div class="meter"><span>${label}</span><div
 
 function overview(a) {
   const l = a.history.filter(h => h.action !== 'reply to Human').slice(-1)[0];
-  return `${meter('Hunger', a.hunger, hungerColor(a.hunger))}${meter('Health', a.health, a.health < 40 ? 'var(--bad)' : 'var(--good)')}
+  const notes = (a.pregnancy ? `<div class="card">🤰 Pregnant by <a href="#" data-goto="${esc(a.pregnancy.father)}">${esc(a.pregnancy.father)}</a> — the baby is due on day ${a.pregnancy.due}.</div>` : '')
+    + (a.stage === 'baby' ? `<div class="card">🍼 A baby: can't think or feed themselves yet, and stays with their mother. Others must <b>care</b> for them (or you can send food). A child from day 5, an adult from day 10.</div>` : '')
+    + (a.stage === 'child' ? '<div class="card">👶 A child: thinks and acts on their own, an adult from day 10.</div>' : '');
+  return notes + `${meter('Hunger', a.hunger, hungerColor(a.hunger))}${meter('Health', a.health, a.health < 40 ? 'var(--bad)' : 'var(--good)')}
     <div class="kv" style="margin-top:8px"><span>Carrying</span><span>🍎 ${a.food} food · 🌱 ${a.seeds} seeds · 🪵 ${a.wood} wood · 🪨 ${a.stone} stone</span>
     <span>Objects</span><span class="objs">${a.items.map(i => `<span class="obj" title="${esc(i.text)}">🔧 ${esc(i.name)}</span>`).join('') || '<span class="muted">none yet</span>'}</span>
     <span>Explored</span><span>${a.discoveries} tiles seen first</span>
@@ -441,9 +448,9 @@ $('auth').onchange = e => api.post('/api/control', { authority: e.target.value }
 
 // ======================================================================= world feed
 const FILTERS = { all: 'All', talk: '💬 Talk', life: '❤️ Life', making: '🔨 Making', ideas: '💡 Ideas', explore: '🧭 Exploring', survival: '🍎 Food' };
-const KIND_FILTER = { birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
+const KIND_FILTER = { care: 'life', birth: 'life', death: 'life', love: 'life', gift: 'life', build: 'making', craft: 'making', farm: 'making',
   idea: 'ideas', explore: 'explore', food: 'survival', role: 'life', brain: 'life' };
-const KIND_ICON = { birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
+const KIND_ICON = { care: '🍼', birth: '👶', death: '🪦', love: '❤️', gift: '🎁', build: '🏗️', craft: '🔧', farm: '🌾', idea: '💡', explore: '🧭', food: '🍎', role: '🎭', brain: '🧠', talk: '💬' };
 $('filters').innerHTML = Object.entries(FILTERS).map(([k, l]) => `<span class="chip ${k === 'all' ? 'on' : ''}" data-f="${k}">${l}</span>`).join('');
 $('filters').onclick = e => { const c = e.target.closest('.chip'); if (!c) return; S.filter = c.dataset.f; for (const x of $('filters').children) x.classList.toggle('on', x === c); renderFeed(S.st, true); };
 let feedKey = '';

@@ -22,7 +22,8 @@ HUNGER_PER_DAY = 1.5
 EAT_RELIEF = 40
 STARVE_DAMAGE = 4
 HUNGER_WARNING = 55
-ADULT_AGE = 40
+BABY_DAYS = 5                         # newborns can't think or feed themselves; others must care for them
+ADULT_AGE = 10                        # child from BABY_DAYS, adult from ADULT_AGE (days since birth)
 OLD_AGE = 500
 OLD_AGE_DEATH_CHANCE = 0.015
 
@@ -30,8 +31,13 @@ OLD_AGE_DEATH_CHANCE = 0.015
 LOVE_BOND = 50
 FRIEND_BOND = 25
 BOND_DECAY = 0.998
-CHILD_FOOD_COST = 2
+CHILD_FOOD_COST = 2                   # each parent pays this at conception
 CHILD_COOLDOWN = 50
+PREGNANCY_DAYS = 10
+BABY_START_HUNGER = 30
+BABY_HUNGER_PER_DAY = 20              # babies get hungry fast...
+BABY_STARVE_DAMAGE = 25               # ...and suffer quickly when nobody feeds them
+CARE_RELIEF = 50                      # hunger removed when someone feeds a baby
 DEFAULT_MAX_AGENTS = 14
 
 # ---- making things ----

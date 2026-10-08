@@ -1,8 +1,8 @@
 """Plain data: an agent's personality, body, possessions, relationships and memories."""
 from dataclasses import asdict, dataclass, field, fields
 
-from .config import (ADULT_AGE, CHILD_COOLDOWN, CHILD_FOOD_COST, COMPACT_AFTER, KEEP_RECENT, LOVE_BOND, OLD_AGE,
-                     TOOLS)
+from .config import (ADULT_AGE, BABY_DAYS, CHILD_COOLDOWN, CHILD_FOOD_COST, COMPACT_AFTER, KEEP_RECENT, LOVE_BOND,
+                     OLD_AGE, TOOLS)
 
 DEFAULT_GOAL = ("Survive, make friends, and build a life and a society together with the others. "
                 "Nobody assigns you a role - decide for yourselves what matters.")
@@ -27,6 +27,7 @@ class Traits:
 class Agent:
     name: str
     traits: Traits
+    sex: str = "female"                # "female" | "male" - a woman carries the baby
     role: str = ""                     # agents invent and claim their own roles
     goal: str = DEFAULT_GOAL
     model: str | None = None           # brain: "local", "local:<name>", or a Claude model id
@@ -49,6 +50,7 @@ class Agent:
     children: list[str] = field(default_factory=list)
     bonds: dict[str, float] = field(default_factory=dict)    # feelings toward others, 0-100
     pending: list | None = None                              # [partner, day] of an open request for a child
+    pregnancy: dict | None = None                            # {"father", "conceived", "due", "name"} while pregnant
     last_child_tick: int = -999
     # mind
     log: list[str] = field(default_factory=list)             # lifelong memory
@@ -75,21 +77,30 @@ class Agent:
     def adult(self, tick: int) -> bool:
         return self.age(tick) >= ADULT_AGE
 
+    def is_baby(self, tick: int) -> bool:
+        return self.age(tick) < BABY_DAYS
+
     def stage(self, tick: int) -> str:
-        return "child" if not self.adult(tick) else "elder" if self.age(tick) >= OLD_AGE else "adult"
+        age = self.age(tick)
+        return "baby" if age < BABY_DAYS else "child" if age < ADULT_AGE else "elder" if age >= OLD_AGE else "adult"
+
+    def word(self, tick: int | None = None) -> str:
+        young = tick is not None and not self.adult(tick)
+        return ("girl" if young else "woman") if self.sex == "female" else ("boy" if young else "man")
 
     def related(self, o: "Agent") -> bool:
         """Parent/child or siblings can't be partners."""
         return o.name in self.parents or self.name in o.parents or bool(set(self.parents) & set(o.parents))
 
     def ready_for_child(self, tick: int) -> bool:
-        return (self.adult(tick) and self.hunger < 85 and self.food >= CHILD_FOOD_COST
+        return (self.adult(tick) and self.hunger < 85 and self.food >= CHILD_FOOD_COST and not self.pregnancy
                 and tick - self.last_child_tick >= CHILD_COOLDOWN)
 
     def child_partners(self, agents: list["Agent"], tick: int) -> list[str]:
         if not self.ready_for_child(tick):
             return []
-        return [o.name for o in agents if o is not self and o.ready_for_child(tick) and not self.related(o)
+        return [o.name for o in agents if o is not self and o.sex != self.sex and o.ready_for_child(tick)
+                and not self.related(o)
                 and self.dist(o) <= 2
                 and self.bonds.get(o.name, 0) >= LOVE_BOND and o.bonds.get(self.name, 0) >= LOVE_BOND]
 

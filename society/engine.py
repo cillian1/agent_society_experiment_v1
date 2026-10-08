@@ -9,7 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import actions, mind
-from .config import (BOND_DECAY, DEFAULT_MAX_AGENTS, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
+from .config import (ADULT_AGE, PREGNANCY_DAYS, BABY_DAYS, BABY_HUNGER_PER_DAY, BABY_START_HUNGER, BABY_STARVE_DAMAGE, BOND_DECAY,
+                     DEFAULT_MAX_AGENTS, EAT_RELIEF, HAIKU, HUNGER_PER_DAY, LOCAL, MAX_EVENTS, MAX_IDEAS_IN_PROMPT,
                      MAX_STATS_POINTS, OLD_AGE, OLD_AGE_DEATH_CHANCE, OPUS, SONNET, STARVE_DAMAGE, TIERS, VIEW_RADIUS)
 from .models import Agent, Traits
 from .world import World
@@ -20,15 +21,15 @@ BABY_NAMES = ["Nova", "Pip", "Juno", "Kit", "Rue", "Sol", "Tove", "Wren", "Zed",
 
 
 def default_agents() -> list[Agent]:
-    """Six settlers with nothing but a personality: no roles, no goals beyond surviving, no family.
-    Two start on Haiku (the 'main characters'), the rest on a free local model."""
+    """Six settlers (three women, three men) with nothing but a personality: no roles, no goals beyond surviving,
+    no family. Everyone starts on the free local model; upgrade anyone from the hub."""
     return [
-        Agent("Ada", Traits(0.6, 0.8, 0.9, 0.6, 0.2), model=HAIKU),
-        Agent("Brix", Traits(0.4, 0.9, 0.4, 0.5, 0.3), model=LOCAL),
-        Agent("Cleo", Traits(0.95, 0.3, 0.7, 0.6, 0.4), model=LOCAL),
-        Agent("Dov", Traits(0.5, 0.6, 0.7, 0.2, 0.5), model=LOCAL),
-        Agent("Eli", Traits(0.7, 0.7, 0.3, 0.2, 0.7), model=LOCAL),
-        Agent("Fenn", Traits(0.85, 0.7, 0.5, 0.9, 0.2), model=HAIKU),
+        Agent("Ada", Traits(0.6, 0.8, 0.9, 0.6, 0.2), sex="female", model=LOCAL),
+        Agent("Brix", Traits(0.4, 0.9, 0.4, 0.5, 0.3), sex="male", model=LOCAL),
+        Agent("Cleo", Traits(0.95, 0.3, 0.7, 0.6, 0.4), sex="female", model=LOCAL),
+        Agent("Dov", Traits(0.5, 0.6, 0.7, 0.2, 0.5), sex="male", model=LOCAL),
+        Agent("Eli", Traits(0.7, 0.7, 0.3, 0.2, 0.7), sex="male", model=LOCAL),
+        Agent("Fenn", Traits(0.85, 0.7, 0.5, 0.9, 0.2), sex="female", model=LOCAL),
     ]
 
 
@@ -105,13 +106,20 @@ class Society:
             self.world.update(self.tick)
             for a in list(self.agents.values()):
                 a.authority = self.human_authority
-                self._live_a_day(a, self.tick)
+                if self._live_a_day(a, self.tick):
+                    self._grow(a, self.tick)
+            for a in list(self.agents.values()):
+                if a.pregnancy and self.tick >= a.pregnancy["due"]:
+                    self._give_birth(a, self.tick)
+            for a in list(self.agents.values()):
+                if a.is_baby(self.tick):
+                    self._carry_baby(a)
             return self.tick
 
     def prepare(self, a: Agent) -> dict | None:
         """What the agent perceives right now (consumes the messages it has heard)."""
         with self.lock:
-            if a.name not in self.agents:
+            if a.name not in self.agents or a.is_baby(self.tick):     # babies don't think (and cost nothing)
                 return None
             agents = list(self.agents.values())
             job = {"prompt": mind.observation(a, self.world, agents, self.tick, self._ideas()),
@@ -162,17 +170,21 @@ class Society:
 
     def _live_a_day(self, a: Agent, tick: int) -> bool:
         """Hunger, health, fading feelings, old age. False if the agent died."""
-        a.hunger = min(100.0, a.hunger + HUNGER_PER_DAY)
+        baby = a.is_baby(tick)
+        a.hunger = min(100.0, a.hunger + (BABY_HUNGER_PER_DAY if baby else HUNGER_PER_DAY))
+        if baby and a.food > 0 and a.hunger >= 40:                 # food handed to a baby gets eaten
+            a.food -= 1
+            a.hunger = max(0.0, a.hunger - EAT_RELIEF)
         for k in list(a.bonds):
             a.bonds[k] *= BOND_DECAY
             if a.bonds[k] < 1:
                 del a.bonds[k]
         if a.hunger >= 100:
-            a.health -= STARVE_DAMAGE
+            a.health -= BABY_STARVE_DAMAGE if baby else STARVE_DAMAGE
         elif a.hunger < 50:
             a.health = min(100.0, a.health + 1)
         if a.health <= 0:
-            self.die(a, tick, "starvation")
+            self.die(a, tick, "neglect - nobody fed them" if baby else "starvation")
             return False
         if a.age(tick) >= OLD_AGE and self.rng.random() < OLD_AGE_DEATH_CHANCE:
             self.die(a, tick, "old age")
@@ -231,30 +243,75 @@ class Society:
             a.remember(tick, f"I explored new land around ({a.x}, {a.y}): {found}. We have explored {pct}% of the world.")
             self.event(tick, a, f"explored new land near ({a.x}, {a.y}): {found} - {pct}% of the world known", "explore")
 
-    def make_baby(self, a: Agent, b: Agent, spot, name: str, tick: int) -> Agent:
+    def _grow(self, a: Agent, tick: int):
+        age = a.age(tick)
+        if age == BABY_DAYS:
+            self.event(tick, a, "is no longer a baby - now a child who can think and act on their own", "birth")
+            a.remember(tick, "I'm not a baby any more. I can walk, talk and look after myself now.")
+            a.heard.append("You have grown from a baby into a child: you can now think, move and act for yourself.")
+        elif age == ADULT_AGE:
+            self.event(tick, a, "has grown up and is now an adult", "birth")
+            a.remember(tick, "I have grown up - I'm an adult now.")
+            a.heard.append("You are now an adult.")
+
+    def pending_births(self) -> int:
+        return sum(1 for a in self.agents.values() if a.pregnancy)
+
+    def conceive(self, mother: Agent, father: Agent, name: str, tick: int):
+        mother.pregnancy = {"father": father.name, "conceived": tick, "due": tick + PREGNANCY_DAYS, "name": name}
+        mother.heart_tick = father.heart_tick = tick
+        for p, o in ((mother, father), (father, mother)):
+            p.remember(tick, f"{o.name} and I are expecting a baby! It is due on day {tick + PREGNANCY_DAYS}.")
+        for o in self.agents.values():
+            if o not in (mother, father):
+                o.heard.append(f"{mother.name} is pregnant by {father.name}.")
+        self.event(tick, mother, f"is pregnant by {father.name} - the baby is due on day {tick + PREGNANCY_DAYS}", "birth")
+
+    def _give_birth(self, mother: Agent, tick: int):
+        p, mother.pregnancy = mother.pregnancy, None
+        spot = self.free_spot_near(mother)
+        if not spot or len(self.agents) >= self.max_agents:
+            self.event(tick, mother, "lost the baby (there was no room for it)", "death")
+            mother.remember(tick, "I lost my baby. I am heartbroken.")
+            return
+        self.make_baby(mother, p["father"], spot, p.get("name", ""), tick)
+
+    def _carry_baby(self, baby: Agent):
+        """Babies stay right next to their mother (she carries them)."""
+        mother = self.agents.get(baby.parents[0]) if baby.parents else None
+        if mother and baby.dist(mother) > 1:
+            spot = self.free_spot_near(mother)
+            if spot:
+                baby.x, baby.y = spot
+
+    def make_baby(self, mother: Agent, father_name: str, spot, name: str, tick: int) -> Agent:
         taken = set(self.agents) | set(self.dead)
         if not name or name in taken:
             free = [n for n in BABY_NAMES if n not in taken]
             name = self.rng.choice(free) if free else f"Baby{len(taken)}"
+        father = self.agents.get(father_name) or (self.dead.get(father_name) or {}).get("agent") or mother
         mix = lambda x, y: min(1.0, max(0.0, (x + y) / 2 + self.rng.gauss(0, 0.1)))
-        traits = Traits(**{k: mix(getattr(a.traits, k), getattr(b.traits, k)) for k in vars(a.traits)})
-        baby = Agent(name, traits, model=self.baby_model, color=_mix(a.color, b.color), x=spot[0], y=spot[1],
-                     hunger=10.0, born=tick, parents=[a.name, b.name], bonds={a.name: 60.0, b.name: 60.0},
+        traits = Traits(**{k: mix(getattr(mother.traits, k), getattr(father.traits, k)) for k in vars(mother.traits)})
+        baby = Agent(name, traits, sex=self.rng.choice(["female", "male"]), model=self.baby_model,
+                     color=_mix(mother.color, father.color), x=spot[0], y=spot[1], hunger=BABY_START_HUNGER, born=tick,
+                     parents=[mother.name, father_name], bonds={mother.name: 60.0, father_name: 60.0},
                      authority=self.human_authority)
         baby.symbol = self._symbol_for(name)
-        baby.heard.append(f"You were just born to {a.name} and {b.name}.")
-        baby.remember(tick, f"I was born to {a.name} and {b.name}.")
+        baby.remember(tick, f"I was born to {mother.name} and {father_name}.")
         self.agents[name] = baby
-        for p in (a, b):
-            p.children.append(name)
-        a.heart_tick = b.heart_tick = tick
+        for p in (mother, father):
+            if p is not baby and name not in p.children:
+                p.children.append(name)
+        mother.heart_tick = tick
         for o in self.agents.values():
             if o is baby:
                 continue
-            o.heard.append(f"{a.name} and {b.name} had a baby named {name}.")
-            o.remember(tick, f"{a.name} and {b.name} had a baby, {name}." if o not in (a, b)
-                       else f"{b.name if o is a else a.name} and I had a baby, {name}!")
-        self.event(tick, a, f"and {b.name} had a baby: {name}!", "birth")
+            o.heard.append(f"{mother.name} gave birth to a baby {'girl' if baby.sex == 'female' else 'boy'} named {name}"
+                           f" (father: {father_name}). Babies can't feed themselves - use care to feed them.")
+            o.remember(tick, f"{mother.name} gave birth to {name}." if o.name not in (mother.name, father_name)
+                       else f"Our baby {name} was born!")
+        self.event(tick, mother, f"gave birth to {name}, a baby {'girl' if baby.sex == 'female' else 'boy'} "
+                                 f"(father: {father_name})", "birth")
         return baby
 
     def die(self, a: Agent, tick: int, cause: str):
@@ -319,6 +376,10 @@ class Society:
             del self.chat[:-150]
             ideas, alive = self._ideas(), list(self.agents.values())
             for a, slot in slots:
+                if a.is_baby(self.tick):               # babies can't talk (and don't use a brain)
+                    slot["text"], slot["pending"] = self.rng.choice(["*gurgles happily*", "*stares at you with big eyes*",
+                                                                     "*giggles*", "*yawns*"]), False
+                    continue
                 situation = mind.observation(a, self.world, alive, self.tick, ideas)
                 others = [n for n in self.agents if n != a.name]
                 threading.Thread(target=self._reply, daemon=True,
@@ -385,7 +446,7 @@ class Society:
     def to_dict(self) -> dict:
         with self.lock:
             return {
-                "version": 2, "seed": self.seed, "tick": self.tick, "max_agents": self.max_agents,
+                "version": 3, "seed": self.seed, "tick": self.tick, "max_agents": self.max_agents,
                 "baby_model": self.baby_model, "human_authority": self.human_authority,
                 "world": self.world.to_dict(),
                 "agents": [a.to_dict() for a in self.agents.values()],
@@ -396,6 +457,9 @@ class Society:
 
     @classmethod
     def from_dict(cls, d: dict, llm) -> "Society":
+        known = {"Ada": "female", "Cleo": "female", "Fenn": "female", "Brix": "male", "Dov": "male", "Eli": "male"}
+        for i, a in enumerate(d["agents"] + [x["agent"] for x in d.get("dead", [])]):
+            a.setdefault("sex", known.get(a["name"], "female" if i % 2 else "male"))   # saves from before sexes existed
         s = cls([Agent.from_dict(a) for a in d["agents"]], llm, World.from_dict(d["world"]), d.get("seed"),
                 d.get("max_agents", DEFAULT_MAX_AGENTS), d.get("baby_model", LOCAL), spawn=False)
         s.tick, s.human_authority = d["tick"], d.get("human_authority", "leader")

@@ -2,8 +2,8 @@
 string that the agent sees next turn. Register new actions with @action("name") - and describe them in mind.py."""
 import re
 
-from .config import (BUILD_COST, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN, GROW_NEEDED,
-                     HEARING_RADIUS, LOVE_BOND, MAX_ITEMS, MAX_STEPS)
+from .config import (BUILD_COST, CARE_RELIEF, CHILD_COOLDOWN, CHILD_FOOD_COST, CRAFT_COST, EAT_RELIEF, FISH_COOLDOWN,
+                     GROW_NEEDED, HEARING_RADIUS, LOVE_BOND, MAX_ITEMS, MAX_STEPS)
 from .mind import DIRS
 
 HANDLERS = {}
@@ -252,17 +252,46 @@ def invent(sim, a, act, tick):
     return f'invented "{idea["title"]}"'
 
 
+@action("care")
+def care(sim, a, act, tick):
+    """Feed and look after a baby (or anyone) next to you."""
+    o = sim.agents.get(act["to"])
+    if not o or o is a or a.dist(o) > 1:
+        babies = [b.name for b in sim.agents.values() if b.is_baby(tick) and a.dist(b) <= 1]
+        if not babies:
+            return "nobody next to you to care for"
+        o = sim.agents[babies[0]]
+    sim.bond(o, a, 6)
+    sim.bond(a, o, 4)
+    if a.food > 0 and o.hunger >= 20:
+        a.food -= 1
+        o.hunger = max(0.0, o.hunger - CARE_RELIEF)
+        what = f"fed {o.name} (their hunger is now {int(o.hunger)})"
+    else:
+        o.health = min(100.0, o.health + 5)
+        what = f"comforted {o.name}" + ("" if a.food else " (you had no food to feed them)")
+    a.remember(tick, f"I {what}.")
+    o.remember(tick, f"{a.name} took care of me.")
+    sim.event(tick, a, what, "care")
+    return what
+
+
 @action("procreate")
 def procreate(sim, a, act, tick):
     b = sim.agents.get(act["to"])
     if not b or b is a:
         return "no such partner"
-    if len(sim.agents) >= sim.max_agents:
+    if a.sex == b.sex:
+        return "a baby needs a woman and a man"
+    if len(sim.agents) + sim.pending_births() >= sim.max_agents:
         return "the world is at its population limit"
     if a.dist(b) > 2:
         return f"{b.name} is too far away"
     if a.related(b):
         return f"{b.name} is close family"
+    mother = a if a.sex == "female" else b
+    if mother.pregnancy:
+        return f"{mother.name} is already pregnant"
     for p in (a, b):
         if not p.adult(tick):
             return f"{p.name} is still a child"
@@ -280,13 +309,10 @@ def procreate(sim, a, act, tick):
         b.heard.append(f"{a.name} wants to have a child with you. Choose procreate with to={a.name} to agree.")
         a.heart_tick = tick
         return f"asked {b.name} to have a child; waiting for their consent"
-    spot = sim.free_spot_near(a) or sim.free_spot_near(b)
-    if not spot:
-        return "no room for a baby"
     for p in (a, b):
         p.food -= CHILD_FOOD_COST
         p.last_child_tick = tick
         p.pending = None
     name = re.sub(r"[^A-Za-z]", "", act["baby_name"])[:12].capitalize()
-    baby = sim.make_baby(a, b, spot, name, tick)
-    return f"had a baby with {b.name}: {baby.name}"
+    sim.conceive(mother, a if mother is b else b, name, tick)
+    return f"{mother.name} is now pregnant - the baby will be born in 10 days"

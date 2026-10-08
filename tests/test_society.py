@@ -67,6 +67,45 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(sim.agents["Ada"].orders[-1][1], "hello")
 
 
+class FamilyTests(unittest.TestCase):
+    def test_pregnancy_baby_child_adult(self):
+        from society.actions import apply
+        from society.mind import parse_action
+        sim = make()
+        ada, brix = sim.agents["Ada"], sim.agents["Brix"]
+        brix.x, brix.y = ada.x + 1, ada.y
+        sim.world.tiles[brix.y][brix.x] = "grass"
+        for p, o in ((ada, brix), (brix, ada)):
+            p.bonds[o.name], p.food = 80, 5
+        act = lambda who, to: apply(sim, who, parse_action(f'{{"action": "procreate", "to": "{to}", "baby_name": "Kiki"}}', [to]), sim.tick)
+        self.assertIn("waiting", act(ada, "Brix"))
+        self.assertIn("pregnant", act(brix, "Ada"))
+        self.assertEqual(ada.pregnancy["father"], "Brix")
+        for _ in range(10):
+            sim.begin_day()
+        kiki = sim.agents["Kiki"]
+        self.assertIsNone(ada.pregnancy)
+        self.assertEqual((kiki.parents, kiki.stage(sim.tick)), (["Ada", "Brix"], "baby"))
+        self.assertIsNone(sim.prepare(kiki))                       # babies don't think
+        self.assertLessEqual(kiki.dist(ada), 1)                      # carried by mum
+        ada.food = 3
+        self.assertIn("fed Kiki", apply(sim, ada, parse_action('{"action": "care", "to": "Kiki"}', ["Kiki"]), sim.tick))
+        for _ in range(5):
+            sim.begin_day()
+        self.assertEqual(kiki.stage(sim.tick), "child")
+        self.assertIsNotNone(sim.prepare(kiki))
+        for _ in range(5):
+            sim.begin_day()
+        self.assertEqual(kiki.stage(sim.tick), "adult")
+
+    def test_same_sex_cannot_conceive(self):
+        from society.actions import apply
+        from society.mind import parse_action
+        sim = make()
+        ada, cleo = sim.agents["Ada"], sim.agents["Cleo"]
+        self.assertIn("woman and a man", apply(sim, ada, parse_action('{"action": "procreate", "to": "Cleo"}', ["Cleo"]), 0))
+
+
 class SaveTests(unittest.TestCase):
     def test_round_trip_and_continue(self):
         sim = make(60)
