@@ -72,7 +72,7 @@ FUNCTIONS = {                         # what a building does, recognised from wo
     "workshop": (("workshop", "forge", "smithy", "workbench", "craft"),
                  "crafting within 2 tiles costs no materials"),
 }
-DEFAULT_COSTS = {                     # what familiar buildings take; new kinds get a blueprint from the Game Master
+DEFAULT_COSTS = {                     # what familiar buildings take; new kinds get a blueprint from Sol
     "home": {"wood": 3}, "storage": {"wood": 4, "stone": 1}, "fire": {"wood": 2, "stone": 1},
     "well": {"stone": 4, "wood": 1}, "workshop": {"wood": 3, "stone": 2}, "wall": {"stone": 2},
     "bridge": {"wood": 3}, None: {"wood": 1},
@@ -104,7 +104,7 @@ AUTOSAVE_EVERY = 25                   # days
 MAX_EVENTS = 300
 MAX_STATS_POINTS = 2000
 
-# ---- the Game Master: judges free-form attempts and turns ideas into real discoveries ----
+# ---- Sol as referee: judges free-form attempts and turns ideas into real discoveries ----
 DISCOVERY_COOLDOWN = 10               # days between discoveries by the same agent
 EFFECTS = {                           # what a discovery may do: key -> (meaning, max amount per discovery, max total)
     "harvest": ("+N extra food from every harvest", 1, 2),

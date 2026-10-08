@@ -90,7 +90,7 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         "  tend    - speed up a young plant within reach (helps once every few days; plants also grow on their own)\n"
         f'  build   - {{"direction": "...", "title": "<ANY building you think your community needs>", "message": "<what it is for>"}} '
         "decide for yourself what to build - the game tells you what it takes (known blueprints are listed below; a new "
-        "kind of building gets its own blueprint the first time someone tries). You can walk into or over what you build, "
+        "kind of building gets its own blueprint from Sol the first time someone tries). You can walk into or over what you build, "
         "except walls and fences. Water only takes bridges/docks. "
         "Buildings DO things: " + "; ".join(f"{words[0]}: {what}" for words, what in FUNCTIONS.values())
         + ". Don't build what already exists nearby - use it, or build something new.\n"
@@ -108,14 +108,15 @@ def system_prompt(a: Agent, others: list[str]) -> str:
         f"themselves for their first {BABY_DAYS} days and die if nobody cares for them; then they are children until "
         f"day {ADULT_AGE}, then adults.\n"
         '  attempt - {"what": "<ANYTHING you can imagine trying>"} e.g. tame a deer, dig a well, brew medicine from herbs, '
-        "build a boat, hold a harvest festival, start a school, smoke fish to preserve it, make a map. A fair game master "
+        "build a boat, hold a harvest festival, start a school, smoke fish to preserve it, make a map. Sol, your mentor, "
         "decides what happens - you may gain things, make objects or buildings, or make a DISCOVERY that changes the "
         "world for everyone. Anything is possible if it's plausible; ambitious ideas may need materials, help or skill.\n"
         '  invent  - {"title": "...", "message": "describe your idea, custom, tool or law"} shared with the whole society '
         "(a truly useful idea can become a discovery)\n"
         "  wait\n"
         + HUMAN_NOTES[a.authority] + " (Talking with the Human happens in a separate chat, so it does not use up your turn.)\n"
-        "Sol is a wise mentor who watches over your society and every few weeks gives everyone advice. Sol sees the "
+        "Sol is a wise mentor who watches over your society, judges what happens when someone attempts or invents "
+        "something, works out what new buildings take, and every few weeks gives everyone advice. Sol sees the "
         "bigger picture: take Sol's advice seriously.\n"
         "THINK IN PROJECTS, not single steps: with \"next\" you can line up to "
         f"{MAX_QUEUE} more actions that run automatically on the following days (you'll be interrupted if something "

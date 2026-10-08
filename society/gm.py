@@ -1,4 +1,4 @@
-"""The Game Master: an impartial referee model that judges anything an agent tries ('attempt') or invents, and
+"""Sol as referee (the 'game master'): an impartial judge that judges anything an agent tries ('attempt') or invents, and
 turns it into concrete, bounded changes to the world. Whatever it says is checked and clamped here, so a
 generous or confused referee can't break the simulation."""
 import json
@@ -36,7 +36,8 @@ def judge(sim, a, act: dict) -> dict | None:
     recent = a.history and sim.tick - max((d["tick"] for d in sim.discoveries if d["by"] == a.name), default=-999) < DISCOVERY_COOLDOWN
     effects = "\n".join(f'  "{k}": {v[0]} (amount up to {v[1]})' for k, v in EFFECTS.items())
     prompt = (f"GAME_MASTER\n{_context(sim, a)}\n\n{a.name} {kind}: \"{what[:400]}\"\n\n"
-              "You are the fair, imaginative game master of this world. Anything is possible if it is plausible for a "
+              "You are Sol, the wise mentor who also acts as the fair, imaginative referee of this world. Anything is "
+              "possible if it is plausible for a "
               "small stone-age society with these resources and abilities. Decide what happens. Reward creativity and "
               "effort; real progress usually needs materials, time, cooperation or skill. Failures can be interesting."
               f"\nA DISCOVERY permanently helps the whole society. Only grant one for a genuinely new, useful idea that "
@@ -49,8 +50,8 @@ def judge(sim, a, act: dict) -> dict | None:
               '"structure": {"kind": "...", "description": "..."}, '
               '"discovery": {"name": "...", "description": "...", "effect": "<one key above>", "amount": 1}, '
               '"hunger": 0, "health": 0}')
-    model = sim.gm_model
-    data = _json(sim.llm.complete("You are the game master of a society simulation. Be fair, vivid and concise.",
+    model = sim.sol_model
+    data = _json(sim.llm.complete("You are Sol, mentor and referee of a society simulation. Be fair, vivid and concise.",
                                   prompt, model=model))
     return data or None
 
@@ -64,13 +65,13 @@ def design(sim, a, kind: str, idea: str) -> dict | None:
                       for b in list(sim.blueprints.values())[-8:]) or "none yet"
     prompt = (f"GAME_MASTER_BLUEPRINT\n{_context(sim, a)}\n\n{a.name} wants to build a \"{kind[:60]}\""
               + (f" ({idea[:160]})" if idea else "") + ".\nKnown buildings and their costs: " + known + "\n"
-              "As the game master, design what it takes for a small stone-age society: materials (wood, stone, food; "
+              "As Sol, the referee of this world, design what it takes for a small stone-age society: materials (wood, stone, food; "
               f"0-{MAX_BUILD_COST} each - bigger or cleverer buildings cost more) and what it does. Pick the function "
               f"that fits best, or none if it is decorative or cultural:\n{funcs}\n"
               'Reply ONLY with JSON: {"cost": {"wood": 0, "stone": 0, "food": 0}, "function": "<key or none>", '
               '"description": "<what it is and does, one sentence>"}')
-    data = _json(sim.llm.complete("You are the game master of a society simulation. Be fair and concise.",
-                                  prompt, model=sim.gm_model))
+    data = _json(sim.llm.complete("You are Sol, mentor and referee of a society simulation. Be fair and concise.",
+                                  prompt, model=sim.sol_model))
     return data or None
 
 

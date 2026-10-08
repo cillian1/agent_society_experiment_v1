@@ -371,7 +371,7 @@ def court(sim, a, act, tick):
 
 @action("attempt")
 def attempt(sim, a, act, tick):
-    """Try anything at all - the Game Master decides what happens."""
+    """Try anything at all - Sol decides what happens."""
     from .gm import apply_outcome
     if not (act.get("what") or act.get("message") or act.get("title")):
         return "say what you want to try (what)"

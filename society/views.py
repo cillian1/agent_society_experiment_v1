@@ -32,7 +32,6 @@ def state(sim: Society, since_event: int = 0) -> dict:
             "inventions": sim.inventions[-40:],
             "blueprints": list(sim.blueprints.values()),
             "discoveries": [{**d, "meaning": EFFECTS[d["effect"]][0].replace("N", str(d["amount"]))} for d in sim.discoveries],
-            "gm_model": sim.gm_model,
             "sol": {"model": sim.sol_model, "last": sim.sol_last, "next_in": max(0, SOL_EVERY - (sim.tick - sim.sol_last)),
                     "log": sim.sol_log[-5:]},
             "structures": [{"x": x, "y": y, "kind": s["kind"], "text": s["text"], "by": s["by"], "walkable": s["walkable"],

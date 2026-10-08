@@ -480,7 +480,6 @@ async function send() {
 $('send').onclick = send;
 $('msg').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 $('auth').onchange = e => api.post('/api/control', { authority: e.target.value });
-$('gm').onchange = e => api.post('/api/control', { gm_model: e.target.value });
 $('solm').onchange = e => api.post('/api/control', { sol_model: e.target.value });
 $('discoveries').onclick = e => { const g = e.target.closest('[data-goto]'); if (g) select(g.dataset.goto); };
 
@@ -649,7 +648,6 @@ async function poll() {
       <span class="muted">${b.by ? 'designed by ' + esc(b.by) : ''}</span><div>${esc(b.description)}</div>
       <span class="eff" style="color:var(--text-2)">needs ${Object.entries(b.cost).map(([k, v]) => `${v} ${k}`).join(', ') || 'nothing'}</span></div>`).join('')
       : '<p class="muted small">No blueprints yet. The first time someone builds a new kind of building, its cost and purpose are worked out and shared here.</p>';
-    if (document.activeElement !== $('gm')) $('gm').value = { 'claude-haiku-5-5': 'haiku', 'claude-sonnet-5-5': 'sonnet', 'claude-opus-5-5': 'opus' }[st.gm_model] || (st.gm_model.startsWith('local:') ? 'smart' : 'local');
     if (S.tab === 'settings') renderUsage();
   } catch (e) { console.error(e); }
   polling = false;

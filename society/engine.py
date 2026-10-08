@@ -71,13 +71,12 @@ class Society:
         self.talk: list[dict] = []                 # agents <-> agents
         self.errors: list[dict] = []
         self.stats: list[dict] = []
-        self.discoveries: list[dict] = []        # ideas the Game Master made real: they change the rules
+        self.discoveries: list[dict] = []        # ideas Sol judged real: they change the rules
         self.blueprints: dict[str, dict] = {}    # what each kind of building costs and does (shared knowledge)
         self.lock = threading.RLock()
         info = llm.info() if hasattr(llm, 'info') else {}
         smart = info.get("smart_local")
-        self.gm_model = HAIKU if info.get('claude') else (f"local:{smart}" if smart else LOCAL)   # the referee
-        self.sol_model = LOCAL                   # Sol the mentor starts on the local brain (change in Settings / --sol-model)
+        self.sol_model = LOCAL                   # Sol: mentor AND referee; starts on the local brain (Settings / --sol-model)
         self.sol_log: list[dict] = []
         self.sol_last, self.sol_due = 0, False
         if spawn:
@@ -203,7 +202,7 @@ class Society:
             try:
                 act["gm"] = gm.judge(self, a, act)
             except Exception as e:
-                self._error(a, e, "game master failed")
+                self._error(a, e, "Sol could not judge this")
         if a.needs_compaction():
             try:
                 mind.compact_memory(a, self.llm, self._summary_model())
@@ -317,7 +316,7 @@ class Society:
         return re.sub(r"^(a|an|the|my|our)\s+", "", re.sub(r"[^a-z ]", "", kind.lower())).strip()
 
     def blueprint(self, kind: str, design: dict | None = None, by: str = "", tick: int = 0) -> dict:
-        """What it takes to build this kind of thing - known, newly designed by the Game Master, or a default."""
+        """What it takes to build this kind of thing - known, newly designed by Sol, or a default."""
         from .config import BLOCK_WORDS_COST, DEFAULT_COSTS, FUNCTIONS, MAX_BUILD_COST
         from .world import function_of
         key = self.blueprint_key(kind) or "structure"
@@ -330,7 +329,7 @@ class Society:
                 if any(w in key for w in words):
                     cost = dict(c)
         desc = FUNCTIONS[func][1] if func else "decorative"
-        if design:                                     # the Game Master's blueprint for a new kind of building
+        if design:                                     # Sol's blueprint for a new kind of building
             if design.get("function") in FUNCTIONS:
                 func, desc = design["function"], FUNCTIONS[design["function"]][1]
             elif design.get("function") in (None, "none", ""):
@@ -622,7 +621,7 @@ class Society:
                 "dead": [{"agent": d["agent"].to_dict(), "tick": d["tick"], "cause": d["cause"]} for d in self.dead.values()],
                 "events": self.events, "inventions": self.inventions, "discoveries": self.discoveries,
                 "blueprints": self.blueprints, "sol_log": self.sol_log, "sol_last": self.sol_last,
-                "sol_model": self.sol_model, "gm_model": self.gm_model, "talk": self.talk, "stats": self.stats,
+                "sol_model": self.sol_model, "talk": self.talk, "stats": self.stats,
                 "chat": [c for c in self.chat if not c.get("pending")],
             }
 

@@ -135,8 +135,6 @@ class Hub:
                      "sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
             if d.get("sol_model"):
                 sim.sol_model = names.get(d["sol_model"], d["sol_model"])
-            if d.get("gm_model"):
-                sim.gm_model = names.get(d["gm_model"], d["gm_model"])
             if d.get("authority") in ("leader", "advisor", "observer"):
                 sim.human_authority = d["authority"]
             return {"paused": self.paused, "interval": self.interval, "max_wait": self.max_wait,
