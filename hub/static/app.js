@@ -256,7 +256,7 @@ setInterval(() => { if ($('follow').checked && S.sel) centerOn(S.sel); }, 1200);
 function renderTop(st) {
   $('p-day').textContent = `Day ${st.day}`;
   const B = st.backends || {};
-  $('p-brain').textContent = B.mock ? '🎭 Mock (scripted)' : '🧠 ' + [B.local ? 'Local: ' + B.local_model : '', B.claude ? 'Claude' : ''].filter(Boolean).join(' + ');
+  $('p-brain').textContent = B.mock ? '🎭 Mock (scripted)' : '🧠 ' + [B.local ? 'Local: ' + B.local_model : '', B.smart_local ? 'Smart: ' + B.smart_local : '', B.claude ? 'Claude' : ''].filter(Boolean).join(' + ');
   $('p-pop').textContent = `👥 ${st.agents.length} / ${st.limits.max_agents}` + (st.dead.length ? ` · 🪦 ${st.dead.length}` : '');
   $('p-explored').textContent = `🧭 ${st.explored}% explored`;
   $('p-speed').textContent = `⏱ ${st.day_seconds || 0}s / day` + (st.thinking ? ` · 💭 ${st.thinking} thinking` : '');
