@@ -73,9 +73,10 @@ class MockLLM(UsageMixin):
     def complete(self, system: str, prompt: str, model: str | None = None) -> str:
         self._record("mock", 0, 0)
         rng = self.rng
-        if "The Human says" in prompt:
-            return json.dumps(dict(thought="The human spoke to me, I should answer.", action="say", to="Human",
-                                   message="I hear you, human! (mock reply)"))
+        if "CHAT_WITH_HUMAN" in prompt:
+            who = re.search(r"You are (\w+),", system)
+            return json.dumps(dict(thought="The human spoke to me, I should answer.",
+                                   message=f"Hello, human! It's {who.group(1) if who else 'me'} - I'm busy surviving, but happy to chat. (mock reply)"))
         hunger = int(re.search(r"Hunger: (\d+)", prompt).group(1))
         carried = int(re.search(r"Food carried: (\d+)", prompt).group(1))
         seeds = int(re.search(r"Seeds: (\d+)", prompt).group(1))

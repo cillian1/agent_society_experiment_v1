@@ -20,6 +20,9 @@ canvas{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;dis
 .card{background:var(--panel2);border:2px solid transparent;border-radius:8px;padding:7px 9px;cursor:pointer;min-width:0}
 .card.sel{border-color:var(--accent)}.card .top{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
 .card .now{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
+#chat{max-height:260px;overflow:auto;margin-bottom:10px;display:flex;flex-direction:column;gap:6px}
+.bub{max-width:88%;padding:6px 10px;border-radius:10px;background:var(--panel2);font-size:13px}
+.bub.me{align-self:flex-end;background:#16384d}.bub b{display:block;font-size:11px;margin-bottom:1px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
 .chip{padding:3px 10px;border-radius:99px;border:2px solid var(--line);background:var(--panel2);cursor:pointer;user-select:none}
 .chip.on{border-color:var(--you);background:#16384d}
@@ -42,10 +45,10 @@ textarea{width:100%;resize:vertical;min-height:58px}
 <div id="left"><canvas id="c"></canvas><div id="hover">Hover over the map for details · click an agent to inspect it</div>
 <div class="legend"><span><i style="background:#4e9a47"></i>grass</span><span><i style="background:#2f6fb5"></i>water (impassable)</span><span><i style="background:#d9c88a"></i>sand</span><span><i style="background:#7b7f86"></i>rock (impassable)</span><span><i style="background:#2f7d32;box-shadow:inset 0 0 0 3px #d62f4b"></i>food bush (regrows)</span><span><i style="background:#4e9a47;box-shadow:inset 0 -6px 0 #6b4a2b"></i>young plant</span><span><i style="background:#e8c547"></i>ripe crop</span><span>🪦 dead · ❤️ in love · small = child</span></div></div>
 <div id="right">
-<div class="panel"><h2>🗣 Speak to the agents</h2><div class="chips" id="to"></div>
+<div class="panel"><h2>🗣 Talk to the agents</h2><div id="chat"><div class="dim">Pick who to talk to, then say something - they answer here.</div></div><div class="chips" id="to"></div>
 <textarea id="msg" placeholder="Type a message… (Enter to send, Shift+Enter for a new line)"></textarea>
 <div class="row"><span class="msg dim" id="sent"></span><button class="primary" id="send">Speak</button></div>
-<div class="tag" style="margin-top:6px">Agents hear you wherever they are, on their next turn, and can reply to “Human”.</div></div>
+<div class="tag" style="margin-top:6px">Each agent you address answers right away, in character (one extra API call each). They also remember it in their next turn.</div></div>
 <div class="panel"><h2>Agents</h2><div class="cards" id="cards"></div></div>
 <div class="panel" id="detail"><h2>Inspector</h2><div class="dim">Click an agent on the map or in the list to see what it is thinking and what it has done.</div></div>
 <div class="panel"><h2>💡 Ideas &amp; inventions <span class="tag">(shared culture)</span></h2><div class="scroll" id="ideas"><div class="dim">nothing invented yet</div></div></div>
@@ -151,11 +154,17 @@ function toggleTo(n){
 async function speak(){
   const m=$('msg').value.trim();if(!m)return;
   const to=toSet.has('*')?'all':[...toSet],r=await post('/api/speak',{to,message:m});
-  $('sent').textContent=r.delivered.length?`Sent to ${r.delivered.length===agents.length?'everyone':r.delivered.join(', ')} — they'll hear it next turn.`:'Nobody received that.';
+  $('sent').textContent=r.delivered.length?`Sent to ${r.delivered.length===agents.length?'everyone':r.delivered.join(', ')}.`:'Nobody received that.';
   $('msg').value='';setTimeout(()=>$('sent').textContent='',6000)}
 $('send').onclick=speak;
 $('msg').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();speak()}});
 
+function renderChat(c){
+  const el=$('chat'),stick=el.scrollTop+el.clientHeight>=el.scrollHeight-30,key=JSON.stringify(c);if(el.dataset.k===key)return;el.dataset.k=key;
+  if(!c.length)return;
+  el.innerHTML=c.map(m=>m.from==='You'?`<div class="bub me"><b style="color:var(--you)">You → ${esc(m.to)}</b>${esc(m.text)}</div>`
+    :`<div class="bub"><b style="color:${m.color}">${esc(m.from)}</b>${m.pending?'<span class="dim">thinking…</span>':esc(m.text)}</div>`).join('');
+  if(stick)el.scrollTop=el.scrollHeight}
 /* ---------- inspector ---------- */
 async function tier(name,t){await post('/api/tier',{name,tier:t});poll1()}
 function select(n){sel=n;toSet=new Set([n]);renderTo();renderCards();detailFor=null;histKey='';renderDetail();loadHistory()}
@@ -202,7 +211,7 @@ async function poll1(){
     $('pop').textContent=`👥 ${agents.length} alive`+(dead.length?` · 🪦 ${dead.length}`:'')+` (max ${s.limits.max_agents})`;
     $('ideas').innerHTML=s.inventions.slice().reverse().map(i=>`<div class="feedrow"><span class="tag">turn ${i.tick}</span> <span class="dot" style="background:${i.color}"></span><b>${esc(i.title)}</b> <span class="dim">by ${esc(i.by)}</span><div>${esc(i.text)}</div></div>`).join('')||'<div class="dim">nothing invented yet</div>';
     $('tick').textContent='turn '+s.tick;$('pause').textContent=s.paused?'▶ Resume':'⏸ Pause';
-    renderUsage(s.usage);renderCards();if(first||$('to').children.length!==agents.length+1)renderTo();if(sel)renderDetail();
+    renderChat(s.chat);renderUsage(s.usage);renderCards();if(first||$('to').children.length!==agents.length+1)renderTo();if(sel)renderDetail();
     $('feed').innerHTML=s.events.slice().reverse().map(e=>`<div class="feedrow ${e.human?'you':''}"><span class="tag">turn ${e.tick}</span> <span class="dot" style="background:${e.color}"></span><b>${esc(e.agent)}</b> ${esc(e.text)}</div>`).join('')||'<div class="dim">quiet so far…</div>'}catch(e){console.error(e)}}
 function poll(){poll1().finally(()=>setTimeout(poll,600))}
 async function histLoop(){try{await loadHistory()}catch(e){}setTimeout(histLoop,1200)}

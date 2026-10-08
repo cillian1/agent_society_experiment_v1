@@ -64,6 +64,7 @@ class Society:
         self.tick = 0
         self.events: list[dict] = []
         self.inventions: list[dict] = []
+        self.chat: list[dict] = []   # conversation between the human and the agents
         self.lock = threading.RLock()
         self._spawn()
 
@@ -325,7 +326,7 @@ class Society:
 
     # ---- human controls ----
     def human_say(self, targets, message: str) -> list[str]:
-        """The human speaks to agents (anywhere in the world); they hear it on their next turn."""
+        """The human talks to agents (anywhere in the world). Each addressed agent answers right away in the chat."""
         message = message.strip()
         with self.lock:
             chosen = list(self.agents.values()) if targets in ("all", None) else \
@@ -333,12 +334,44 @@ class Society:
             if not message or not chosen:
                 return []
             everyone = len(chosen) == len(self.agents)
-            for a in chosen:
-                a.heard.append(f'The Human says{" to everyone" if everyone else " to you"}: "{message}"')
-            to = "everyone" if everyone else ", ".join(a.name for a in chosen)
+            names = [a.name for a in chosen]
+            to = "everyone" if everyone else ", ".join(names)
+            self.chat.append({"from": "You", "to": to, "text": message, "tick": self.tick, "color": "#7dd3fc"})
             self.events.append({"tick": self.tick, "agent": "You", "text": f'to {to}: "{message}"',
                                 "color": "#ffffff", "human": True})
-            return [a.name for a in chosen]
+            slots = []
+            for a in chosen:
+                slot = {"from": a.name, "text": "", "pending": True, "tick": self.tick, "color": a.color}
+                self.chat.append(slot)
+                slots.append((a, slot))
+            del self.chat[:-120]
+            ideas = [f"{i['title']} (by {i['by']}): {i['text']}" for i in self.inventions[-MAX_IDEAS_IN_PROMPT:]]
+            alive = list(self.agents.values())
+            for a, slot in slots:
+                situation = a.observe(self.world, alive, self.tick, ideas)
+                others = [n for n in self.agents if n != a.name]
+                threading.Thread(target=self._reply, daemon=True,
+                                 args=(a, slot, situation, message, others, [n for n in names if n != a.name])).start()
+            return names
+
+    def _reply(self, a: Agent, slot: dict, situation: str, message: str, others: list[str], also_to: list[str]):
+        try:
+            out = a.reply(self.llm, situation, message, others, also_to)
+            text = out["message"] or "..."
+            err = None
+        except Exception as e:  # network / API problem: tell the human instead of failing silently
+            out, text, err = {"thought": ""}, f"(couldn't answer: {e})", e
+        with self.lock:
+            slot["text"], slot["pending"] = text, False
+            if err is None:
+                a.chat += [("Human", message), ("You", text)]
+                del a.chat[:-16]
+                a.last_say, a.last_say_tick = text, self.tick
+                self._event(self.tick, a, f'replied to You: "{text}"', reply=True)
+            a.heard.append(f'The Human said to you: "{message}"' + (f' - you replied: "{text}"' if err is None else ""))
+            a.history.append({"tick": self.tick, "x": a.x, "y": a.y, "hunger": int(a.hunger),
+                              "thought": out.get("thought", ""), "action": "reply to Human", "result": text,
+                              "heard": [f'The Human says: "{message}"']})
 
     def set_tier(self, name: str, tier: str) -> str | None:
         """haiku (cheap) -> sonnet (upgrade) -> opus ('enlighten': only one agent at a time)."""
@@ -394,6 +427,7 @@ class Society:
                 "dead": [{**self._agent_view(d["agent"], False), "died": d["tick"], "cause": d["cause"]}
                          for d in self.dead.values()],
                 "events": self.events[-60:],
+                "chat": self.chat[-60:],
                 "inventions": self.inventions[-30:],
                 "usage": self.llm.usage(),
                 "limits": {"max_agents": self.max_agents, "adult_age": ADULT_AGE, "love": LOVE_BOND},

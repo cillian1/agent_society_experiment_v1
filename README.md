@@ -36,10 +36,11 @@ are in the header. `serve.py --host 0.0.0.0 --port 8000` exposes it beyond local
 - **Brains/cost tiers:** babies run on Haiku (cheap). In the hub's inspector, **Upgrade to Sonnet** or **Enlighten (Opus)**:
   only one agent can be Opus at a time; Fenn starts enlightened. More agents = more API calls per turn.
 
-## Speaking to the agents
-The **Speak** panel in the hub lets you message everyone, one agent, or any group (click the name chips, then type and press Enter).
-Agents hear you anywhere in the world on their next turn, see it in their prompt as "The Human says ...", and can answer with
-`say` to "Human" (replies show in the world feed). What each agent heard is shown in its inspector history. No restart needed.
+## Talking to the agents
+The **Talk** panel in the hub lets you message everyone, one agent, or any group (click the name chips, type, press Enter).
+Each addressed agent answers immediately, in character and aware of its current situation, in a chat thread (one extra API
+call per agent per message, on that agent's own model). The exchange is also saved in its history and memory for its next turn.
+No restart needed for new messages.
 
 ## Usage counter
 The hub header shows API calls and input/output tokens used this run (hover for a per-model breakdown).

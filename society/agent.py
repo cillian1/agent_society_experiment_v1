@@ -56,6 +56,7 @@ class Agent:
     history: list[dict] = field(default_factory=list)   # every thought + action so far
     last_say: str = ""
     last_say_tick: int = -99
+    chat: list[tuple[str, str]] = field(default_factory=list)  # (speaker, text) conversation with the Human
 
     # ---- family / love ----
     def age(self, tick: int) -> int:
@@ -104,8 +105,8 @@ class Agent:
             f"adults, nearby, each pays {CHILD_FOOD_COST} food)\n"
             '  invent  - {"title": "...", "message": "describe your idea, custom, tool or law"} shared with the whole society\n'
             "  wait\n"
-            "A human observer may speak to you (\"The Human says ...\"); they are not in the world. "
-            'Reply with a say action to "Human" when they ask something.\n'
+            "A human observer outside the world sometimes talks to you; you answer them directly and in character "
+            "(that happens in a separate chat, so it does not use up your turn).\n"
             "Reply ONLY with JSON; add an optional \"remember\" string for something worth keeping in long-term memory, e.g.\n"
             '{"thought": "<1-2 sentences of private reasoning>", "action": "move", "direction": "east", "remember": "berries near the lake"}'
         )
@@ -149,6 +150,27 @@ class Agent:
     def decide(self, llm, prompt: str, others: list[str]) -> dict:
         raw = llm.complete(self.system_prompt(others), prompt, model=self.model)
         return self.parse(raw, others)
+
+    def reply_prompt(self, situation: str, human_msg: str, also_to: list[str]) -> str:
+        talk = "\n".join(f"{who}: {t}" for who, t in self.chat[-8:]) or "(this is the first time they speak to you)"
+        also = f" (they said it to {', '.join(also_to)} as well)" if also_to else ""
+        return (f"CHAT_WITH_HUMAN\nYour current situation:\n{situation}\n\nYour earlier conversation with the Human:\n{talk}\n\n"
+                f'The Human (an observer outside the world) just said to you{also}: "{human_msg}"\n'
+                "Answer them directly and in character in 1-3 sentences: reply to what they actually say or ask, and "
+                "mention what is going on in your life if it fits. Reply ONLY with JSON: "
+                '{"thought": "<private reasoning>", "message": "<what you say to them>"}')
+
+    def reply(self, llm, situation: str, human_msg: str, others: list[str], also_to: list[str]) -> dict:
+        raw = llm.complete(self.system_prompt(others), self.reply_prompt(situation, human_msg, also_to), model=self.model)
+        m = re.search(r"\{.*\}", raw, re.S)
+        try:
+            data = json.loads(m.group(0)) if m else {}
+        except json.JSONDecodeError:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        return {"thought": str(data.get("thought") or "").strip(),
+                "message": str(data.get("message") or (raw if not data else "")).strip()}
 
     @staticmethod
     def parse(raw: str, others: list[str]) -> dict:
